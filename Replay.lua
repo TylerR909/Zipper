@@ -130,18 +130,48 @@ function ns.Replay:Project(mapID, x, y)
 	return px, py
 end
 
-function ns.Replay:AcquireLine()
+function ns.Replay:PathLayer()
 	local canvas = self:Canvas()
+	if not canvas then
+		return nil
+	end
+	-- MapUtils draws its stitched world as a child frame above the canvas textures.
+	-- A texture painted on the canvas itself ends up underneath that art. Markers
+	-- already sit above it because they are frames. The path uses the same trick.
+	local layer = self.pathLayer
+	if not layer then
+		layer = CreateFrame("Frame", nil, canvas)
+		layer:EnableMouse(false)
+		self.pathLayer = layer
+	end
+	if layer:GetParent() ~= canvas then
+		layer:SetParent(canvas)
+	end
+	layer:ClearAllPoints()
+	layer:SetAllPoints(canvas)
+	local level = (canvas:GetFrameLevel() or 1) + 20
+	if layer:GetFrameLevel() ~= level then
+		layer:SetFrameLevel(level)
+	end
+	layer:Show()
+	return layer
+end
+
+function ns.Replay:AcquireLine()
+	local layer = self:PathLayer()
+	if not layer then
+		return nil
+	end
 	local line = self.lines[self.lineUsed + 1]
 	if not line then
-		line = canvas:CreateTexture(nil, "OVERLAY")
+		line = layer:CreateTexture(nil, "OVERLAY")
 		line:SetTexture("Interface\\BUTTONS\\WHITE8X8")
 		line:SetVertexColor(PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A)
 		self.lines[#self.lines + 1] = line
 	end
 	self.lineUsed = self.lineUsed + 1
-	if line:GetParent() ~= canvas then
-		line:SetParent(canvas)
+	if line:GetParent() ~= layer then
+		line:SetParent(layer)
 	end
 	return line
 end
@@ -285,14 +315,16 @@ function ns.Replay:DrawPath(sessions)
 	end
 	self.lineUsed = 0
 	local canvas = self:Canvas()
-	if not canvas or canvas:GetWidth() <= 0 then
+	if not canvas or canvas:GetWidth() <= 0 or not self:PathLayer() then
 		self:HideSpareLines()
 		return
 	end
 	for i = 2, n do
 		if not brk[i] then
 			local line = self:AcquireLine()
-			self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i])
+			if line then
+				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i])
+			end
 		end
 	end
 	self:HideSpareLines()
