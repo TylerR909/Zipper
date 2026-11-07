@@ -983,8 +983,179 @@ function ns.Replay:Toggle()
 	self:SetMode(self.mode or "current", self.index)
 end
 
+function ns.Replay:MapButtonParent()
+	if WorldMapFrame and WorldMapFrame.ScrollContainer then
+		return WorldMapFrame.ScrollContainer
+	end
+	return WorldMapFrame
+end
+
+function ns.Replay:IsOurMapChild(frame)
+	if frame == self.mapButton or frame == self.pathLayer or frame == self.dot then
+		return true
+	end
+	if self.markers then
+		for i = 1, #self.markers do
+			if self.markers[i] == frame then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+function ns.Replay:CornerButton()
+	local canvas = self:MapButtonParent()
+	if not canvas or not canvas.GetLeft then
+		return nil
+	end
+	local left, top = canvas:GetLeft(), canvas:GetTop()
+	if not left or not top then
+		return nil
+	end
+	local best
+	local function check(frame)
+		if self:IsOurMapChild(frame) or type(frame) ~= "table" then
+			return
+		end
+		if not frame.IsShown or not frame:IsShown() or not frame.GetLeft then
+			return
+		end
+		local frameLeft, frameTop = frame:GetLeft(), frame:GetTop()
+		local width, height = frame:GetWidth() or 0, frame:GetHeight() or 0
+		if not frameLeft or not frameTop or width < 12 or width > 60 or height < 12 or height > 60 then
+			return
+		end
+		if math.abs(frameLeft - left) < 50 and (top - frameTop) > -12 and (top - frameTop) < 220 then
+			if not best or frame:GetBottom() < best:GetBottom() then
+				best = frame
+			end
+		end
+	end
+	for _, frame in ipairs(WorldMapFrame.overlayFrames or {}) do
+		check(frame)
+	end
+	for _, frame in ipairs({ WorldMapFrame:GetChildren() }) do
+		check(frame)
+	end
+	if canvas ~= WorldMapFrame then
+		for _, frame in ipairs({ canvas:GetChildren() }) do
+			check(frame)
+		end
+	end
+	local child = canvas.Child
+	if child and child.GetChildren then
+		for _, frame in ipairs({ child:GetChildren() }) do
+			check(frame)
+		end
+	end
+	return best
+end
+
+function ns.Replay:CreateMapButton()
+	if self.mapButton then
+		return
+	end
+	local parent = self:MapButtonParent()
+	if not parent then
+		return
+	end
+	local button = CreateFrame("Button", "ZipperWorldMapButton", parent)
+	button:SetSize(24, 24)
+	button:SetFrameStrata("HIGH")
+	button:SetFrameLevel(510)
+	button.icon = button:CreateTexture(nil, "ARTWORK")
+	button.icon:SetTexture("Interface\\BUTTONS\\WHITE8X8")
+	button.icon:SetVertexColor(0.25, 0.85, 1, 1)
+	button.icon:SetSize(16, 3)
+	button.icon:SetPoint("CENTER", -1, -1)
+	button.icon:SetRotation(0.55)
+	button.dot = button:CreateTexture(nil, "OVERLAY")
+	button.dot:SetTexture("Interface\\BUTTONS\\WHITE8X8")
+	button.dot:SetVertexColor(1, 0.82, 0.2, 1)
+	button.dot:SetSize(6, 6)
+	button.dot:SetPoint("CENTER", 5, 3)
+	button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
+	button:SetScript("OnClick", function()
+		ns.Replay:Toggle()
+	end)
+	button:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Zipper", 1, 0.82, 0)
+		GameTooltip:AddLine("Open the journey replay.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	button:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+	self.mapButton = button
+end
+
+function ns.Replay:PlaceMapButton(settled)
+	if not WorldMapFrame or not WorldMapFrame:IsShown() then
+		return
+	end
+	self:CreateMapButton()
+	local button = self.mapButton
+	local parent = self:MapButtonParent()
+	if not button or not parent then
+		return
+	end
+	if button:GetParent() ~= parent then
+		button:SetParent(parent)
+	end
+	local above = self:CornerButton()
+	button:ClearAllPoints()
+	if above then
+		local size = math.floor(math.min(above:GetWidth(), above:GetHeight()) * 0.9 + 0.5)
+		if size < 16 then
+			size = 16
+		end
+		button:SetSize(size, size)
+		button:SetPoint("TOP", above, "BOTTOM", 2, -3)
+	else
+		button:SetSize(24, 24)
+		button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -8)
+	end
+	button:Show()
+	if settled then
+		return
+	end
+	C_Timer.After(0.2, function()
+		if self.mapButton and self.mapButton:IsShown() then
+			self:PlaceMapButton(true)
+		end
+	end)
+end
+
+function ns.Replay:InstallMapButton()
+	if self.mapButtonInstalled or not WorldMapFrame or not WorldMapFrame.HookScript then
+		return
+	end
+	self.mapButtonInstalled = true
+	WorldMapFrame:HookScript("OnShow", function()
+		ns.Replay:PlaceMapButton()
+	end)
+	if WorldMapFrame:IsShown() then
+		self:PlaceMapButton()
+	end
+end
+
 function ns.Replay:Init()
 	ns.OnDataChanged = function()
 		ns.Replay:OnDataChanged()
 	end
+	local waiter = CreateFrame("Frame")
+	waiter:RegisterEvent("PLAYER_LOGIN")
+	waiter:RegisterEvent("ADDON_LOADED")
+	waiter:SetScript("OnEvent", function(self, event, name)
+		if event == "ADDON_LOADED" and name ~= "Blizzard_WorldMap" and not WorldMapFrame then
+			return
+		end
+		if not WorldMapFrame then
+			return
+		end
+		self:UnregisterAllEvents()
+		ns.Replay:InstallMapButton()
+	end)
 end
