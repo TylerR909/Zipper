@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: Zipper
+## Notes: Records a character's journey and replays it on the world map.
+## Author: Tyler
+## Version: 0.1.0
+## SavedVariables: ZipperDB
+## SavedVariablesPerCharacter: ZipperCharDB
+
+Enums.lua
+Config.lua
+DB.lua
+GPS.lua
+Replay.lua
+Zipper.lua
