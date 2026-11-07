@@ -358,9 +358,47 @@ function ns.GPS:OnKill()
 	ns.DB:AddKill()
 end
 
+function ns.GPS:EnsureEvents()
+	if self.eventsReady then
+		return true
+	end
+	-- RegisterEvent is protected during combat lockdown. Logging back into a
+	-- fight makes the first PLAYER_ENTERING_WORLD hit that case.
+	if InCombatLockdown and InCombatLockdown() then
+		return false
+	end
+	if not self.frame then
+		self.frame = CreateFrame("Frame")
+		self.frame:SetScript("OnEvent", function(_, event, ...)
+			self:OnEvent(event, ...)
+		end)
+	end
+	local frame = self.frame
+	frame:RegisterEvent("PLAYER_STARTED_MOVING")
+	frame:RegisterEvent("PLAYER_STOPPED_MOVING")
+	frame:RegisterEvent("PLAYER_STOPPED_TURNING")
+	frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+	frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+	frame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+	frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
+	frame:RegisterEvent("PLAYER_DEAD")
+	frame:RegisterEvent("QUEST_ACCEPTED")
+	frame:RegisterEvent("QUEST_TURNED_IN")
+	frame:RegisterEvent("CONFIRM_SUMMON")
+	frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+	frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+	frame:RegisterEvent("PLAYER_CONTROL_LOST")
+	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
+	self.eventsReady = true
+	return true
+end
+
 function ns.GPS:Tick()
 	if not self.active then
 		return
+	end
+	if not self.eventsReady then
+		self:EnsureEvents()
 	end
 	ns.DB:NoteProgress()
 	self:SyncTaxi()
@@ -456,28 +494,7 @@ function ns.GPS:Start(continued)
 		self:RememberWorld()
 	end
 
-	if not self.frame then
-		self.frame = CreateFrame("Frame")
-		self.frame:SetScript("OnEvent", function(_, event, ...)
-			self:OnEvent(event, ...)
-		end)
-	end
-	local frame = self.frame
-	frame:RegisterEvent("PLAYER_STARTED_MOVING")
-	frame:RegisterEvent("PLAYER_STOPPED_MOVING")
-	frame:RegisterEvent("PLAYER_STOPPED_TURNING")
-	frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-	frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-	frame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
-	frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
-	frame:RegisterEvent("PLAYER_DEAD")
-	frame:RegisterEvent("QUEST_ACCEPTED")
-	frame:RegisterEvent("QUEST_TURNED_IN")
-	frame:RegisterEvent("CONFIRM_SUMMON")
-	frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-	frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-	frame:RegisterEvent("PLAYER_CONTROL_LOST")
-	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
+	self:EnsureEvents()
 
 	self:SyncMount()
 	self:SyncAFK()
