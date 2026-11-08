@@ -36,18 +36,6 @@ local function Notify()
 	end
 end
 
-local function CombatLogReader()
-	if CombatLogGetCurrentEventInfo then
-		return CombatLogGetCurrentEventInfo
-	end
-	if C_CombatLog and C_CombatLog.GetCurrentEventInfo then
-		return C_CombatLog.GetCurrentEventInfo
-	end
-	if C_CombatLogInternal and C_CombatLogInternal.GetCurrentEventInfo then
-		return C_CombatLogInternal.GetCurrentEventInfo
-	end
-end
-
 local function IsHearthSpell(spellID)
 	if spellID == 8690 or spellID == 556 then
 		return true
@@ -379,16 +367,14 @@ function ns.GPS:CheckSummon()
 	end
 end
 
-function ns.GPS:OnKill()
-	local read = CombatLogReader()
-	if not read then
+function ns.GPS:OnKill(attackerGUID)
+	-- Forever forbids registering COMBAT_LOG_EVENT_UNFILTERED. PARTY_KILL is the
+	-- kill-credit event, and it also fires for other people in the party.
+	if not attackerGUID or (issecretvalue and issecretvalue(attackerGUID)) then
 		return
 	end
-	local ok, _, subevent, _, sourceGUID = pcall(read)
-	if not ok or subevent ~= "PARTY_KILL" then
-		return
-	end
-	if sourceGUID ~= UnitGUID("player") then
+	local me = UnitGUID("player")
+	if not me or (issecretvalue and issecretvalue(me)) or attackerGUID ~= me then
 		return
 	end
 	ns.DB:AddKill()
@@ -433,7 +419,7 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("QUEST_TURNED_IN")
 	frame:RegisterEvent("CONFIRM_SUMMON")
 	frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-	frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+	frame:RegisterEvent("PARTY_KILL")
 	frame:RegisterEvent("PLAYER_CONTROL_LOST")
 	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
 	self.eventsReady = true
@@ -504,8 +490,9 @@ function ns.GPS:OnEvent(event, ...)
 			self.hearthUntil = ns.DB:Now() + 20
 			self:Mark(Kind.HEARTH, spellID or 0)
 		end
-	elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-		self:OnKill()
+	elseif event == "PARTY_KILL" then
+		local attackerGUID = ...
+		self:OnKill(attackerGUID)
 	elseif event == "PLAYER_CONTROL_LOST" or event == "PLAYER_CONTROL_GAINED" then
 		self:SyncTaxi()
 	end
