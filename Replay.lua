@@ -85,15 +85,7 @@ local function Locate(sessions, epoch)
 end
 
 function ns.Replay:Canvas()
-	if not WorldMapFrame then
-		return nil
-	end
-	if WorldMapFrame.GetCanvas then
-		return WorldMapFrame:GetCanvas()
-	end
-	if WorldMapFrame.ScrollContainer then
-		return WorldMapFrame.ScrollContainer.Child
-	end
+	return ns.Map:Use():Canvas()
 end
 
 function ns.Replay:EnsureMap()
@@ -136,9 +128,6 @@ function ns.Replay:PathLayer()
 	if not canvas then
 		return nil
 	end
-	-- MapUtils draws its stitched world as a child frame above the canvas textures.
-	-- A texture painted on the canvas itself ends up underneath that art. Markers
-	-- already sit above it because they are frames. The path uses the same trick.
 	local layer = self.pathLayer
 	if not layer then
 		layer = CreateFrame("Frame", nil, canvas)
@@ -150,25 +139,13 @@ function ns.Replay:PathLayer()
 	end
 	layer:ClearAllPoints()
 	layer:SetAllPoints(canvas)
-	local level = (canvas:GetFrameLevel() or 1) + 20
+	local level = ns.Map:Use():OverlayLevel(canvas)
 	if layer:GetFrameLevel() ~= level then
 		layer:SetFrameLevel(level)
 	end
 	layer:EnableMouse(false)
 	layer:Show()
 	return layer
-end
-
-function ns.Replay:ScreenScale()
-	local canvas = self:Canvas()
-	if not canvas then
-		return 1
-	end
-	local scale = canvas:GetScale() or 1
-	if scale < 0.05 then
-		scale = 0.05
-	end
-	return 1 / scale
 end
 
 function ns.Replay:AcquireLine()
@@ -451,14 +428,12 @@ function ns.Replay:DrawMarkers(sessions)
 				marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 				marker.texture:SetTexCoord(0, 1, 0, 1)
 				marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
-				marker:SetSize(PIP, PIP)
-				marker:SetScale(self:ScreenScale())
+				ns.Map:Use():FitPin(marker, PIP)
 				marker.kind = kind
 				marker.extra = track.ea[i]
 				marker.mapID = track.em[i]
 				marker.when = session.s + track.et[i]
-				marker:ClearAllPoints()
-				marker:SetPoint("CENTER", canvas, "TOPLEFT", px * width, -py * height)
+				ns.Map:Use():Place(marker, px, py)
 				marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + 30)
 				marker:Show()
 			end
@@ -478,13 +453,8 @@ function ns.Replay:PositionDot(x, y)
 		self.dot:Hide()
 		return
 	end
-	if self.dot:GetParent() ~= canvas then
-		self.dot:SetParent(canvas)
-	end
-	self.dot:SetSize(8, 8)
-	self.dot:SetScale(self:ScreenScale())
-	self.dot:ClearAllPoints()
-	self.dot:SetPoint("CENTER", canvas, "TOPLEFT", x * width, -y * height)
+	ns.Map:Use():FitPin(self.dot, 8)
+	ns.Map:Use():Place(self.dot, x, y)
 	self.dot:SetFrameLevel((canvas:GetFrameLevel() or 1) + 40)
 	self.dot:Show()
 end
@@ -715,8 +685,8 @@ function ns.Replay:HoverPath()
 	if width <= 0 or height <= 0 then
 		return
 	end
-	local cx, cy = GetCursorPosition()
-	cx, cy = cx / scale, cy / scale
+	local rawX, rawY = GetCursorPosition()
+	local cx, cy = rawX / scale, rawY / scale
 	if cx < left or cx > right or cy > top or cy < bottom then
 		self:HidePathTip()
 		return
@@ -742,12 +712,14 @@ function ns.Replay:HoverPath()
 			qx = seg.x1 + (dx * along)
 			qy = seg.y1 + (dy * along)
 		end
-		local dist = math.sqrt((((px - qx) * width) ^ 2) + (((py - qy) * height) ^ 2))
+		local ax = (left + (qx * width)) * scale
+		local ay = (top - (qy * height)) * scale
+		local dist = math.sqrt(((rawX - ax) ^ 2) + ((rawY - ay) ^ 2))
 		if not bestDist or dist < bestDist then
 			best, bestDist, bestAlong = seg, dist, along
 		end
 	end
-	if not best or not best.t1 or bestDist > 16 then
+	if not best or not best.t1 or bestDist > 12 then
 		self:HidePathTip()
 		return
 	end
@@ -1018,14 +990,14 @@ function ns.Replay:HookMap()
 end
 
 function ns.Replay:RescalePins()
-	local scale = self:ScreenScale()
+	local host = ns.Map:Use()
 	if self.markers then
 		for i = 1, self.markerUsed or 0 do
-			self.markers[i]:SetScale(scale)
+			host:FitPin(self.markers[i], PIP)
 		end
 	end
 	if self.dot then
-		self.dot:SetScale(scale)
+		host:FitPin(self.dot, 8)
 	end
 end
 

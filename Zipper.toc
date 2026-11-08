@@ -10,5 +10,7 @@ Enums.lua
 Config.lua
 DB.lua
 GPS.lua
+Map.lua
+MapUtilsShim.lua
 Replay.lua
 Zipper.lua
