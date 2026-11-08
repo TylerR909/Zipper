@@ -1356,7 +1356,7 @@ end
 function ns.Replay:ApplySkin()
 	local skin = self.skin
 	local frame = self.frame
-	if not skin or not frame then
+	if not skin or not frame or self.skinApplied then
 		return
 	end
 	local function paint(fn, ...)
@@ -1364,30 +1364,36 @@ function ns.Replay:ApplySkin()
 			fn(...)
 		end
 	end
-	paint(skin.Shell, frame)
-	if self.closeButton then
-		paint(skin.CloseButton, self.closeButton)
-	end
-	local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.speedButton, self.optionsButton }
-	for i = 1, #buttons do
-		local button = buttons[i]
-		if button then
-			paint(skin.Button, button)
-			paint(skin.WhiteButtonLabel, button)
+	local ok, err = pcall(function()
+		paint(skin.Shell, frame)
+		if self.closeButton then
+			paint(skin.CloseButton, self.closeButton)
 		end
-	end
-	local bar = self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar)
-	if bar then
-		paint(skin.ScrollBar, bar)
-	end
-	if self.titleText then
-		paint(skin.Font, self.titleText)
-	end
-	if self.timeText then
-		paint(skin.Font, self.timeText)
-	end
-	if self.summaryText then
-		paint(skin.Font, self.summaryText)
+		local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.speedButton, self.optionsButton }
+		for i = 1, #buttons do
+			local button = buttons[i]
+			if button then
+				paint(skin.Button, button)
+				paint(skin.WhiteButtonLabel, button)
+			end
+		end
+		local bar = self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar)
+		if bar then
+			paint(skin.ScrollBar, bar)
+		end
+		if self.titleText then
+			paint(skin.Font, self.titleText)
+		end
+		if self.timeText then
+			paint(skin.Font, self.timeText)
+		end
+		if self.summaryText then
+			paint(skin.Font, self.summaryText)
+		end
+	end)
+	self.skinApplied = true
+	if not ok then
+		ns:Print("EllesmereUI skin skipped: " .. tostring(err))
 	end
 end
 
