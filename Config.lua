@@ -243,49 +243,34 @@ function ns.Config:CreateFrame()
 	if self.frame then
 		return
 	end
-	local frame = CreateFrame("Frame", "ZipperConfigFrame", UIParent, "BackdropTemplate")
-	frame:Hide()
-	frame:SetSize(340, 580)
-	frame:SetFrameStrata("DIALOG")
-	frame:SetClampedToScreen(true)
-	frame:SetMovable(true)
-	frame:EnableMouse(true)
-	frame:RegisterForDrag("LeftButton")
-	frame:SetBackdrop({
-		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-		tile = true,
-		tileSize = 32,
-		edgeSize = 32,
-		insets = { left = 11, right = 12, top = 12, bottom = 11 },
-	})
-	frame:SetScript("OnDragStart", frame.StartMoving)
-	frame:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		local point, _, _, x, y = self:GetPoint(1)
-		ZipperDB = ZipperDB or {}
-		ZipperDB.configWindow = { point = point, x = x, y = y }
-	end)
-	frame:SetScript("OnShow", function()
-		ns.Config:Refresh()
-	end)
-	tinsert(UISpecialFrames, "ZipperConfigFrame")
+	-- Same registration Forever Quest Tint uses. The name is what the AddOns list shows.
+	local canvas = CreateFrame("Frame")
+	canvas.name = "Zipper"
+	local scroll = CreateFrame("ScrollFrame", nil, canvas, "UIPanelScrollFrameTemplate")
+	scroll:SetPoint("TOPLEFT", 0, -4)
+	scroll:SetPoint("BOTTOMRIGHT", -28, 4)
+	local panel = CreateFrame("Frame", nil, scroll)
+	panel:SetSize(640, 640)
+	scroll:SetScrollChild(panel)
 
-	local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 18, -16)
-	title:SetText("Zipper options")
+	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+	title:SetPoint("TOPLEFT", 16, -16)
+	title:SetText("Zipper")
 
-	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-	close:SetPoint("TOPRIGHT", -4, -4)
+	local sub = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+	sub:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+	sub:SetJustifyH("LEFT")
+	sub:SetText("Records this character's journey and replays it on the world map.")
 
-	local remind = AddCheck(frame, "ZipperConfigRemind", "Remind me to /reload", 16, -44)
+	local remind = AddCheck(panel, "ZipperConfigRemind", "Remind me to /reload", 12, -72)
 	remind:SetScript("OnClick", function(self)
 		ns.Config:SetRemind(self:GetChecked())
 	end)
 
-	local slider = CreateFrame("Slider", "ZipperConfigRemindSlider", frame, "UISliderTemplate")
-	slider:SetPoint("TOPLEFT", 28, -84)
-	slider:SetSize(180, 16)
+	local slider = CreateFrame("Slider", "ZipperConfigRemindSlider", panel, "UISliderTemplate")
+	slider:SetPoint("TOPLEFT", 28, -112)
+	slider:SetSize(220, 16)
 	slider:SetMinMaxValues(30, 180)
 	slider:SetValueStep(15)
 	slider:SetObeyStepOnDrag(true)
@@ -312,15 +297,15 @@ function ns.Config:CreateFrame()
 		end
 	end)
 
-	local valueText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	local valueText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	valueText:SetPoint("LEFT", slider, "RIGHT", 16, 0)
 	valueText:SetText("1 hour")
 
-	local record = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	record:SetPoint("TOPLEFT", 18, -122)
+	local record = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	record:SetPoint("TOPLEFT", 16, -156)
 	record:SetText("Record")
 
-	local path = AddCheck(frame, "ZipperConfigPath", "Movement", 16, -146)
+	local path = AddCheck(panel, "ZipperConfigPath", "Movement", 12, -180)
 	path:SetScript("OnClick", function(self)
 		ns.Config:SetTrack("path", self:GetChecked())
 	end)
@@ -328,7 +313,7 @@ function ns.Config:CreateFrame()
 	local boxes = { remind = remind, path = path }
 	for i = 1, #TRACKS do
 		local entry = TRACKS[i]
-		local box = AddCheck(frame, "ZipperConfig" .. entry.key, entry.label, 16, -146 - (i * 28))
+		local box = AddCheck(panel, "ZipperConfig" .. entry.key, entry.label, 12, -180 - (i * 28))
 		box.trackKey = entry.key
 		box:SetScript("OnClick", function(self)
 			ns.Config:SetTrack(self.trackKey, self:GetChecked())
@@ -336,31 +321,36 @@ function ns.Config:CreateFrame()
 		boxes[entry.key] = box
 	end
 
-	local markerY = -146 - ((#TRACKS + 1) * 28)
-	local markers = AddCheck(frame, "ZipperConfigMarkers", "Show event markers on the map", 16, markerY)
+	local markerY = -180 - ((#TRACKS + 1) * 28)
+	local markers = AddCheck(panel, "ZipperConfigMarkers", "Show event markers on the map", 12, markerY)
 	markers:SetScript("OnClick", function(self)
 		ns.Config:SetShowMarkers(self:GetChecked())
 	end)
 	boxes.showMarkers = markers
 
-	local note = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	note:SetPoint("BOTTOMLEFT", 18, 16)
-	note:SetPoint("BOTTOMRIGHT", -18, 16)
+	local note = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	note:SetPoint("TOPLEFT", markers, "BOTTOMLEFT", 4, -8)
+	note:SetWidth(420)
 	note:SetJustifyH("LEFT")
 	note:SetText("Unchecking a type stops new records of it. Saved history stays.")
 
-	self.frame = frame
+	canvas:SetScript("OnShow", function()
+		ns.Config:Refresh()
+	end)
+
+	local category
+	if Settings and Settings.RegisterCanvasLayoutCategory then
+		category = Settings.RegisterCanvasLayoutCategory(canvas, canvas.name)
+		Settings.RegisterAddOnCategory(category)
+	elseif InterfaceOptions_AddCategory then
+		InterfaceOptions_AddCategory(canvas)
+	end
+
+	self.frame = canvas
+	self.category = category
 	self.slider = slider
 	self.sliderText = valueText
 	self.boxes = boxes
-
-	local window = ZipperDB and ZipperDB.configWindow
-	frame:ClearAllPoints()
-	if window and window.point then
-		frame:SetPoint(window.point, UIParent, window.point, window.x or 0, window.y or 0)
-	else
-		frame:SetPoint("CENTER", UIParent, "CENTER", -220, 0)
-	end
 end
 
 function ns.Config:Refresh()
@@ -380,9 +370,12 @@ end
 
 function ns.Config:Toggle()
 	self:CreateFrame()
-	if self.frame:IsShown() then
-		self.frame:Hide()
-	else
-		self.frame:Show()
+	if Settings and Settings.OpenToCategory and self.category then
+		Settings.OpenToCategory(self.category:GetID())
+	elseif InterfaceOptionsFrame_OpenToCategory then
+		InterfaceOptionsFrame_OpenToCategory(self.frame)
+		InterfaceOptionsFrame_OpenToCategory(self.frame)
 	end
 end
+
+ns.Config:CreateFrame()
