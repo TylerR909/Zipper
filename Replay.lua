@@ -7,14 +7,34 @@ ns.Replay = {
 	speeds = { 1, 10, 30, 120, 600 },
 }
 
+-- Minutes of trail behind the playhead. 0 is the whole selected journey.
+ns.Replay.TRAIL_STOPS = { 2, 3, 5, 10, 15, 20, 30, 45, 60, 0 }
+
 local Kind = ns.Kind
 local PIP = 6
 local PARK_SECONDS = 20
 local PARK_DIST = 0.0035
+local TRAVEL_GAP = 20
 local LINE_CAP = 500
 local MARKER_CAP = 300
 local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.9
 local SPEEDS = ns.Replay.speeds
+
+local function PlainNumber(value)
+	return type(value) == "number" and not (issecretvalue and issecretvalue(value))
+end
+
+local function Comma(value)
+	local text = tostring(math.floor(value or 0))
+	while true do
+		local replaced
+		text, replaced = string.gsub(text, "^(-?%d+)(%d%d%d)", "%1,%2")
+		if replaced == 0 then
+			break
+		end
+	end
+	return text
+end
 
 local function FormatClock(seconds)
 	seconds = math.floor(seconds or 0)
@@ -444,26 +464,42 @@ function ns.Replay:UsingReplayTrail()
 	return self.frame and self.frame:IsShown()
 end
 
-function ns.Replay:ReplaySpanMinutes()
-	if not self.t0 or not self.t1 or self.t1 <= self.t0 then
-		return 2
+function ns.Replay:SnapTrail(minutes)
+	minutes = tonumber(minutes) or 0
+	if minutes <= 0 or minutes > 60 then
+		return 0
 	end
-	local minutes = math.ceil((self.t1 - self.t0) / 60)
-	if minutes < 2 then
-		return 2
+	local best, bestDist
+	for i = 1, #self.TRAIL_STOPS do
+		local stop = self.TRAIL_STOPS[i]
+		if stop > 0 then
+			local dist = math.abs(stop - minutes)
+			if not bestDist or dist < bestDist or (dist == bestDist and stop > best) then
+				best, bestDist = stop, dist
+			end
+		end
 	end
-	return minutes
+	return best or 0
+end
+
+function ns.Replay:TrailIndex(minutes)
+	local stops = self.TRAIL_STOPS
+	for i = 1, #stops do
+		if stops[i] == minutes then
+			return i
+		end
+	end
+	return #stops
 end
 
 function ns.Replay:ReplayTrailMinutes()
 	if self.replayTrail == nil then
 		local saved = tonumber(ZipperDB and ZipperDB.replayTrail) or 0
-		if saved < 2 then
-			saved = 0
-		else
-			saved = math.floor(saved + 0.5)
+		local snapped = self:SnapTrail(saved)
+		self.replayTrail = snapped
+		if ZipperDB and ZipperDB.replayTrail ~= snapped then
+			ZipperDB.replayTrail = snapped
 		end
-		self.replayTrail = saved
 	end
 	return self.replayTrail
 end
@@ -476,10 +512,7 @@ function ns.Replay:TrailLabel(minutes)
 end
 
 function ns.Replay:SetReplayTrail(minutes)
-	minutes = math.floor((tonumber(minutes) or 0) + 0.5)
-	if minutes < 2 or minutes >= self:ReplaySpanMinutes() then
-		minutes = 0
-	end
+	minutes = self:SnapTrail(minutes)
 	self.replayTrail = minutes
 	self.trailShown = minutes
 	ZipperDB = ZipperDB or {}
@@ -495,27 +528,17 @@ function ns.Replay:SyncTrailSlider()
 	if not slider then
 		return
 	end
-	local span = self:ReplaySpanMinutes()
 	local minutes = self:ReplayTrailMinutes()
-	if self.trailSpan == span and self.trailShown == minutes then
+	if self.trailShown == minutes then
 		return
 	end
-	self.trailSpan = span
 	self.trailShown = minutes
+	local stops = self.TRAIL_STOPS
 	self.lockTrail = true
-	if span <= 2 then
-		slider:SetMinMaxValues(2, 2)
-		slider:SetValue(2)
-		slider:Disable()
-	else
-		slider:Enable()
-		slider:SetMinMaxValues(2, span)
-		if minutes <= 0 or minutes >= span then
-			slider:SetValue(span)
-		else
-			slider:SetValue(minutes)
-		end
-	end
+	slider:Enable()
+	slider:SetMinMaxValues(1, #stops)
+	slider:SetValueStep(1)
+	slider:SetValue(self:TrailIndex(minutes))
 	self.lockTrail = false
 	if self.trailValue then
 		self.trailValue:SetText(self:TrailLabel(minutes))
@@ -854,63 +877,287 @@ function ns.Replay:UpdateDot()
 	end
 end
 
-function ns.Replay:Summarize(sessions)
-	local afk, dungeon, raid = 0, 0, 0
-	local afkStart, instStart, instType
-	local lastT = self.t1
+function ns.Replay:MapYards(mapID)
+	if not mapID then
+		return nil
+	end
+	self.mapYards = self.mapYards or {}
+	local cached = self.mapYards[mapID]
+	if cached ~= nil then
+		if cached then
+			return cached
+		end
+		return nil
+	end
+	local width, height
+	if C_Map and C_Map.GetMapWorldSize then
+		width, height = C_Map.GetMapWorldSize(mapID)
+	end
+	if not PlainNumber(width) or not PlainNumber(height) or width <= 0 or height <= 0 then
+		self.mapYards[mapID] = false
+		return nil
+	end
+	self.mapYards[mapID] = { width, height }
+	return self.mapYards[mapID]
+end
+
+function ns.Replay:CollectStats(sessions)
+	local recorded, afk = 0, 0
+	local footTime, mountTime, flightTime = 0, 0, 0
+	local footYards, mountYards, flightYards = 0, 0, 0
+	local yardsKnown = false
+	local speedTime, speedSum, maxSpeed = 0, 0, 0
+	local kills, turnins, levels = 0, 0, 0
+	local accepts, deaths, summons, hearths, flights, mounts = 0, 0, 0, 0, 0, 0
+	local zoneChanges, zoneCount, samples = 0, 0, 0
+	local zones = {}
+	local entered, inside = {}, {}
+	for _, kind in pairs(ns.Instance) do
+		entered[kind] = 0
+		inside[kind] = 0
+	end
+	local scale = ns.COORD_SCALE
 	for s = 1, #sessions do
 		local session = sessions[s]
+		local endT = session.seen or session.s
+		if endT > session.s then
+			recorded = recorded + (endT - session.s)
+		end
+		kills = kills + (session.kills or 0)
+		turnins = turnins + (session.quests or 0)
+		levels = levels + ns.DB:LevelsGained(session)
 		local track = ns.DB:Track(session)
-		for i = 1, #track.ek do
+		samples = samples + #track.t
+		local modes = track.mode
+		if not modes or #modes < #track.t then
+			modes = self:InferModes(track)
+		end
+		for i = 1, #track.t do
+			local mapID = track.m[i]
+			if mapID and not zones[mapID] then
+				zones[mapID] = true
+				zoneCount = zoneCount + 1
+			end
+			local spd = track.spd and track.spd[i]
+			if PlainNumber(spd) and spd > maxSpeed then
+				maxSpeed = spd
+			end
+			if i > 1 and mapID and mapID == track.m[i - 1] then
+				local dt = (track.t[i] or 0) - (track.t[i - 1] or 0)
+				if dt > 0 and dt <= TRAVEL_GAP then
+					local mode = modes[i] or ns.Travel.FOOT
+					if mode == ns.Travel.FLIGHT then
+						flightTime = flightTime + dt
+					elseif mode == ns.Travel.MOUNT then
+						mountTime = mountTime + dt
+					else
+						footTime = footTime + dt
+					end
+					if PlainNumber(spd) and spd > 0 then
+						speedTime = speedTime + dt
+						speedSum = speedSum + (spd * dt)
+					end
+					local size = self:MapYards(mapID)
+					if size then
+						local dx = ((track.x[i] or 0) - (track.x[i - 1] or 0)) / scale * size[1]
+						local dy = ((track.y[i] or 0) - (track.y[i - 1] or 0)) / scale * size[2]
+						local yards = math.sqrt((dx * dx) + (dy * dy))
+						yardsKnown = true
+						if mode == ns.Travel.FLIGHT then
+							flightYards = flightYards + yards
+						elseif mode == ns.Travel.MOUNT then
+							mountYards = mountYards + yards
+						else
+							footYards = footYards + yards
+						end
+					end
+				end
+			end
+		end
+		local afkStart, instStart, instType
+		for i = 1, #(track.ek or {}) do
 			local kind = track.ek[i]
-			local t = session.s + track.et[i]
+			local t = session.s + (track.et[i] or 0)
 			local extra = track.ea[i]
 			if kind == Kind.AFK_START then
 				afkStart = t
 			elseif kind == Kind.AFK_END and afkStart then
-				afk = afk + (t - afkStart)
+				if t > afkStart then
+					afk = afk + (t - afkStart)
+				end
 				afkStart = nil
 			elseif kind == Kind.INSTANCE_ENTER then
 				instStart = t
 				instType = extra
-			elseif kind == Kind.INSTANCE_LEAVE and instStart then
-				local span = t - instStart
-				if instType == ns.Instance.RAID then
-					raid = raid + span
-				elseif instType == ns.Instance.PARTY then
-					dungeon = dungeon + span
+				if not entered[extra] then
+					extra = ns.Instance.OTHER
+					instType = extra
 				end
-				instStart = nil
-				instType = nil
+				entered[instType] = entered[instType] + 1
+			elseif kind == Kind.INSTANCE_LEAVE and instStart then
+				if t > instStart and inside[instType] then
+					inside[instType] = inside[instType] + (t - instStart)
+				end
+				instStart, instType = nil, nil
+			elseif kind == Kind.QUEST_ACCEPT then
+				accepts = accepts + 1
+			elseif kind == Kind.DEATH then
+				deaths = deaths + 1
+			elseif kind == Kind.SUMMON then
+				summons = summons + 1
+			elseif kind == Kind.HEARTH then
+				hearths = hearths + 1
+			elseif kind == Kind.FLIGHT_START then
+				flights = flights + 1
+			elseif kind == Kind.MOUNT then
+				mounts = mounts + 1
+			elseif kind == Kind.ZONE then
+				zoneChanges = zoneChanges + 1
 			end
 		end
-	end
-	if afkStart and lastT and lastT > afkStart then
-		afk = afk + (lastT - afkStart)
-	end
-	if instStart and lastT and lastT > instStart then
-		local span = lastT - instStart
-		if instType == ns.Instance.RAID then
-			raid = raid + span
-		elseif instType == ns.Instance.PARTY then
-			dungeon = dungeon + span
+		if afkStart and endT > afkStart then
+			afk = afk + (endT - afkStart)
+		end
+		if instStart and endT > instStart and inside[instType] then
+			inside[instType] = inside[instType] + (endT - instStart)
 		end
 	end
-	return afk, dungeon, raid
+	local function yards(value)
+		if not yardsKnown then
+			return "—"
+		end
+		return Comma(math.floor((value or 0) + 0.5)) .. " yd"
+	end
+	local function percent(value)
+		if not value or value <= 0 then
+			return "—"
+		end
+		return math.floor(value + 0.5) .. "%"
+	end
+	local average = 0
+	if speedTime > 0 then
+		average = speedSum / speedTime
+	end
+	local party, raid = ns.Instance.PARTY, ns.Instance.RAID
+	local pvp, arena, scenario, other = ns.Instance.PVP, ns.Instance.ARENA, ns.Instance.SCENARIO, ns.Instance.OTHER
+	return {
+		{ header = "Time" },
+		{ "Recorded", FormatClock(recorded) },
+		{ "On foot", FormatClock(footTime) },
+		{ "Mounted", FormatClock(mountTime) },
+		{ "Flight path", FormatClock(flightTime) },
+		{ "AFK", FormatClock(afk) },
+		{ "Dungeons", FormatClock(inside[party]) },
+		{ "Raids", FormatClock(inside[raid]) },
+		{ "Battlegrounds", FormatClock(inside[pvp]) },
+		{ "Arenas", FormatClock(inside[arena]) },
+		{ "Scenarios", FormatClock(inside[scenario]) },
+		{ "Other instances", FormatClock(inside[other]) },
+		{ header = "Distance" },
+		{ "On foot", yards(footYards) },
+		{ "Mounted", yards(mountYards) },
+		{ "Flight path", yards(flightYards) },
+		{ "Fastest", percent(maxSpeed) },
+		{ "Average speed", percent(average) },
+		{ header = "Progress" },
+		{ "Levels", string.format("+%.2f", levels) },
+		{ "Kills", Comma(kills) },
+		{ "Quests picked up", Comma(accepts) },
+		{ "Quests turned in", Comma(turnins) },
+		{ "Deaths", Comma(deaths) },
+		{ header = "Moments" },
+		{ "Summons", Comma(summons) },
+		{ "Hearths", Comma(hearths) },
+		{ "Flights", Comma(flights) },
+		{ "Mounts", Comma(mounts) },
+		{ "Dungeons entered", Comma(entered[party]) },
+		{ "Raids entered", Comma(entered[raid]) },
+		{ "Battlegrounds entered", Comma(entered[pvp]) },
+		{ "Arenas entered", Comma(entered[arena]) },
+		{ "Scenarios entered", Comma(entered[scenario]) },
+		{ "Other instances entered", Comma(entered[other]) },
+		{ "Zone changes", Comma(zoneChanges) },
+		{ "Zones visited", Comma(zoneCount) },
+		{ "Path samples", Comma(samples) },
+		{ "Sessions", Comma(#sessions) },
+	}
 end
 
-function ns.Replay:UpdateRecap(sessions)
-	if not self.summaryText then
+function ns.Replay:StatsKey(sessions)
+	local parts = { tostring(#sessions) }
+	for i = 1, #sessions do
+		local session = sessions[i]
+		local track = ns.DB:Track(session)
+		parts[#parts + 1] = string.format(
+			"%s.%s.%s.%s.%s.%s.%s.%s",
+			session.id or i,
+			session.seen or 0,
+			session.kills or 0,
+			session.quests or 0,
+			session.el or 0,
+			session.ex or 0,
+			#track.t,
+			#(track.ek or {})
+		)
+	end
+	return table.concat(parts, ":")
+end
+
+function ns.Replay:RefreshStats(sessions)
+	local content = self.statContent
+	if not content then
 		return
 	end
 	sessions = sessions or self.sessions or {}
-	local recap = ns.DB:RecapText(sessions)
-	if not self.t0 or not self.t1 then
-		self.summaryText:SetText(recap)
+	local key = self:StatsKey(sessions)
+	if key == self.statsKey then
 		return
 	end
-	local afk, dungeon, raid = self:Summarize(sessions)
-	self.summaryText:SetText(string.format("%s\nAFK %s    Dungeons %s    Raids %s", recap, FormatClock(afk), FormatClock(dungeon), FormatClock(raid)))
+	self.statsKey = key
+	local width = self.statScroll and self.statScroll:GetWidth() or 0
+	if width > 40 then
+		content:SetWidth(width)
+	end
+	local rows = self:CollectStats(sessions)
+	self.statRows = self.statRows or {}
+	for i = 1, #rows do
+		local info = rows[i]
+		local row = self.statRows[i]
+		if not row then
+			row = CreateFrame("Frame", nil, content)
+			row:SetHeight(16)
+			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.label:SetPoint("LEFT", 4, 0)
+			row.label:SetJustifyH("LEFT")
+			row.value = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.value:SetPoint("RIGHT", -4, 0)
+			row.value:SetJustifyH("RIGHT")
+			row.label:SetPoint("RIGHT", row.value, "LEFT", -8, 0)
+			self.statRows[i] = row
+		end
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 16))
+		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+		if info.header then
+			row.label:SetText(info.header)
+			row.label:SetTextColor(1, 0.86, 0.45)
+			row.value:SetText("")
+		else
+			row.label:SetText(info[1])
+			row.label:SetTextColor(0.78, 0.76, 0.70)
+			row.value:SetText(info[2] or "")
+			row.value:SetTextColor(0.93, 0.90, 0.78)
+		end
+		row:Show()
+	end
+	for i = #rows + 1, #self.statRows do
+		self.statRows[i]:Hide()
+	end
+	content:SetHeight(math.max(16, #rows * 16))
+end
+
+function ns.Replay:UpdateRecap(sessions)
+	self:RefreshStats(sessions)
 end
 
 function ns.Replay:ScopeCaption()
@@ -1394,7 +1641,7 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(336, 560)
+	frame:SetSize(336, 640)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
@@ -1591,9 +1838,9 @@ function ns.Replay:CreateFrame()
 	trail:SetPoint("TOPLEFT", 16, -376)
 	trail:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	trail:SetHeight(16)
-	trail:SetMinMaxValues(2, 2)
+	trail:SetMinMaxValues(1, #ns.Replay.TRAIL_STOPS)
 	trail:SetValueStep(1)
-	trail:SetValue(2)
+	trail:SetValue(#ns.Replay.TRAIL_STOPS)
 	trail:SetObeyStepOnDrag(true)
 	for _, key in ipairs({ "Low", "High", "Text" }) do
 		local label = trail[key] or _G[trail:GetName() .. key]
@@ -1601,11 +1848,23 @@ function ns.Replay:CreateFrame()
 			label:Hide()
 		end
 	end
-	trail:SetScript("OnValueChanged", function(_, value)
+	trail:SetScript("OnValueChanged", function(slider, value)
 		if ns.Replay.lockTrail then
 			return
 		end
-		ns.Replay:SetReplayTrail(value)
+		local stops = ns.Replay.TRAIL_STOPS
+		local index = math.floor(value + 0.5)
+		if index < 1 then
+			index = 1
+		elseif index > #stops then
+			index = #stops
+		end
+		if math.abs(slider:GetValue() - index) > 0.01 then
+			ns.Replay.lockTrail = true
+			slider:SetValue(index)
+			ns.Replay.lockTrail = false
+		end
+		ns.Replay:SetReplayTrail(stops[index])
 	end)
 
 	local trailLow = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -1616,12 +1875,23 @@ function ns.Replay:CreateFrame()
 	trailHigh:SetPoint("TOPRIGHT", trail, "BOTTOMRIGHT", 0, -1)
 	trailHigh:SetText("Full")
 
-	local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	summary:SetPoint("TOPLEFT", 16, -418)
-	summary:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
-	summary:SetJustifyH("LEFT")
-	summary:SetJustifyV("TOP")
-	summary:SetTextColor(0.78, 0.76, 0.70)
+	local statInset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+	statInset:SetPoint("TOPLEFT", 14, -408)
+	statInset:SetPoint("BOTTOMRIGHT", -14, 12)
+	statInset:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	statInset:SetBackdropColor(0, 0, 0, 0.35)
+	statInset:SetBackdropBorderColor(0.35, 0.30, 0.16, 0.85)
+
+	local statScroll = CreateFrame("ScrollFrame", "ZipperReplayStats", statInset, "UIPanelScrollFrameTemplate")
+	statScroll:SetPoint("TOPLEFT", 4, -4)
+	statScroll:SetPoint("BOTTOMRIGHT", -22, 4)
+	local statContent = CreateFrame("Frame", nil, statScroll)
+	statContent:SetSize(260, 16)
+	statScroll:SetScrollChild(statContent)
 
 	self.frame = frame
 	self.scopeText = scope
@@ -1640,7 +1910,9 @@ function ns.Replay:CreateFrame()
 	self.trailLabel = trailLabel
 	self.trailValue = trailValue
 	self.trailSlider = trail
-	self.summaryText = summary
+	self.statScroll = statScroll
+	self.statContent = statContent
+	self.statRows = {}
 	-- The route can already have drawn into these pools. Replacing the tables
 	-- leaves the old textures on the map, stuck to the first view.
 	self:EnsurePools()
@@ -1739,9 +2011,18 @@ function ns.Replay:StyleMapButton(button)
 	border:SetSize(54, 54)
 	border:SetPoint("TOPLEFT")
 	button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
-	button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	button:RegisterForClicks("LeftButtonUp", "RightButtonUp", "Shift-RightButtonUp")
 	button:SetScript("OnClick", function(_, mouseButton)
-		if mouseButton == "RightButton" then
+		local shift = mouseButton == "Shift-RightButton"
+		if not shift and mouseButton == "RightButton" and IsShiftKeyDown then
+			shift = IsShiftKeyDown()
+			if issecretvalue and issecretvalue(shift) then
+				shift = false
+			end
+		end
+		if shift then
+			ns.Config:Toggle()
+		elseif mouseButton == "RightButton" then
 			ns.Replay:Toggle()
 		else
 			ns.Replay:ToggleRoute()
@@ -1752,6 +2033,7 @@ function ns.Replay:StyleMapButton(button)
 		GameTooltip:AddLine("Zipper", 1, 0.82, 0)
 		GameTooltip:AddLine("Left click: show or hide the route.", 1, 1, 1, true)
 		GameTooltip:AddLine("Right click: open the replay.", 1, 1, 1, true)
+		GameTooltip:AddLine("Shift+right click: open settings.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	button:SetScript("OnLeave", function()
@@ -1807,9 +2089,14 @@ function ns.Replay:ApplySkin()
 				paint(skin.WhiteButtonLabel, button)
 			end
 		end
-		local bar = self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar)
-		if bar then
-			paint(skin.ScrollBar, bar)
+		local bars = {
+			self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar),
+			self.statScroll and (self.statScroll.ScrollBar or self.statScroll.scrollBar),
+		}
+		for i = 1, #bars do
+			if bars[i] then
+				paint(skin.ScrollBar, bars[i])
+			end
 		end
 		if self.titleText then
 			paint(skin.Font, self.titleText)
@@ -1822,9 +2109,6 @@ function ns.Replay:ApplySkin()
 		end
 		if self.trailValue then
 			paint(skin.Font, self.trailValue)
-		end
-		if self.summaryText then
-			paint(skin.Font, self.summaryText)
 		end
 	end)
 	self.skinApplied = true
