@@ -15,6 +15,7 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		-- Once per UI load. Zoning also fires this event; the open session stays open.
 		-- A reload within a few minutes of the last logout stamp continues that session.
 		ns.started = true
+		ns.DB:BindPlayer()
 		local _, continued = ns.DB:Open(ns.DB:Now(), false)
 		ns.GPS:Start(continued)
 		ns:Print("recording. /zipper opens the map replay.")
@@ -22,6 +23,7 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		ns.Config:StartSizePoll()
 	elseif event == "PLAYER_LOGOUT" then
 		ns.GPS:Stop()
+		ns.DB:Flush()
 	end
 end)
 

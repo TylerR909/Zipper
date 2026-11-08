@@ -1162,8 +1162,77 @@ function ns.Replay:UpdateRecap(sessions)
 	self:RefreshStats(sessions)
 end
 
+function ns.Replay:ToggleCharacters()
+	local picker = self.charPicker
+	if not picker then
+		return
+	end
+	if picker:IsShown() then
+		picker:Hide()
+		return
+	end
+	self:RefreshCharacters()
+	picker:Show()
+end
+
+function ns.Replay:RefreshCharacters()
+	if self.charButton and ns.DB.char then
+		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+	end
+	local picker = self.charPicker
+	if not picker then
+		return
+	end
+	local list = ns.DB:CharacterList()
+	self.charRows = self.charRows or {}
+	for i = 1, #list do
+		local row = self.charRows[i]
+		if not row then
+			row = CreateFrame("Button", nil, picker)
+			row:SetHeight(20)
+			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.label:SetPoint("LEFT", 8, 0)
+			row.label:SetPoint("RIGHT", -6, 0)
+			row.label:SetJustifyH("LEFT")
+			row:SetScript("OnClick", function(button)
+				ns.DB:SetView(button.charKey)
+				if ns.Replay.charPicker then
+					ns.Replay.charPicker:Hide()
+				end
+				if button.charKey == ns.DB.playerKey then
+					ns.Replay:SetMode("current")
+				else
+					ns.Replay:SetMode("all")
+				end
+			end)
+			self.charRows[i] = row
+		end
+		row.charKey = list[i].key
+		local mark = list[i].current and "  · recording" or ""
+		row.label:SetText(string.format("%s  (%d)%s", list[i].label, list[i].sessions, mark))
+		if list[i].key == ns.DB.viewKey then
+			row.label:SetTextColor(1, 0.86, 0.45)
+		else
+			row.label:SetTextColor(0.9, 0.88, 0.78)
+		end
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", picker, "TOPLEFT", 0, -((i - 1) * 20))
+		row:SetPoint("RIGHT", picker, "RIGHT", 0, 0)
+		row:Show()
+	end
+	for i = #list + 1, #self.charRows do
+		self.charRows[i]:Hide()
+	end
+	picker:SetHeight(math.max(22, #list * 20 + 4))
+end
+
 function ns.Replay:ScopeCaption()
+	local who = ns.DB:JourneyLabel(ns.DB.char)
+	local other = ns.DB.viewKey and ns.DB.playerKey and ns.DB.viewKey ~= ns.DB.playerKey
 	local count = #ns.DB:Sessions()
+	if other then
+		return string.format("%s's saved journey. %d sessions. Recording continues on this character.", who, count)
+	end
 	if self.mode == "all" then
 		if count <= 1 then
 			return "Every session on this character, added together. There is only one so far, so this matches the recording in progress."
@@ -1802,6 +1871,9 @@ function ns.Replay:OnDataChanged()
 end
 
 function ns.Replay:SetMode(mode, index)
+	if mode == "current" and ns.DB.playerKey then
+		ns.DB:SetView(ns.DB.playerKey)
+	end
 	self.mode = mode
 	self.index = index
 	self.playing = false
@@ -1844,6 +1916,9 @@ function ns.Replay:RefreshList()
 		return
 	end
 	local sessions = ns.DB:Sessions()
+	if self.charButton and ns.DB.char then
+		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+	end
 	local width = content:GetWidth()
 	if width < 40 then
 		width = 250
@@ -2106,9 +2181,33 @@ function ns.Replay:CreateFrame()
 	title:SetPoint("TOPLEFT", 16, -8)
 	title:SetText("Zipper")
 
-	local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	hint:SetPoint("TOPLEFT", 16, -28)
-	hint:SetText("Where you have been")
+	local charButton = MakeButton(frame, "Character", 200)
+	charButton:SetPoint("TOPLEFT", 14, -26)
+	charButton:SetHeight(18)
+	charButton:SetScript("OnClick", function()
+		ns.Replay:ToggleCharacters()
+	end)
+	charButton:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 1, 1)
+		end
+	end)
+
+	local charPicker = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+	charPicker:SetPoint("TOPLEFT", charButton, "BOTTOMLEFT", 0, -2)
+	charPicker:SetWidth(220)
+	charPicker:SetFrameStrata("DIALOG")
+	charPicker:SetFrameLevel(400)
+	charPicker:Hide()
+	charPicker:EnableMouse(true)
+	charPicker:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	charPicker:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
+	charPicker:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.95)
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", 2, 2)
@@ -2352,6 +2451,9 @@ function ns.Replay:CreateFrame()
 	self.titleText = title
 	self.closeButton = close
 	self.optionsButton = options
+	self.charButton = charButton
+	self.charPicker = charPicker
+	self.charRows = {}
 	self.sessionButton = sessionButton
 	self.journeyButton = journeyButton
 	self.scroll = scroll
@@ -2548,6 +2650,7 @@ function ns.Replay:ApplySkin()
 		end
 		buttons[#buttons + 1] = self.chapterPrev
 		buttons[#buttons + 1] = self.chapterNext
+		buttons[#buttons + 1] = self.charButton
 		for i = 1, #buttons do
 			local button = buttons[i]
 			if button then

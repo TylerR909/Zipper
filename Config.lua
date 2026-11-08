@@ -545,7 +545,7 @@ function ns.Config:PaintSize()
 		return
 	end
 	self.sizeText:SetText(string.format(
-		"This character is about %s.\nAccount options are about %s.\n%s\nLower bound from a compact encoding. The saved file on disk is larger.",
+		"This character's journey packs to about %s.\nEvery saved character packs to about %s.\n%s\nJourneys are packed into the account file, so any character can open them.",
 		FormatBytes(self.characterBytes),
 		FormatBytes(self.accountBytes),
 		self:GrowthText()
@@ -558,7 +558,7 @@ function ns.Config:RefreshSize()
 		return
 	end
 	self.characterBytes = ns.DB:EstimateCharacter()
-	self.accountBytes = ns.DB:EstimateBytes(ZipperDB)
+	self.accountBytes = ns.DB:EstimateAll()
 	self:PaintSize()
 end
 
