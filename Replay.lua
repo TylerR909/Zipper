@@ -148,11 +148,23 @@ function ns.Replay:PathLayer()
 	return layer
 end
 
+function ns.Replay:EnsurePools()
+	if not self.lines then
+		self.lines = {}
+		self.lineUsed = 0
+	end
+	if not self.markers then
+		self.markers = {}
+		self.markerUsed = 0
+	end
+end
+
 function ns.Replay:AcquireLine()
 	local layer = self:PathLayer()
 	if not layer then
 		return nil
 	end
+	self:EnsurePools()
 	local line = self.lines[self.lineUsed + 1]
 	if not line then
 		line = layer:CreateTexture(nil, "OVERLAY")
@@ -251,6 +263,9 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
 end
 
 function ns.Replay:HideSpareLines()
+	if not self.lines then
+		return
+	end
 	for i = self.lineUsed + 1, #self.lines do
 		self.lines[i]:Hide()
 	end
@@ -258,6 +273,10 @@ end
 
 function ns.Replay:AcquireMarker()
 	local canvas = self:Canvas()
+	if not canvas then
+		return nil
+	end
+	self:EnsurePools()
 	local marker = self.markers[self.markerUsed + 1]
 	if not marker then
 		marker = CreateFrame("Frame", nil, canvas)
@@ -302,6 +321,9 @@ function ns.Replay:AcquireMarker()
 end
 
 function ns.Replay:HideSpareMarkers()
+	if not self.markers then
+		return
+	end
 	for i = self.markerUsed + 1, #self.markers do
 		self.markers[i]:Hide()
 		self.markers[i].kind = nil
