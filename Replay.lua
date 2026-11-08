@@ -668,7 +668,7 @@ function ns.Replay:HoverPath()
 	local layer = self.pathLayer
 	local canvas = self:Canvas()
 	local count = self.segmentCount or 0
-	if not self.frame or not self.frame:IsShown() or not layer or not canvas or count == 0 then
+	if not self.route or not layer or not canvas or count == 0 then
 		return
 	end
 	local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
@@ -779,7 +779,7 @@ function ns.Replay:FollowPlayhead()
 end
 
 function ns.Replay:Redraw()
-	if not self.frame or not self.frame:IsShown() then
+	if not self.route then
 		self:ClearOverlay()
 		return
 	end
@@ -800,11 +800,11 @@ function ns.Replay:Redraw()
 end
 
 function ns.Replay:OnDataChanged()
-	if not self.frame or not self.frame:IsShown() then
+	if not self.route then
 		self.dirty = true
 		return
 	end
-	if self.mode ~= "current" and self.mode ~= "all" then
+	if self.frame and self.frame:IsShown() and self.mode ~= "current" and self.mode ~= "all" then
 		self.dirty = true
 		return
 	end
@@ -917,6 +917,7 @@ function ns.Replay:TogglePlay()
 		self.playhead = self.t0
 	end
 	self.playing = true
+	self.route = true
 	self.playButton:SetText("Pause")
 	local map = self:EnsureMap()
 	if map and not map:IsShown() and ToggleWorldMap then
@@ -971,6 +972,11 @@ function ns.Replay:HookMap()
 			ns.Replay:Redraw()
 		end)
 	end
+	WorldMapFrame:HookScript("OnShow", function()
+		if ns.Replay.route then
+			ns.Replay:Redraw()
+		end
+	end)
 	WorldMapFrame:HookScript("OnHide", function()
 		ns.Replay.playing = false
 		if ns.Replay.playButton then
@@ -993,7 +999,7 @@ function ns.Replay:HookMap()
 	if scroll and not self.cursorWatch then
 		self.cursorWatch = true
 		scroll:HookScript("OnUpdate", function()
-			if ns.Replay.frame and ns.Replay.frame:IsShown() and WorldMapFrame:IsShown() then
+			if ns.Replay.route and WorldMapFrame:IsShown() then
 				ns.Replay:HoverPath()
 			end
 		end)
@@ -1270,6 +1276,28 @@ function ns.Replay:Toggle()
 	self:SetMode(self.mode or "current", self.index)
 end
 
+function ns.Replay:ToggleRoute()
+	self.route = not self.route
+	if not self.route then
+		self.playing = false
+		if self.playButton then
+			self.playButton:SetText("Play")
+		end
+		self:ClearOverlay()
+		return
+	end
+	if not self.sessions then
+		self:ReloadView()
+	end
+	local map = self:EnsureMap()
+	if map and not map:IsShown() and ToggleWorldMap then
+		ToggleWorldMap()
+	end
+	self:HookMap()
+	self:EnsureDot()
+	self:Redraw()
+end
+
 function ns.Replay:RaiseMapButton(button)
 	-- Krowi parents the button to WorldMapFrame, under the scroll container that
 	-- holds the map art. RareScanner's template is HIGH; a plain button is not,
@@ -1298,13 +1326,19 @@ function ns.Replay:StyleMapButton(button)
 	border:SetSize(54, 54)
 	border:SetPoint("TOPLEFT")
 	button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
-	button:SetScript("OnClick", function()
-		ns.Replay:Toggle()
+	button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	button:SetScript("OnClick", function(_, mouseButton)
+		if mouseButton == "RightButton" then
+			ns.Replay:Toggle()
+		else
+			ns.Replay:ToggleRoute()
+		end
 	end)
 	button:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:AddLine("Zipper", 1, 0.82, 0)
-		GameTooltip:AddLine("Open the journey replay.", 1, 1, 1, true)
+		GameTooltip:AddLine("Left click: show or hide the route.", 1, 1, 1, true)
+		GameTooltip:AddLine("Right click: open the replay.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	button:SetScript("OnLeave", function()
