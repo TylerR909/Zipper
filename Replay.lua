@@ -228,9 +228,9 @@ function ns.Replay:InferModes(track)
 end
 
 function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
-	local canvas = self:Canvas()
-	local width = canvas:GetWidth()
-	local height = canvas:GetHeight()
+	local parent = line:GetParent()
+	local width = parent and parent:GetWidth()
+	local height = parent and parent:GetHeight()
 	if not width or width <= 0 or not height or height <= 0 then
 		line:Hide()
 		return
@@ -243,7 +243,8 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
 		line:Hide()
 		return
 	end
-	local scale = canvas:GetScale() or 1
+	local canvas = self:Canvas()
+	local scale = (canvas and canvas:GetScale()) or 1
 	if scale < 0.05 then
 		scale = 0.05
 	end
@@ -257,7 +258,7 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
 	line:SetVertexColor(r, g, b, a or 0.9)
 	line:ClearAllPoints()
 	line:SetSize(length, thick)
-	line:SetPoint("CENTER", canvas, "TOPLEFT", (sx1 + sx2) / 2, (sy1 + sy2) / 2)
+	line:SetPoint("CENTER", parent, "TOPLEFT", (sx1 + sx2) / 2, (sy1 + sy2) / 2)
 	line:SetRotation(math.atan2(dy, dx))
 	line:Show()
 end
@@ -1014,7 +1015,11 @@ function ns.Replay:HookMap()
 	end
 	if WorldMapFrame.OnCanvasScaleChanged then
 		hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", function()
-			ns.Replay:RescalePins()
+			if ns.Replay.route then
+				ns.Replay:Redraw()
+			else
+				ns.Replay:RescalePins()
+			end
 		end)
 	end
 	local scroll = WorldMapFrame.ScrollContainer
@@ -1251,10 +1256,9 @@ function ns.Replay:CreateFrame()
 	self.scrub = scrub
 	self.timeText = timeText
 	self.summaryText = summary
-	self.lines = {}
-	self.markers = {}
-	self.lineUsed = 0
-	self.markerUsed = 0
+	-- The route can already have drawn into these pools. Replacing the tables
+	-- leaves the old textures on the map, stuck to the first view.
+	self:EnsurePools()
 
 	local window = ZipperDB and ZipperDB.window
 	frame:ClearAllPoints()
