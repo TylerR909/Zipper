@@ -1272,7 +1272,7 @@ function ns.Replay:UpdateReadout()
 	if span < 0 then
 		span = 0
 	end
-	self.timeText:SetText(string.format("%s  /  %s    %dx", FormatClock(at - self.t0), FormatClock(span), self.speed))
+	self.timeText:SetText(string.format("%s  /  %s", FormatClock(at - self.t0), FormatClock(span)))
 	self:UpdateRecap(sessions)
 	if not self.playing then
 		self.playButton:SetText("Play")
@@ -1985,17 +1985,35 @@ function ns.Replay:TogglePlay()
 	end
 end
 
-function ns.Replay:CycleSpeed()
-	local nextSpeed = SPEEDS[1]
-	for i = 1, #SPEEDS do
-		if SPEEDS[i] == self.speed then
-			nextSpeed = SPEEDS[(i % #SPEEDS) + 1]
-			break
+function ns.Replay:StyleSpeedButtons()
+	local buttons = self.speedButtons
+	if not buttons then
+		return
+	end
+	for i = 1, #buttons do
+		local button = buttons[i]
+		local active = button.speed == self.speed
+		local font = button:GetFontString()
+		if font then
+			if active then
+				font:SetTextColor(1, 0.86, 0.45)
+			else
+				font:SetTextColor(0.78, 0.76, 0.70)
+			end
+		end
+		if active then
+			button:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
+			button:SetBackdropColor(0.20, 0.16, 0.08, 1)
+		else
+			button:SetBackdropBorderColor(0.38, 0.32, 0.16, 0.9)
+			button:SetBackdropColor(0.12, 0.11, 0.10, 1)
 		end
 	end
-	self.speed = nextSpeed
-	self.speedButton:SetText(self.speed .. "x")
-	self:UpdateReadout()
+end
+
+function ns.Replay:SetSpeed(speed)
+	self.speed = speed
+	self:StyleSpeedButtons()
 end
 
 function ns.Replay:OnUpdate(_, elapsed)
@@ -2256,7 +2274,7 @@ function ns.Replay:CreateFrame()
 	content:SetSize(260, 22)
 	scroll:SetScrollChild(content)
 
-	local play = MakeButton(frame, "Play", 72)
+	local play = MakeButton(frame, "Play", 56)
 	play:SetPoint("TOPLEFT", 14, -298)
 	play:SetScript("OnClick", function()
 		ns.Replay:TogglePlay()
@@ -2268,17 +2286,21 @@ function ns.Replay:CreateFrame()
 		end
 	end)
 
-	local speed = MakeButton(frame, self.speed .. "x", 56)
-	speed:SetPoint("LEFT", play, "RIGHT", 8, 0)
-	speed:SetScript("OnClick", function()
-		ns.Replay:CycleSpeed()
-	end)
-	speed:SetScript("OnLeave", function(self)
-		local font = self:GetFontString()
-		if font then
-			font:SetTextColor(1, 1, 1)
-		end
-	end)
+	local speedButtons = {}
+	local speedWidth, speedGap = 46, 4
+	for i = 1, #SPEEDS do
+		local rate = SPEEDS[i]
+		local speed = MakeButton(frame, rate .. "x", speedWidth)
+		speed.speed = rate
+		speed:SetPoint("TOPLEFT", 76 + ((i - 1) * (speedWidth + speedGap)), -298)
+		speed:SetScript("OnClick", function(button)
+			ns.Replay:SetSpeed(button.speed)
+		end)
+		speed:SetScript("OnLeave", function()
+			ns.Replay:StyleSpeedButtons()
+		end)
+		speedButtons[i] = speed
+	end
 
 	local trailLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	trailLabel:SetPoint("TOPLEFT", 16, -328)
@@ -2460,7 +2482,8 @@ function ns.Replay:CreateFrame()
 	self.listContent = content
 	self.rows = {}
 	self.playButton = play
-	self.speedButton = speed
+	self.speedButtons = speedButtons
+	self:StyleSpeedButtons()
 	self.scrub = scrub
 	self.jumpButtons = jumpButtons
 	self.chapterPrev = chapterPrev
@@ -2642,7 +2665,12 @@ function ns.Replay:ApplySkin()
 		if self.closeButton then
 			paint(skin.CloseButton, self.closeButton)
 		end
-		local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.speedButton, self.optionsButton }
+		local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.optionsButton }
+		if self.speedButtons then
+			for j = 1, #self.speedButtons do
+				buttons[#buttons + 1] = self.speedButtons[j]
+			end
+		end
 		if self.jumpButtons then
 			for j = 1, #self.jumpButtons do
 				buttons[#buttons + 1] = self.jumpButtons[j]
@@ -2683,6 +2711,10 @@ function ns.Replay:ApplySkin()
 	self.skinApplied = true
 	if not ok then
 		ns:Print("EllesmereUI skin skipped: " .. tostring(err))
+	end
+	self:StyleSpeedButtons()
+	if self.sessionButton then
+		self:StyleModeButtons()
 	end
 end
 
