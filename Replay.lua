@@ -429,6 +429,7 @@ function ns.Replay:CollectPath(sessions, minDist)
 	local oldest, newest = self:TrailSpan()
 	local deathTimes = self:DeathTimes(sessions)
 	local deathIndex = 1
+	local instanceSpans = self:InstanceSpans(sessions)
 	local xs, ys, brk, modes, speeds, times, maps = {}, {}, {}, {}, {}, {}, {}
 	local n = 0
 	local prevT
@@ -456,6 +457,10 @@ function ns.Replay:CollectPath(sessions, minDist)
 					if newest and t > newest then
 						break
 					end
+					if self:InsideSkippedInstance(t, instanceSpans) then
+						open = false
+						prevT = t
+					else
 					local px, py = self:Project(track.m[i], track.x[i] / ns.COORD_SCALE, track.y[i] / ns.COORD_SCALE)
 					local mode = track.mode and track.mode[i]
 					if mode == nil then
@@ -492,6 +497,7 @@ function ns.Replay:CollectPath(sessions, minDist)
 						end
 					end
 					prevT = t
+					end
 				end
 			end
 		end
@@ -1494,7 +1500,14 @@ function ns.Replay:MapTitle(mapID)
 	return "Zone"
 end
 
-function ns.Replay:ChapterName(kind, mapID)
+function ns.Replay:ChapterName(kind, mapID, chapter)
+	if kind == "instance" then
+		local label = ns.InstanceName[chapter and chapter.inst] or "Dungeon"
+		if chapter and chapter.tEnd and chapter.tEnd > chapter.t then
+			return label .. " · " .. FormatClock(chapter.tEnd - chapter.t)
+		end
+		return label
+	end
 	local zone = self:MapTitle(mapID)
 	if kind == "hearth" then
 		return "Hearth · " .. zone
@@ -1502,6 +1515,69 @@ function ns.Replay:ChapterName(kind, mapID)
 		return "Landed · " .. zone
 	end
 	return zone
+end
+
+function ns.Replay:InstanceSkips(inst)
+	return inst ~= ns.Instance.PVP and inst ~= ns.Instance.ARENA
+end
+
+function ns.Replay:InstanceSpans(sessions)
+	local spans = {}
+	local open
+	for s = 1, #(sessions or {}) do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		local endT = session.seen or session.s
+		for i = 1, #(track.ek or {}) do
+			local kind = track.ek[i]
+			local t = session.s + (track.et[i] or 0)
+			if kind == Kind.INSTANCE_ENTER then
+				if open then
+					open.tEnd = t
+					spans[#spans + 1] = open
+				end
+				open = {
+					t = t,
+					map = track.em[i],
+					inst = track.ea[i],
+					skip = self:InstanceSkips(track.ea[i]),
+				}
+			elseif kind == Kind.INSTANCE_LEAVE and open then
+				open.tEnd = t
+				spans[#spans + 1] = open
+				open = nil
+			end
+		end
+		if open then
+			open.tEnd = endT
+			spans[#spans + 1] = open
+			open = nil
+		end
+	end
+	return spans
+end
+
+function ns.Replay:InsideSkippedInstance(t, spans)
+	for i = 1, #(spans or {}) do
+		local span = spans[i]
+		if span.skip and t > span.t and t < (span.tEnd or t) then
+			return true
+		end
+	end
+	return false
+end
+
+function ns.Replay:InstanceSkipTo(at)
+	if not at or not self.sessions then
+		return nil
+	end
+	local spans = self:InstanceSpans(self.sessions)
+	for i = 1, #spans do
+		local span = spans[i]
+		if span.skip and at >= span.t and span.tEnd and at < span.tEnd then
+			return span.tEnd
+		end
+	end
 end
 
 function ns.Replay:CollectChapters(sessions)
@@ -1585,6 +1661,18 @@ function ns.Replay:CollectChapters(sessions)
 			end
 		end
 	end
+	local indoors = self:InstanceSpans(sessions)
+	for i = 1, #indoors do
+		local span = indoors[i]
+		chapters[#chapters + 1] = {
+			t = span.t,
+			tEnd = span.tEnd,
+			map = span.map,
+			kind = "instance",
+			inst = span.inst,
+			skip = span.skip,
+		}
+	end
 	table.sort(chapters, function(a, b)
 		if a.t == b.t then
 			return a.kind < b.kind
@@ -1596,7 +1684,7 @@ function ns.Replay:CollectChapters(sessions)
 	for i = 1, #chapters do
 		local chapter = chapters[i]
 		local previous = merged[#merged]
-		if previous and (chapter.t - previous.t) <= CHAPTER_MERGE then
+		if previous and previous.kind ~= "instance" and chapter.kind ~= "instance" and (chapter.t - previous.t) <= CHAPTER_MERGE then
 			if chapter.t < previous.t then
 				previous.t = chapter.t
 			end
@@ -1617,7 +1705,7 @@ function ns.Replay:CollectChapters(sessions)
 	end
 	for i = 1, #merged do
 		local chapter = merged[i]
-		chapter.name = self:ChapterName(chapter.kind, chapter.map)
+		chapter.name = self:ChapterName(chapter.kind, chapter.map, chapter)
 	end
 	return merged
 end
@@ -1813,6 +1901,10 @@ function ns.Replay:SeekFraction(fraction, immediate)
 		return
 	end
 	self.playhead = self.t0 + ((self.t1 - self.t0) * fraction)
+	local indoors = self:InstanceSkipTo(self.playhead)
+	if indoors and indoors > self.playhead then
+		self.playhead = indoors
+	end
 	self:UpdateDot()
 	self:UpdateReadout()
 	if immediate then
@@ -2280,6 +2372,10 @@ function ns.Replay:OnUpdate(_, elapsed)
 	end
 	if self.playing and self.t0 then
 		self.playhead = self.playhead + (elapsed * self.speed)
+		local indoors = self:InstanceSkipTo(self.playhead)
+		if indoors and indoors > self.playhead then
+			self.playhead = indoors
+		end
 		if self.playhead >= self.t1 then
 			self.playhead = self.t1
 			self.playing = false

@@ -24,4 +24,4 @@ Not started.
 
 ## Dungeons, raids, and PvP
 
-Not started.
+In progress. A dungeon or raid is a chapter on the scrubber. Replay skips from the door to the exit, and indoor points are not drawn on the world map. Battlegrounds and arenas stay on the path. Login compares the live instance with the last saved door and writes the missing enter or leave, including across a relog. OneForAll's dungeon window is not used.

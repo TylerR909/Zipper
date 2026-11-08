@@ -239,17 +239,27 @@ function ns.GPS:ReadInstance()
 	return InstanceByType[kind] or ns.Instance.OTHER
 end
 
+function ns.GPS:ReconcileInstance()
+	local inst = self:ReadInstance()
+	self.instance = inst
+	self.instanceReady = true
+	local kind, extra, session = ns.DB:LastInstanceDoor()
+	if kind == Kind.INSTANCE_ENTER and session and session ~= ns.DB.session then
+		ns.DB:CloseInstance(session, extra)
+		kind, extra, session = ns.DB:LastInstanceDoor()
+	end
+	local openHere = kind == Kind.INSTANCE_ENTER and session == ns.DB.session
+	if inst and not openHere then
+		self:Mark(Kind.INSTANCE_ENTER, inst)
+	elseif not inst and openHere then
+		self:Mark(Kind.INSTANCE_LEAVE, extra)
+	end
+end
+
 function ns.GPS:SyncInstance()
 	local inst = self:ReadInstance()
 	if not self.instanceReady then
-		self.instance = inst
-		if self.continued or not inst then
-			self.instanceReady = true
-			return
-		end
-		if self:Mark(Kind.INSTANCE_ENTER, inst) then
-			self.instanceReady = true
-		end
+		self:ReconcileInstance()
 		return
 	end
 	if inst == self.instance then

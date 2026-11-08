@@ -965,10 +965,13 @@ function ns.DB:AddSample(mapID, x, y, now, mode, speed)
 end
 
 function ns.DB:AddEvent(kind, mapID, x, y, now, extra)
+	return self:AddEventOn(self.session, kind, mapID, x, y, now, extra)
+end
+
+function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 	if not ns.Config:WantsKind(kind) then
 		return false
 	end
-	local session = self.session
 	if not session then
 		return false
 	end
@@ -991,6 +994,36 @@ function ns.DB:AddEvent(kind, mapID, x, y, now, extra)
 	track.ea[n] = extra or 0
 	session.seen = now
 	return true
+end
+
+function ns.DB:LastInstanceDoor()
+	local host = self.record
+	local sessions = host and host.sessions
+	if type(sessions) ~= "table" then
+		return nil
+	end
+	for s = #sessions, 1, -1 do
+		local session = sessions[s]
+		local track = self:Track(session)
+		for i = #(track.ek or {}), 1, -1 do
+			local kind = track.ek[i]
+			if kind == ns.Kind.INSTANCE_ENTER or kind == ns.Kind.INSTANCE_LEAVE then
+				return kind, track.ea[i], session
+			end
+		end
+	end
+end
+
+function ns.DB:CloseInstance(session, extra)
+	if not session then
+		return false
+	end
+	local track = self:Track(session)
+	local n = #track.t
+	local mapID = n > 0 and track.m[n] or 0
+	local x = n > 0 and (track.x[n] / ns.COORD_SCALE) or 0
+	local y = n > 0 and (track.y[n] / ns.COORD_SCALE) or 0
+	return self:AddEventOn(session, ns.Kind.INSTANCE_LEAVE, mapID, x, y, session.seen or session.s, extra or 0)
 end
 
 function ns.DB:Stats()
