@@ -983,8 +983,21 @@ function ns.Replay:Toggle()
 	self:SetMode(self.mode or "current", self.index)
 end
 
+function ns.Replay:RaiseMapButton(button)
+	-- Krowi parents the button to WorldMapFrame, under the scroll container that
+	-- holds the map art. RareScanner's template is HIGH; a plain button is not,
+	-- so the map draws over it. Keep it on the scroll container, above that art.
+	local container = WorldMapFrame and WorldMapFrame.ScrollContainer
+	if container and button:GetParent() ~= container then
+		button:SetParent(container)
+	end
+	button:SetFrameStrata("HIGH")
+	button:SetFrameLevel(510)
+end
+
 function ns.Replay:StyleMapButton(button)
 	button:SetSize(32, 32)
+	self:RaiseMapButton(button)
 	button.icon = button:CreateTexture(nil, "ARTWORK")
 	button.icon:SetTexture("Interface\\BUTTONS\\WHITE8X8")
 	button.icon:SetVertexColor(0.25, 0.85, 1, 1)
@@ -1010,7 +1023,9 @@ function ns.Replay:StyleMapButton(button)
 		GameTooltip:Hide()
 	end)
 	-- Krowi calls this on every map change before it reflows the column.
-	button.Refresh = function() end
+	button.Refresh = function()
+		ns.Replay:RaiseMapButton(button)
+	end
 end
 
 function ns.Replay:CreateMapButton()
