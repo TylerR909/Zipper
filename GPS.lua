@@ -367,7 +367,18 @@ function ns.GPS:CheckSummon()
 	end
 end
 
-function ns.GPS:OnKill(attackerGUID)
+function ns.GPS:TargetIsElite()
+	if not UnitExists or not UnitExists("target") or not UnitClassification then
+		return false
+	end
+	local class = UnitClassification("target")
+	if not class or (issecretvalue and issecretvalue(class)) then
+		return false
+	end
+	return class == "elite" or class == "rareelite" or class == "worldboss"
+end
+
+function ns.GPS:OnKill(attackerGUID, targetGUID)
 	-- Forever forbids registering COMBAT_LOG_EVENT_UNFILTERED. PARTY_KILL is the
 	-- kill-credit event, and it also fires for other people in the party.
 	if not attackerGUID or (issecretvalue and issecretvalue(attackerGUID)) then
@@ -377,7 +388,14 @@ function ns.GPS:OnKill(attackerGUID)
 	if not me or (issecretvalue and issecretvalue(me)) or attackerGUID ~= me then
 		return
 	end
-	ns.DB:AddKill()
+	if targetGUID and issecretvalue and issecretvalue(targetGUID) then
+		targetGUID = nil
+	end
+	local mobID = ns.DB:CreatureID(targetGUID)
+	local extra = ns.DB:PackKill(mobID, self:TargetIsElite())
+	if not self:Mark(Kind.KILL, extra) then
+		ns.DB:AddKill()
+	end
 end
 
 function ns.GPS:CombatLocked()
@@ -491,8 +509,8 @@ function ns.GPS:OnEvent(event, ...)
 			self:Mark(Kind.HEARTH, spellID or 0)
 		end
 	elseif event == "PARTY_KILL" then
-		local attackerGUID = ...
-		self:OnKill(attackerGUID)
+		local attackerGUID, targetGUID = ...
+		self:OnKill(attackerGUID, targetGUID)
 	elseif event == "PLAYER_CONTROL_LOST" or event == "PLAYER_CONTROL_GAINED" then
 		self:SyncTaxi()
 	end

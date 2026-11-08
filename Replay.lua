@@ -12,6 +12,9 @@ ns.Replay.TRAIL_STOPS = { 2, 3, 5, 10, 15, 20, 30, 45, 60, 0 }
 
 local Kind = ns.Kind
 local PIP = 6
+local KILL_PIP = 5
+local ELITE_PIP = 8
+local KILL_CAP = 800
 local PARK_SECONDS = 20
 local PARK_DIST = 0.0035
 local TRAVEL_GAP = 20
@@ -324,7 +327,15 @@ function ns.Replay:AcquireMarker()
 				return
 			end
 			GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
-			GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
+			if pin.kind == Kind.KILL then
+				local mobID, elite = ns.DB:ReadKill(pin.extra)
+				GameTooltip:SetText(elite and "Elite kill" or "Kill", 1, 0.25, 0.2)
+				if mobID > 0 then
+					GameTooltip:AddLine("Mob " .. mobID, 1, 1, 1)
+				end
+			else
+				GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
+			end
 			if pin.extra and (pin.kind == Kind.QUEST_ACCEPT or pin.kind == Kind.QUEST_TURNIN) and pin.extra > 0 then
 				local title = C_QuestLog.GetTitleForQuestID(pin.extra)
 				GameTooltip:AddLine(title or ("Quest " .. pin.extra), 1, 1, 1)
@@ -683,38 +694,54 @@ function ns.Replay:DrawMarkers(sessions)
 		return
 	end
 	local width, height = canvas:GetWidth(), canvas:GetHeight()
-	local shown = 0
-	for s = #sessions, 1, -1 do
-		local session = sessions[s]
-		local track = ns.DB:Track(session)
-		for i = #track.ek, 1, -1 do
-			if shown >= MARKER_CAP then
+	local function draw(wantKill, cap)
+		local shown = 0
+		for s = #sessions, 1, -1 do
+			if shown >= cap then
 				break
 			end
-			local kind = track.ek[i]
-			local when = session.s + (track.et[i] or 0)
-			if kind ~= Kind.ZONE and self:SegmentFade(when) > 0 then
-				local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
-				if px then
-					shown = shown + 1
-					local marker = self:AcquireMarker()
-					marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-					marker.texture:SetTexCoord(0, 1, 0, 1)
-					marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
-					local fade = self:SegmentFade(when)
-					marker:SetAlpha(fade)
-					ns.Map:Use():FitPin(marker, PIP)
-					marker.kind = kind
-					marker.extra = track.ea[i]
-					marker.mapID = track.em[i]
-					marker.when = session.s + track.et[i]
-					ns.Map:Use():Place(marker, px, py)
-					marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + 30)
-					marker:Show()
+			local session = sessions[s]
+			local track = ns.DB:Track(session)
+			for i = #track.ek, 1, -1 do
+				if shown >= cap then
+					break
+				end
+				local kind = track.ek[i]
+				local isKill = kind == Kind.KILL
+				local when = session.s + (track.et[i] or 0)
+				if isKill == wantKill and kind ~= Kind.ZONE and self:SegmentFade(when) > 0 then
+					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
+					if px then
+						shown = shown + 1
+						local marker = self:AcquireMarker()
+						local size = PIP
+						if isKill then
+							local _, elite = ns.DB:ReadKill(track.ea[i])
+							marker.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(0.86, 0.12, 0.10, 1)
+							size = elite and ELITE_PIP or KILL_PIP
+						else
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
+						end
+						marker:SetAlpha(self:SegmentFade(when))
+						ns.Map:Use():FitPin(marker, size)
+						marker.kind = kind
+						marker.extra = track.ea[i]
+						marker.mapID = track.em[i]
+						marker.when = when
+						ns.Map:Use():Place(marker, px, py)
+						marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + (isKill and 28 or 30))
+						marker:Show()
+					end
 				end
 			end
 		end
 	end
+	draw(false, MARKER_CAP)
+	draw(true, KILL_CAP)
 	self:HideSpareMarkers()
 end
 

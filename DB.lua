@@ -757,6 +757,38 @@ function ns.DB:Touch(now)
 	end
 end
 
+ns.DB.KILL_ELITE = 16777216
+
+function ns.DB:CreatureID(guid)
+	if type(guid) ~= "string" or guid == "" then
+		return 0
+	end
+	local unitType, _, _, _, _, id = strsplit("-", guid)
+	if (unitType == "Creature" or unitType == "Vehicle") and id then
+		return tonumber(id) or 0
+	end
+	return 0
+end
+
+function ns.DB:PackKill(mobID, elite)
+	mobID = tonumber(mobID) or 0
+	if mobID < 0 then
+		mobID = 0
+	end
+	if elite then
+		return mobID + self.KILL_ELITE
+	end
+	return mobID
+end
+
+function ns.DB:ReadKill(extra)
+	extra = tonumber(extra) or 0
+	if extra >= self.KILL_ELITE then
+		return extra - self.KILL_ELITE, true
+	end
+	return extra, false
+end
+
 function ns.DB:AddKill()
 	if not ns.Config:WantsKind(ns.Kind.KILL) then
 		return
@@ -816,10 +848,8 @@ function ns.DB:AddEvent(kind, mapID, x, y, now, extra)
 		return false
 	end
 	if kind == ns.Kind.KILL then
-		self:AddKill()
-		return true
-	end
-	if kind == ns.Kind.QUEST_TURNIN then
+		session.kills = (session.kills or 0) + 1
+	elseif kind == ns.Kind.QUEST_TURNIN then
 		session.quests = (session.quests or 0) + 1
 	end
 	local track = self:Track(session)
