@@ -2,6 +2,9 @@ local _, ns = ...
 
 ns.Config = {}
 
+-- Minutes of trail shown on the map while glancing. 0 is the whole history.
+ns.Config.GLANCE_STOPS = { 5, 10, 15, 20, 30, 45, 60, 0 }
+
 local TRACK_DEFAULTS = {
 	path = true,
 	kills = true,
@@ -107,6 +110,9 @@ function ns.Config:Get()
 	if cfg.showMarkers == nil then
 		cfg.showMarkers = true
 	end
+	if cfg.glanceTrail == nil then
+		cfg.glanceTrail = 30
+	end
 	if type(cfg.track) ~= "table" then
 		cfg.track = {}
 	end
@@ -136,6 +142,42 @@ end
 
 function ns.Config:ShowMarkers()
 	return self:Get().showMarkers and true or false
+end
+
+function ns.Config:GlanceTrail()
+	local minutes = self:Get().glanceTrail
+	if minutes == nil then
+		return 30
+	end
+	return minutes
+end
+
+function ns.Config:GlanceIndex(minutes)
+	local stops = self.GLANCE_STOPS
+	for i = 1, #stops do
+		if stops[i] == minutes then
+			return i
+		end
+	end
+	return 5
+end
+
+function ns.Config:GlanceLabel(minutes)
+	if not minutes or minutes <= 0 then
+		return "Full"
+	end
+	return minutes .. " min"
+end
+
+function ns.Config:SetGlanceTrail(minutes)
+	self:Get().glanceTrail = minutes or 0
+	if self.glanceText then
+		self.glanceText:SetText(self:GlanceLabel(minutes))
+	end
+	local replay = ns.Replay
+	if replay and replay.route and not (replay.UsingReplayTrail and replay:UsingReplayTrail()) then
+		replay:Redraw()
+	end
 end
 
 function ns.Config:ApplyReminder()
@@ -250,7 +292,7 @@ function ns.Config:CreateFrame()
 	scroll:SetPoint("TOPLEFT", 0, -4)
 	scroll:SetPoint("BOTTOMRIGHT", -28, 4)
 	local panel = CreateFrame("Frame", nil, scroll)
-	panel:SetSize(640, 640)
+	panel:SetSize(640, 760)
 	scroll:SetScrollChild(panel)
 
 	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -301,11 +343,61 @@ function ns.Config:CreateFrame()
 	valueText:SetPoint("LEFT", slider, "RIGHT", 16, 0)
 	valueText:SetText("1 hour")
 
+	local glanceLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	glanceLabel:SetPoint("TOPLEFT", 16, -148)
+	glanceLabel:SetText("Trail on the map")
+
+	local glanceText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	glanceText:SetPoint("LEFT", glanceLabel, "RIGHT", 10, 0)
+	glanceText:SetText(ns.Config:GlanceLabel(ns.Config:GlanceTrail()))
+
+	local glance = CreateFrame("Slider", "ZipperConfigGlanceSlider", panel, "UISliderTemplate")
+	glance:SetPoint("TOPLEFT", 28, -176)
+	glance:SetSize(220, 16)
+	glance:SetMinMaxValues(1, #ns.Config.GLANCE_STOPS)
+	glance:SetValueStep(1)
+	glance:SetObeyStepOnDrag(true)
+	local glanceLow = glance.Low or _G[glance:GetName() .. "Low"]
+	local glanceHigh = glance.High or _G[glance:GetName() .. "High"]
+	local glanceTitle = glance.Text or _G[glance:GetName() .. "Text"]
+	if glanceLow then
+		glanceLow:Hide()
+	end
+	if glanceHigh then
+		glanceHigh:Hide()
+	end
+	if glanceTitle then
+		glanceTitle:Hide()
+	end
+	glance:SetScript("OnValueChanged", function(slider, value)
+		if ns.Config.lock then
+			return
+		end
+		local index = math.floor(value + 0.5)
+		if index < 1 then
+			index = 1
+		elseif index > #ns.Config.GLANCE_STOPS then
+			index = #ns.Config.GLANCE_STOPS
+		end
+		if math.abs(slider:GetValue() - index) > 0.01 then
+			ns.Config.lock = true
+			slider:SetValue(index)
+			ns.Config.lock = false
+		end
+		ns.Config:SetGlanceTrail(ns.Config.GLANCE_STOPS[index])
+	end)
+
+	local glanceHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	glanceHint:SetPoint("TOPLEFT", 28, -196)
+	glanceHint:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+	glanceHint:SetJustifyH("LEFT")
+	glanceHint:SetText("Solid back to this point, then a short fade. The replay panel has its own slider.")
+
 	local record = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	record:SetPoint("TOPLEFT", 16, -156)
+	record:SetPoint("TOPLEFT", 16, -230)
 	record:SetText("Record")
 
-	local path = AddCheck(panel, "ZipperConfigPath", "Movement", 12, -180)
+	local path = AddCheck(panel, "ZipperConfigPath", "Movement", 12, -254)
 	path:SetScript("OnClick", function(self)
 		ns.Config:SetTrack("path", self:GetChecked())
 	end)
@@ -313,7 +405,7 @@ function ns.Config:CreateFrame()
 	local boxes = { remind = remind, path = path }
 	for i = 1, #TRACKS do
 		local entry = TRACKS[i]
-		local box = AddCheck(panel, "ZipperConfig" .. entry.key, entry.label, 12, -180 - (i * 28))
+		local box = AddCheck(panel, "ZipperConfig" .. entry.key, entry.label, 12, -254 - (i * 28))
 		box.trackKey = entry.key
 		box:SetScript("OnClick", function(self)
 			ns.Config:SetTrack(self.trackKey, self:GetChecked())
@@ -321,7 +413,7 @@ function ns.Config:CreateFrame()
 		boxes[entry.key] = box
 	end
 
-	local markerY = -180 - ((#TRACKS + 1) * 28)
+	local markerY = -254 - ((#TRACKS + 1) * 28)
 	local markers = AddCheck(panel, "ZipperConfigMarkers", "Show event markers on the map", 12, markerY)
 	markers:SetScript("OnClick", function(self)
 		ns.Config:SetShowMarkers(self:GetChecked())
@@ -350,6 +442,8 @@ function ns.Config:CreateFrame()
 	self.category = category
 	self.slider = slider
 	self.sliderText = valueText
+	self.glanceSlider = glance
+	self.glanceText = glanceText
 	self.boxes = boxes
 end
 
@@ -366,6 +460,14 @@ function ns.Config:Refresh()
 		self.boxes[key]:SetChecked(self:Enabled(key))
 	end
 	self:RefreshSlider()
+	if self.glanceSlider then
+		self.lock = true
+		self.glanceSlider:SetValue(self:GlanceIndex(cfg.glanceTrail))
+		self.lock = false
+		if self.glanceText then
+			self.glanceText:SetText(self:GlanceLabel(cfg.glanceTrail))
+		end
+	end
 end
 
 function ns.Config:Toggle()

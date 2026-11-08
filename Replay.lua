@@ -229,7 +229,7 @@ function ns.Replay:InferModes(track)
 	return modes
 end
 
-function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
+function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha)
 	local parent = line:GetParent()
 	local width = parent and parent:GetWidth()
 	local height = parent and parent:GetHeight()
@@ -251,6 +251,14 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
 		scale = 0.05
 	end
 	local r, g, b, a, mul = self:LineLook(mode, speed)
+	if trailAlpha == nil then
+		trailAlpha = 1
+	end
+	a = (a or 0.9) * trailAlpha
+	if a < 0.03 then
+		line:Hide()
+		return
+	end
 	local thick = (2 * (mul or 1)) / scale
 	if thick < 1 then
 		thick = 1
@@ -333,7 +341,23 @@ function ns.Replay:HideSpareMarkers()
 	end
 end
 
+local function FirstIndexAtOrAfter(times, origin, threshold)
+	local lo, hi = 1, #times
+	local found = hi + 1
+	while lo <= hi do
+		local mid = math.floor((lo + hi) / 2)
+		if origin + times[mid] < threshold then
+			lo = mid + 1
+		else
+			found = mid
+			hi = mid - 1
+		end
+	end
+	return found
+end
+
 function ns.Replay:CollectPath(sessions, minDist)
+	local oldest, newest = self:TrailSpan()
 	local xs, ys, brk, modes, speeds, times, maps = {}, {}, {}, {}, {}, {}, {}
 	local n = 0
 	local prevT
@@ -343,44 +367,240 @@ function ns.Replay:CollectPath(sessions, minDist)
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
-		local inferred
-		for i = 1, #track.t do
-			local t = session.s + track.t[i]
-			local px, py = self:Project(track.m[i], track.x[i] / ns.COORD_SCALE, track.y[i] / ns.COORD_SCALE)
-			local mode = track.mode and track.mode[i]
-			if mode == nil then
-				if not inferred then
-					inferred = self:InferModes(track)
+		local count = #track.t
+		if count > 0 then
+			local origin = session.s
+			local startT = origin + track.t[1]
+			local endT = origin + track.t[count]
+			if newest and startT > newest then
+				break
+			elseif not oldest or endT >= oldest then
+				local inferred
+				local i0 = 1
+				if oldest and startT < oldest then
+					i0 = FirstIndexAtOrAfter(track.t, origin, oldest)
 				end
-				mode = inferred[i] or ns.Travel.FOOT
+				for i = i0, count do
+					local t = origin + track.t[i]
+					if newest and t > newest then
+						break
+					end
+					local px, py = self:Project(track.m[i], track.x[i] / ns.COORD_SCALE, track.y[i] / ns.COORD_SCALE)
+					local mode = track.mode and track.mode[i]
+					if mode == nil then
+						if not inferred then
+							inferred = self:InferModes(track)
+						end
+						mode = inferred[i] or ns.Travel.FOOT
+					end
+					local speed = (track.spd and track.spd[i]) or 100
+					local gap = prevT and (t - prevT) > ns.CONTINUE_SECONDS
+					if not px or gap then
+						open = false
+					else
+						local keep = not open
+						if open then
+							local dx, dy = px - lastX, py - lastY
+							keep = (dx * dx + dy * dy) >= minDistSq or mode ~= lastMode
+						end
+						if keep then
+							n = n + 1
+							xs[n] = px
+							ys[n] = py
+							modes[n] = mode
+							speeds[n] = speed
+							times[n] = t
+							maps[n] = track.m[i]
+							brk[n] = not open
+							lastX, lastY, lastMode = px, py, mode
+							open = true
+						end
+					end
+					prevT = t
+				end
 			end
-			local speed = (track.spd and track.spd[i]) or 100
-			local gap = prevT and (t - prevT) > ns.CONTINUE_SECONDS
-			if not px or gap then
-				open = false
-			else
-				local keep = not open
-				if open then
-					local dx, dy = px - lastX, py - lastY
-					keep = (dx * dx + dy * dy) >= minDistSq or mode ~= lastMode
-				end
-				if keep then
-					n = n + 1
-					xs[n] = px
-					ys[n] = py
-					modes[n] = mode
-					speeds[n] = speed
-					times[n] = t
-					maps[n] = track.m[i]
-					brk[n] = not open
-					lastX, lastY, lastMode = px, py, mode
-					open = true
-				end
+		end
+	end
+	if self:UsingReplayTrail() and newest then
+		local mapID, x, y = self:PlayheadPlace()
+		if mapID then
+			local px, py = self:Project(mapID, x, y)
+			if px and (n == 0 or math.abs(xs[n] - px) > 0.00001 or math.abs(ys[n] - py) > 0.00001) then
+				n = n + 1
+				xs[n] = px
+				ys[n] = py
+				modes[n] = modes[n - 1] or ns.Travel.FOOT
+				speeds[n] = speeds[n - 1] or 100
+				times[n] = newest
+				maps[n] = mapID
+				brk[n] = n == 1 or maps[n - 1] ~= mapID
 			end
-			prevT = t
 		end
 	end
 	return xs, ys, brk, modes, speeds, times, maps, n
+end
+
+function ns.Replay:UsingReplayTrail()
+	return self.frame and self.frame:IsShown()
+end
+
+function ns.Replay:ReplaySpanMinutes()
+	if not self.t0 or not self.t1 or self.t1 <= self.t0 then
+		return 2
+	end
+	local minutes = math.ceil((self.t1 - self.t0) / 60)
+	if minutes < 2 then
+		return 2
+	end
+	return minutes
+end
+
+function ns.Replay:ReplayTrailMinutes()
+	if self.replayTrail == nil then
+		local saved = tonumber(ZipperDB and ZipperDB.replayTrail) or 0
+		if saved < 2 then
+			saved = 0
+		else
+			saved = math.floor(saved + 0.5)
+		end
+		self.replayTrail = saved
+	end
+	return self.replayTrail
+end
+
+function ns.Replay:TrailLabel(minutes)
+	if not minutes or minutes <= 0 then
+		return "Full"
+	end
+	return minutes .. " min"
+end
+
+function ns.Replay:SetReplayTrail(minutes)
+	minutes = math.floor((tonumber(minutes) or 0) + 0.5)
+	if minutes < 2 or minutes >= self:ReplaySpanMinutes() then
+		minutes = 0
+	end
+	self.replayTrail = minutes
+	self.trailShown = minutes
+	ZipperDB = ZipperDB or {}
+	ZipperDB.replayTrail = minutes
+	if self.trailValue then
+		self.trailValue:SetText(self:TrailLabel(minutes))
+	end
+	self.trailDirty = true
+end
+
+function ns.Replay:SyncTrailSlider()
+	local slider = self.trailSlider
+	if not slider then
+		return
+	end
+	local span = self:ReplaySpanMinutes()
+	local minutes = self:ReplayTrailMinutes()
+	if self.trailSpan == span and self.trailShown == minutes then
+		return
+	end
+	self.trailSpan = span
+	self.trailShown = minutes
+	self.lockTrail = true
+	if span <= 2 then
+		slider:SetMinMaxValues(2, 2)
+		slider:SetValue(2)
+		slider:Disable()
+	else
+		slider:Enable()
+		slider:SetMinMaxValues(2, span)
+		if minutes <= 0 or minutes >= span then
+			slider:SetValue(span)
+		else
+			slider:SetValue(minutes)
+		end
+	end
+	self.lockTrail = false
+	if self.trailValue then
+		self.trailValue:SetText(self:TrailLabel(minutes))
+	end
+end
+
+function ns.Replay:TrailWindow()
+	local minutes
+	if self:UsingReplayTrail() then
+		minutes = self:ReplayTrailMinutes()
+	else
+		minutes = ns.Config:GlanceTrail()
+	end
+	if not minutes or minutes <= 0 then
+		return nil
+	end
+	return minutes * 60
+end
+
+function ns.Replay:TrailNow()
+	if self:UsingReplayTrail() and self.playhead then
+		return self.playhead
+	end
+	return self.t1 or (ns.DB and ns.DB:Now()) or 0
+end
+
+-- Oldest sample that still belongs on the trail, and the "now" the solid part ends at.
+-- Full history has no oldest bound. The fade tail sits just past the solid window.
+function ns.Replay:TrailSpan()
+	local nowT = self:TrailNow()
+	local window = self:TrailWindow()
+	if not window then
+		return nil, nowT
+	end
+	local fade = math.min(45, math.max(10, window * 0.12))
+	return nowT - window - fade, nowT
+end
+
+function ns.Replay:SegmentFade(older)
+	local nowT = self:TrailNow()
+	if not older or older > nowT then
+		return 0
+	end
+	local window = self:TrailWindow()
+	if not window then
+		return 1
+	end
+	local age = nowT - older
+	if age <= window then
+		return 1
+	end
+	local fade = math.min(45, math.max(10, window * 0.12))
+	if age >= window + fade then
+		return 0
+	end
+	return 1 - ((age - window) / fade)
+end
+
+function ns.Replay:RefreshTrailFade()
+	local count = self.segmentCount or 0
+	for i = 1, count do
+		local seg = self.segments[i]
+		local line = seg and seg.line
+		if line then
+			local fade = self:SegmentFade(seg.t1)
+			local r, g, b, a = self:LineLook(seg.mode, seg.speed)
+			a = (a or 0.9) * fade
+			if a < 0.03 then
+				line:Hide()
+			else
+				line:SetVertexColor(r, g, b, a)
+				line:Show()
+			end
+		end
+	end
+	for i = 1, self.markerUsed or 0 do
+		local marker = self.markers[i]
+		local fade = self:SegmentFade(marker.when)
+		if fade < 0.03 then
+			marker:Hide()
+		else
+			marker:SetAlpha(fade)
+			marker:Show()
+		end
+	end
 end
 
 function ns.Replay:DrawPath(sessions)
@@ -405,13 +625,15 @@ function ns.Replay:DrawPath(sessions)
 		if not brk[i] then
 			local line = self:AcquireLine()
 			if line then
-				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i])
+				local fade = self:SegmentFade(times[i - 1])
+				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i], fade)
 				self.segmentCount = self.segmentCount + 1
 				local seg = self.segments[self.segmentCount]
 				if not seg then
 					seg = {}
 					self.segments[self.segmentCount] = seg
 				end
+				seg.line = line
 				seg.x1, seg.y1 = xs[i - 1], ys[i - 1]
 				seg.x2, seg.y2 = xs[i], ys[i]
 				seg.t1, seg.t2 = times[i - 1], times[i]
@@ -445,23 +667,26 @@ function ns.Replay:DrawMarkers(sessions)
 				break
 			end
 			local kind = track.ek[i]
-			if kind ~= Kind.ZONE then
-			local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
-			if px then
-				shown = shown + 1
-				local marker = self:AcquireMarker()
-				marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-				marker.texture:SetTexCoord(0, 1, 0, 1)
-				marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
-				ns.Map:Use():FitPin(marker, PIP)
-				marker.kind = kind
-				marker.extra = track.ea[i]
-				marker.mapID = track.em[i]
-				marker.when = session.s + track.et[i]
-				ns.Map:Use():Place(marker, px, py)
-				marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + 30)
-				marker:Show()
-			end
+			local when = session.s + (track.et[i] or 0)
+			if kind ~= Kind.ZONE and self:SegmentFade(when) > 0 then
+				local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
+				if px then
+					shown = shown + 1
+					local marker = self:AcquireMarker()
+					marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+					marker.texture:SetTexCoord(0, 1, 0, 1)
+					marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
+					local fade = self:SegmentFade(when)
+					marker:SetAlpha(fade)
+					ns.Map:Use():FitPin(marker, PIP)
+					marker.kind = kind
+					marker.extra = track.ea[i]
+					marker.mapID = track.em[i]
+					marker.when = session.s + track.et[i]
+					ns.Map:Use():Place(marker, px, py)
+					marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + 30)
+					marker:Show()
+				end
 			end
 		end
 	end
@@ -607,21 +832,26 @@ function ns.Replay:PlayheadPlace()
 end
 
 function ns.Replay:UpdateDot()
+	-- Glancing keeps the saved replay position, but the dot belongs at the end of the live trail.
+	local glance = not self:UsingReplayTrail()
+	local saved
+	if glance then
+		saved = self.playhead
+		self.playhead = self.t1
+	end
 	local mapID, x, y = self:PlayheadPlace()
-	if not mapID then
-		if self.dot then
-			self.dot:Hide()
-		end
-		return
+	local px, py
+	if mapID then
+		px, py = self:Project(mapID, x, y)
 	end
-	local px, py = self:Project(mapID, x, y)
-	if not px then
-		if self.dot then
-			self.dot:Hide()
-		end
-		return
+	if px then
+		self:PositionDot(px, py)
+	elseif self.dot then
+		self.dot:Hide()
 	end
-	self:PositionDot(px, py)
+	if glance then
+		self.playhead = saved
+	end
 end
 
 function ns.Replay:Summarize(sessions)
@@ -714,6 +944,7 @@ function ns.Replay:UpdateReadout()
 		self.timeText:SetText("No path yet. Walk somewhere and Zipper will keep the points.")
 		self:UpdateRecap(sessions)
 		self.playButton:SetText("Play")
+		self:SyncTrailSlider()
 		return
 	end
 	local at = self.playhead or self.t0
@@ -727,6 +958,7 @@ function ns.Replay:UpdateReadout()
 		self.playButton:SetText("Play")
 	end
 	self:UpdateScrub()
+	self:SyncTrailSlider()
 end
 
 function ns.Replay:UpdateScrub()
@@ -752,6 +984,7 @@ function ns.Replay:SeekFraction(fraction)
 	self.playhead = self.t0 + ((self.t1 - self.t0) * fraction)
 	self:UpdateDot()
 	self:UpdateReadout()
+	self.trailDirty = true
 end
 
 function ns.Replay:ReloadView()
@@ -811,27 +1044,29 @@ function ns.Replay:HoverPath()
 	local best, bestDist, bestAlong
 	for i = 1, count do
 		local seg = self.segments[i]
-		local dx, dy = seg.x2 - seg.x1, seg.y2 - seg.y1
-		local len2 = (dx * dx) + (dy * dy)
-		local along = 0
-		local qx, qy
-		if len2 < 0.0000001 then
-			qx, qy = seg.x1, seg.y1
-		else
-			along = ((px - seg.x1) * dx + (py - seg.y1) * dy) / len2
-			if along < 0 then
-				along = 0
-			elseif along > 1 then
-				along = 1
+		if seg and seg.line and seg.line:IsShown() then
+			local dx, dy = seg.x2 - seg.x1, seg.y2 - seg.y1
+			local len2 = (dx * dx) + (dy * dy)
+			local along = 0
+			local qx, qy
+			if len2 < 0.0000001 then
+				qx, qy = seg.x1, seg.y1
+			else
+				along = ((px - seg.x1) * dx + (py - seg.y1) * dy) / len2
+				if along < 0 then
+					along = 0
+				elseif along > 1 then
+					along = 1
+				end
+				qx = seg.x1 + (dx * along)
+				qy = seg.y1 + (dy * along)
 			end
-			qx = seg.x1 + (dx * along)
-			qy = seg.y1 + (dy * along)
-		end
-		local ax = (left + (qx * width)) * scale
-		local ay = (top - (qy * height)) * scale
-		local dist = math.sqrt(((rawX - ax) ^ 2) + ((rawY - ay) ^ 2))
-		if not bestDist or dist < bestDist then
-			best, bestDist, bestAlong = seg, dist, along
+			local ax = (left + (qx * width)) * scale
+			local ay = (top - (qy * height)) * scale
+			local dist = math.sqrt(((rawX - ax) ^ 2) + ((rawY - ay) ^ 2))
+			if not bestDist or dist < bestDist then
+				best, bestDist, bestAlong = seg, dist, along
+			end
 		end
 	end
 	if not best or not best.t1 or bestDist > 12 then
@@ -1063,18 +1298,34 @@ function ns.Replay:OnUpdate(_, elapsed)
 		self:ReloadView()
 		self:Redraw()
 	end
-	if not self.playing or not self.t0 then
-		return
+	if self.playing and self.t0 then
+		self.playhead = self.playhead + (elapsed * self.speed)
+		if self.playhead >= self.t1 then
+			self.playhead = self.t1
+			self.playing = false
+			self.playButton:SetText("Play")
+		end
+		self:FollowPlayhead()
+		self:UpdateDot()
+		self:UpdateReadout()
+		self.trailDirty = true
 	end
-	self.playhead = self.playhead + (elapsed * self.speed)
-	if self.playhead >= self.t1 then
-		self.playhead = self.t1
-		self.playing = false
-		self.playButton:SetText("Play")
+	-- Keep the drawn tip within about four seconds of travel. High playback speeds redraw more often.
+	local trailWait = 4 / math.max(self.speed or 1, 1)
+	if trailWait < 0.05 then
+		trailWait = 0.05
+	elseif trailWait > 0.25 then
+		trailWait = 0.25
 	end
-	self:FollowPlayhead()
-	self:UpdateDot()
-	self:UpdateReadout()
+	if self.trailDirty and (GetTime() - (self.lastTrailRedraw or 0)) >= trailWait then
+		self.lastTrailRedraw = GetTime()
+		self.trailDirty = false
+		if self.route then
+			self:Redraw()
+		end
+	elseif self.playing and (self.segmentCount or 0) > 0 then
+		self:RefreshTrailFade()
+	end
 end
 
 function ns.Replay:HookMap()
@@ -1143,7 +1394,7 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(336, 508)
+	frame:SetSize(336, 560)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
@@ -1326,8 +1577,47 @@ function ns.Replay:CreateFrame()
 	timeText:SetJustifyH("LEFT")
 	timeText:SetTextColor(0.85, 0.82, 0.70)
 
+	local trailLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	trailLabel:SetPoint("TOPLEFT", 16, -354)
+	trailLabel:SetText("Trail")
+	trailLabel:SetTextColor(0.85, 0.82, 0.70)
+
+	local trailValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	trailValue:SetPoint("LEFT", trailLabel, "RIGHT", 8, 0)
+	trailValue:SetTextColor(1, 0.86, 0.45)
+	trailValue:SetText("Full")
+
+	local trail = CreateFrame("Slider", "ZipperReplayTrail", frame, "UISliderTemplate")
+	trail:SetPoint("TOPLEFT", 16, -376)
+	trail:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	trail:SetHeight(16)
+	trail:SetMinMaxValues(2, 2)
+	trail:SetValueStep(1)
+	trail:SetValue(2)
+	trail:SetObeyStepOnDrag(true)
+	for _, key in ipairs({ "Low", "High", "Text" }) do
+		local label = trail[key] or _G[trail:GetName() .. key]
+		if label then
+			label:Hide()
+		end
+	end
+	trail:SetScript("OnValueChanged", function(_, value)
+		if ns.Replay.lockTrail then
+			return
+		end
+		ns.Replay:SetReplayTrail(value)
+	end)
+
+	local trailLow = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	trailLow:SetPoint("TOPLEFT", trail, "BOTTOMLEFT", 0, -1)
+	trailLow:SetText("2 min")
+
+	local trailHigh = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	trailHigh:SetPoint("TOPRIGHT", trail, "BOTTOMRIGHT", 0, -1)
+	trailHigh:SetText("Full")
+
 	local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	summary:SetPoint("TOPLEFT", 16, -354)
+	summary:SetPoint("TOPLEFT", 16, -418)
 	summary:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	summary:SetJustifyH("LEFT")
 	summary:SetJustifyV("TOP")
@@ -1347,6 +1637,9 @@ function ns.Replay:CreateFrame()
 	self.speedButton = speed
 	self.scrub = scrub
 	self.timeText = timeText
+	self.trailLabel = trailLabel
+	self.trailValue = trailValue
+	self.trailSlider = trail
 	self.summaryText = summary
 	-- The route can already have drawn into these pools. Replacing the tables
 	-- leaves the old textures on the map, stuck to the first view.
@@ -1523,6 +1816,12 @@ function ns.Replay:ApplySkin()
 		end
 		if self.timeText then
 			paint(skin.Font, self.timeText)
+		end
+		if self.trailLabel then
+			paint(skin.Font, self.trailLabel)
+		end
+		if self.trailValue then
+			paint(skin.Font, self.trailValue)
 		end
 		if self.summaryText then
 			paint(skin.Font, self.summaryText)
