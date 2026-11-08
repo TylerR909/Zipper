@@ -9,6 +9,8 @@ ns.Replay = {
 
 local Kind = ns.Kind
 local PIP = 6
+local PARK_SECONDS = 20
+local PARK_DIST = 0.0035
 local LINE_CAP = 500
 local MARKER_CAP = 300
 local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.9
@@ -466,6 +468,94 @@ function ns.Replay:DrawMarkers(sessions)
 	self:HideSpareMarkers()
 end
 
+function ns.Replay:ClassColor()
+	if self.classR then
+		return self.classR, self.classG, self.classB
+	end
+	local _, classFile = UnitClass("player")
+	if issecretvalue and issecretvalue(classFile) then
+		classFile = nil
+	end
+	local r, g, b
+	if classFile and C_ClassColor and C_ClassColor.GetClassColor then
+		local color = C_ClassColor.GetClassColor(classFile)
+		if color and color.GetRGB then
+			r, g, b = color:GetRGB()
+		end
+	end
+	if (not r or (issecretvalue and issecretvalue(r))) and classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile] then
+		local color = RAID_CLASS_COLORS[classFile]
+		r, g, b = color.r, color.g, color.b
+	end
+	if not r or (issecretvalue and issecretvalue(r)) then
+		r, g, b = 0.9, 0.9, 0.9
+	end
+	self.classR, self.classG, self.classB = r, g, b
+	return r, g, b
+end
+
+function ns.Replay:PlayheadParked()
+	local sessions = self.sessions
+	local when = self.playhead
+	if not sessions or not when then
+		return false
+	end
+	local afk = false
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		for i = 1, #(track.ek or {}) do
+			local at = session.s + (track.et[i] or 0)
+			if at > when then
+				break
+			end
+			local kind = track.ek[i]
+			if kind == Kind.AFK_START then
+				afk = true
+			elseif kind == Kind.AFK_END then
+				afk = false
+			end
+		end
+	end
+	if afk then
+		return true
+	end
+	local s1, i1, s2, i2 = Locate(sessions, when)
+	if not s1 then
+		return false
+	end
+	local map1, x1, y1, t1 = self:SampleXY(sessions[s1], i1)
+	local map2, x2, y2, t2 = self:SampleXY(sessions[s2], i2)
+	if i1 == i2 and i1 > 1 then
+		map1, x1, y1, t1 = self:SampleXY(sessions[s1], i1 - 1)
+		map2, x2, y2, t2 = self:SampleXY(sessions[s2], i2)
+	end
+	if map1 ~= map2 then
+		return false
+	end
+	local dx, dy = (x2 or x1) - x1, (y2 or y1) - y1
+	if (dx * dx) + (dy * dy) > (PARK_DIST * PARK_DIST) then
+		return false
+	end
+	return (when - t1) >= PARK_SECONDS
+end
+
+function ns.Replay:StyleDot(parked)
+	local dot = self.dot
+	if not dot or dot.parked == parked then
+		return
+	end
+	dot.parked = parked
+	if parked then
+		dot.texture:SetTexture("Interface\\BUTTONS\\WHITE8X8")
+		dot.texture:SetVertexColor(0.55, 0.42, 0.06, 1)
+	else
+		dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
+		local r, g, b = self:ClassColor()
+		dot.texture:SetVertexColor(r, g, b, 1)
+	end
+end
+
 function ns.Replay:PositionDot(x, y)
 	local canvas = self:Canvas()
 	if not canvas or not self.dot then
@@ -476,7 +566,9 @@ function ns.Replay:PositionDot(x, y)
 		self.dot:Hide()
 		return
 	end
-	ns.Map:Use():FitPin(self.dot, 8)
+	local parked = self:PlayheadParked()
+	self:StyleDot(parked)
+	ns.Map:Use():FitPin(self.dot, parked and 9 or 12)
 	ns.Map:Use():Place(self.dot, x, y)
 	self.dot:SetFrameLevel((canvas:GetFrameLevel() or 1) + 40)
 	self.dot:Show()
@@ -1041,7 +1133,7 @@ function ns.Replay:RescalePins()
 		end
 	end
 	if self.dot then
-		host:FitPin(self.dot, 8)
+		host:FitPin(self.dot, self.dot.parked and 9 or 12)
 	end
 end
 
@@ -1279,8 +1371,10 @@ function ns.Replay:EnsureDot()
 	dot:SetSize(12, 12)
 	dot.texture = dot:CreateTexture(nil, "OVERLAY")
 	dot.texture:SetAllPoints()
-	dot.texture:SetTexture("Interface\\BUTTONS\\WHITE8X8")
-	dot.texture:SetVertexColor(1, 0.82, 0.2, 1)
+	dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
+	local r, g, b = self:ClassColor()
+	dot.texture:SetVertexColor(r, g, b, 1)
+	dot.parked = false
 	dot:EnableMouse(false)
 	self.dot = dot
 end
