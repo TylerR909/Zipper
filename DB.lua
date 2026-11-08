@@ -542,6 +542,7 @@ function ns.DB:CharacterList()
 				key = key,
 				label = self:JourneyLabel(journey),
 				sessions = type(journey.sessions) == "table" and #journey.sessions or 0,
+				bytes = self:JourneyBytes(journey),
 				current = key == self.playerKey,
 			}
 		end
@@ -590,6 +591,7 @@ function ns.DB:Flush()
 					journey.tracks[id] = self:PackTrack(track)
 				end
 			end
+			journey.bytes = self:MeasureJourney(journey)
 		end
 	end
 end
@@ -966,6 +968,27 @@ function ns.DB:MeasureJourney(journey)
 	return bytes
 end
 
+function ns.DB:JourneyBytes(journey)
+	if type(journey) ~= "table" then
+		return 0
+	end
+	local loaded = false
+	if type(journey.tracks) == "table" then
+		for _, track in pairs(journey.tracks) do
+			if type(track) == "table" then
+				loaded = true
+				break
+			end
+		end
+	end
+	if loaded or type(journey.bytes) ~= "number" then
+		local bytes = self:MeasureJourney(journey)
+		journey.bytes = bytes
+		return bytes
+	end
+	return journey.bytes
+end
+
 function ns.DB:EstimateCharacter()
 	if not self.record then
 		self:BindPlayer()
@@ -973,14 +996,15 @@ function ns.DB:EstimateCharacter()
 	if not self.record then
 		return 0
 	end
-	return self:MeasureJourney(self.record)
+	local bytes = self:JourneyBytes(self.record)
+	return bytes
 end
 
 function ns.DB:EstimateAll()
 	self:EnsureStore()
 	local total = 0
 	for _, journey in pairs(ZipperDB.journeys) do
-		total = total + self:MeasureJourney(journey)
+		total = total + self:JourneyBytes(journey)
 	end
 	return total
 end
@@ -1034,7 +1058,18 @@ function ns.DB:SizeGrowth()
 	if type(log) ~= "table" or #log < 2 then
 		return nil
 	end
-	local first, last = log[1], log[#log]
+	-- A switch to packed storage drops the number once. Rate starts after that drop.
+	local start = 1
+	for i = 2, #log do
+		local prev = log[i - 1]
+		local sample = log[i]
+		local before = type(prev) == "table" and prev[2] or 0
+		local after = type(sample) == "table" and sample[2] or 0
+		if before > 0 and after < before * 0.85 then
+			start = i
+		end
+	end
+	local first, last = log[start], log[#log]
 	if type(first) ~= "table" or type(last) ~= "table" then
 		return nil
 	end
@@ -1049,35 +1084,52 @@ function ns.DB:SizeGrowth()
 	return (delta / span) * 3600, span, delta
 end
 
-function ns.DB:Purge()
+function ns.DB:Purge(key)
 	self:EnsureStore()
-	local key = self.playerKey
-	local name, realm = "Character", ""
-	if self.record then
-		name = self.record.name or name
-		realm = self.record.realm or realm
+	key = key or self.playerKey
+	if not key or type(ZipperDB.journeys[key]) ~= "table" then
+		return false
 	end
-	local fresh = self:NewJourney(name, realm)
-	if key then
+	local removingCurrent = key == self.playerKey
+	if removingCurrent then
+		local name, realm = "Character", ""
+		if self.record then
+			name = self.record.name or name
+			realm = self.record.realm or realm
+		end
+		local fresh = self:NewJourney(name, realm)
 		ZipperDB.journeys[key] = fresh
+		self.record = fresh
+		self.session = nil
+		if self.viewKey == key then
+			self.char = fresh
+		end
+		self:Open(self:Now(), true)
+	else
+		ZipperDB.journeys[key] = nil
+		if self.viewKey == key then
+			self.viewKey = self.playerKey
+			self.char = self.record
+		end
 	end
-	self.record = fresh
-	if not key or self.viewKey == key then
-		self.char = fresh
-		self.viewKey = key
-	end
-	self.session = nil
-	self:Open(self:Now(), true)
 	if ns.Replay then
-		ns.Replay.playing = false
+		ns.Replay.playing = removingCurrent and false or ns.Replay.playing
 		ns.Replay.statsKey = nil
-		if ns.Replay.playButton then
+		ns.Replay.chapterKey = nil
+		if removingCurrent and ns.Replay.playButton then
 			ns.Replay.playButton:SetText("Play")
+		end
+		if ns.Replay.RefreshCharacters then
+			ns.Replay:RefreshCharacters()
+		end
+		if ns.Replay.frame and ns.Replay.frame:IsShown() and ns.Replay.SetMode then
+			ns.Replay:SetMode(removingCurrent and "current" or "all")
 		end
 	end
 	if ns.OnDataChanged then
 		ns.OnDataChanged()
 	end
+	return true
 end
 
 function ns.DB:SelectSessions(mode, index)

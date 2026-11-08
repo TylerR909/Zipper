@@ -435,24 +435,46 @@ function ns.Config:CreateFrame()
 	sizeText:SetWidth(520)
 	sizeText:SetJustifyH("LEFT")
 	sizeText:SetJustifyV("TOP")
-	sizeText:SetText("Measuring this character's saved data.")
+	sizeText:SetText("Saved journeys")
+
+	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", panel, "UIPanelButtonTemplate")
+	purgeDrop:SetSize(280, 22)
+	purgeDrop:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -10)
+	purgeDrop:SetText("Saved characters")
+	purgeDrop:SetScript("OnClick", function()
+		ns.Config:TogglePurgeList()
+	end)
+
+	local purgeList = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	purgeList:SetPoint("TOPLEFT", purgeDrop, "BOTTOMLEFT", 0, -2)
+	purgeList:SetWidth(280)
+	purgeList:SetFrameStrata("FULLSCREEN_DIALOG")
+	purgeList:SetFrameLevel(20)
+	purgeList:Hide()
+	purgeList:EnableMouse(true)
+	purgeList:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	purgeList:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
+	purgeList:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
 
 	local purge = CreateFrame("Button", "ZipperConfigPurge", panel, "UIPanelButtonTemplate")
-	purge:SetSize(180, 22)
-	purge:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -12)
-	purge:SetText("Purge this character")
+	purge:SetSize(80, 22)
+	purge:SetPoint("LEFT", purgeDrop, "RIGHT", 8, 0)
+	purge:SetText("Delete")
 	purge:SetScript("OnClick", function()
 		ns.Config:ConfirmPurge()
 	end)
 
-	local purgeNote = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	purgeNote:SetPoint("TOPLEFT", purge, "BOTTOMLEFT", 0, -6)
-	purgeNote:SetWidth(520)
-	purgeNote:SetJustifyH("LEFT")
-	purgeNote:SetText("Deletes this character's journey. You will be asked to type gone forever.")
-
 	canvas:SetScript("OnShow", function()
 		ns.Config:Refresh()
+	end)
+	canvas:SetScript("OnHide", function()
+		if ns.Config.purgeList then
+			ns.Config.purgeList:Hide()
+		end
 	end)
 
 	local category
@@ -470,6 +492,10 @@ function ns.Config:CreateFrame()
 	self.glanceSlider = glance
 	self.glanceText = glanceText
 	self.sizeText = sizeText
+	self.purgeDrop = purgeDrop
+	self.purgeList = purgeList
+	self.purgeRows = {}
+	self.purgeButton = purge
 	self.boxes = boxes
 end
 
@@ -513,43 +539,25 @@ local function FormatBytes(bytes)
 	return string.format("%.2f MB", bytes / (1024 * 1024))
 end
 
-local function FormatSpan(seconds)
-	seconds = math.floor(seconds or 0)
-	if seconds < 3600 then
-		return string.format("%d minutes", math.max(1, math.floor(seconds / 60)))
-	end
-	local hours = seconds / 3600
-	if hours < 10 then
-		return string.format("%.1f hours", hours)
-	end
-	return string.format("%.0f hours", hours)
-end
-
 function ns.Config:GrowthText()
-	local perHour, span, delta = ns.DB:SizeGrowth()
-	if not perHour then
-		return "Watching how fast this grows. A per-hour figure shows up after a few minutes of play."
+	local perHour, span = ns.DB:SizeGrowth()
+	if not perHour or perHour < 1 or (span or 0) < 300 then
+		return ""
 	end
-	local watched = "over the last " .. FormatSpan(span)
-	if delta < 1 then
-		return "No new data " .. watched .. "."
-	end
-	if perHour < 0 then
-		return "It shrank " .. watched .. "."
-	end
-	return string.format("About %s per hour, %s.", FormatBytes(perHour), watched)
+	return string.format("About %s per hour.", FormatBytes(perHour))
 end
 
 function ns.Config:PaintSize()
 	if not self.sizeText then
 		return
 	end
-	self.sizeText:SetText(string.format(
-		"This character's journey packs to about %s.\nEvery saved character packs to about %s.\n%s\nJourneys are packed into the account file, so any character can open them.",
-		FormatBytes(self.characterBytes),
-		FormatBytes(self.accountBytes),
-		self:GrowthText()
-	))
+	local text = "Saved journeys  " .. FormatBytes(self.accountBytes)
+	local rate = self:GrowthText()
+	if rate ~= "" then
+		text = text .. "\n" .. rate
+	end
+	self.sizeText:SetText(text)
+	self:RefreshPurgeList()
 end
 
 -- Settings is one of the two places that measure saved data. The other is the quiet poll.
@@ -607,14 +615,105 @@ local function DialogAccept(dialog)
 	return dialog.button1
 end
 
+function ns.Config:PurgeLabel(row)
+	if not row then
+		return "Saved characters"
+	end
+	return string.format("%s   %s", row.label, FormatBytes(row.bytes))
+end
+
+function ns.Config:RefreshPurgeList()
+	if not self.purgeDrop or not ns.DB or not ns.DB.CharacterList then
+		return
+	end
+	local list = ns.DB:CharacterList()
+	local selected
+	for i = 1, #list do
+		if list[i].key == self.purgeKey then
+			selected = list[i]
+			break
+		end
+	end
+	if not selected then
+		selected = list[1]
+		self.purgeKey = selected and selected.key or nil
+	end
+	self.purgeDrop:SetText(self:PurgeLabel(selected))
+	if self.purgeButton then
+		if selected then
+			self.purgeButton:Enable()
+		else
+			self.purgeButton:Disable()
+		end
+	end
+	local menu = self.purgeList
+	if not menu then
+		return
+	end
+	self.purgeRows = self.purgeRows or {}
+	for i = 1, #list do
+		local row = self.purgeRows[i]
+		if not row then
+			row = CreateFrame("Button", nil, menu)
+			row:SetHeight(20)
+			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.label:SetPoint("LEFT", 8, 0)
+			row.label:SetPoint("RIGHT", -6, 0)
+			row.label:SetJustifyH("LEFT")
+			row:SetScript("OnClick", function(button)
+				ns.Config.purgeKey = button.charKey
+				if ns.Config.purgeList then
+					ns.Config.purgeList:Hide()
+				end
+				ns.Config:RefreshPurgeList()
+			end)
+			self.purgeRows[i] = row
+		end
+		row.charKey = list[i].key
+		row.label:SetText(self:PurgeLabel(list[i]))
+		if list[i].key == self.purgeKey then
+			row.label:SetTextColor(1, 0.82, 0)
+		else
+			row.label:SetTextColor(1, 1, 1)
+		end
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, -((i - 1) * 20))
+		row:SetPoint("RIGHT", menu, "RIGHT", 0, 0)
+		row:Show()
+	end
+	for i = #list + 1, #self.purgeRows do
+		self.purgeRows[i]:Hide()
+	end
+	menu:SetHeight(math.max(22, #list * 20 + 4))
+end
+
+function ns.Config:TogglePurgeList()
+	local menu = self.purgeList
+	if not menu then
+		return
+	end
+	if menu:IsShown() then
+		menu:Hide()
+		return
+	end
+	self:RefreshPurgeList()
+	menu:Show()
+end
+
 function ns.Config:ConfirmPurge()
 	if not StaticPopupDialogs or not StaticPopup_Show then
 		return
 	end
+	local key = self.purgeKey
+	local journey = key and ZipperDB and ZipperDB.journeys and ZipperDB.journeys[key]
+	if type(journey) ~= "table" then
+		return
+	end
+	local label = ns.DB:JourneyLabel(journey)
 	if not StaticPopupDialogs.ZIPPER_PURGE then
 		StaticPopupDialogs.ZIPPER_PURGE = {
-			text = "This deletes the journey saved for this character. Account options stay.\n\nType gone forever to confirm.",
-			button1 = "Purge",
+			text = "Delete %s?\n\nType gone forever to confirm.",
+			button1 = "Delete",
 			button2 = "Cancel",
 			hasEditBox = true,
 			maxLetters = 32,
@@ -644,18 +743,23 @@ function ns.Config:ConfirmPurge()
 					end
 				end
 			end,
-			OnAccept = function(dialog)
+			OnAccept = function(dialog, data)
 				local box = DialogEditBox(dialog)
 				if not box or not PurgePhrase(box:GetText()) then
 					return
 				end
-				ns.DB:Purge()
-				ns.Config:RefreshSize()
-				ns:Print("This character's history is gone.")
+				local which = data or ns.Config.purgeKey
+				local gone = which and ZipperDB and ZipperDB.journeys and ZipperDB.journeys[which]
+				local name = ns.DB:JourneyLabel(gone)
+				if ns.DB:Purge(which) then
+					ns.Config.purgeKey = nil
+					ns.Config:RefreshSize()
+					ns:Print(name .. " is gone.")
+				end
 			end,
 		}
 	end
-	StaticPopup_Show("ZIPPER_PURGE")
+	StaticPopup_Show("ZIPPER_PURGE", label, nil, key)
 end
 
 function ns.Config:Toggle()
