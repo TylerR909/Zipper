@@ -757,24 +757,34 @@ function ns.Replay:ClearOverlay()
 	end
 end
 
+function ns.Replay:FollowPlayhead()
+	if not self.playing or self.settingMap then
+		return
+	end
+	local mapID = self:PlayheadPlace()
+	local map = self:EnsureMap()
+	if not mapID or not map or not map:IsShown() or not map.SetMapID or not map.GetMapID then
+		return
+	end
+	if map:GetMapID() == mapID then
+		return
+	end
+	self.settingMap = true
+	if C_Map and C_Map.OpenWorldMap and not map:IsShown() then
+		C_Map.OpenWorldMap(mapID)
+	else
+		map:SetMapID(mapID)
+	end
+	self.settingMap = false
+end
+
 function ns.Replay:Redraw()
 	if not self.frame or not self.frame:IsShown() then
 		self:ClearOverlay()
 		return
 	end
+	self:FollowPlayhead()
 	local map = self:EnsureMap()
-	if self.playing and map and map:IsShown() and map.GetMapID and map.SetMapID and not self.settingMap then
-		local desired = self:PlayheadPlace()
-		local current = map:GetMapID()
-		if desired and current and desired ~= current then
-			self.settingMap = true
-			map:SetMapID(desired)
-			self.settingMap = false
-			if map:GetMapID() ~= current then
-				return
-			end
-		end
-	end
 	self.mapID = map and map.GetMapID and map:GetMapID() or nil
 	local canvas = self:Canvas()
 	if not map or not map:IsShown() or not canvas or canvas:GetWidth() <= 0 then
@@ -946,6 +956,7 @@ function ns.Replay:OnUpdate(_, elapsed)
 		self.playing = false
 		self.playButton:SetText("Play")
 	end
+	self:FollowPlayhead()
 	self:UpdateDot()
 	self:UpdateReadout()
 end
