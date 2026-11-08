@@ -396,6 +396,207 @@ function ns.DB:Stats()
 	return #sessions, points, events
 end
 
+local function QuoteJSON(text)
+	text = tostring(text)
+	text = text:gsub("[%z\1-\31\\\"]", function(char)
+		if char == "\\" then
+			return "\\\\"
+		elseif char == "\"" then
+			return "\\\""
+		elseif char == "\n" then
+			return "\\n"
+		elseif char == "\r" then
+			return "\\r"
+		elseif char == "\t" then
+			return "\\t"
+		end
+		return string.format("\\u%04x", string.byte(char))
+	end)
+	return "\"" .. text .. "\""
+end
+
+local function AppendJSON(out, value, seen)
+	local kind = type(value)
+	if kind == "number" then
+		if value ~= value or value == math.huge or value == -math.huge then
+			out[#out + 1] = "null"
+		elseif value % 1 == 0 and value > -1e15 and value < 1e15 then
+			out[#out + 1] = string.format("%d", value)
+		else
+			out[#out + 1] = string.format("%.6g", value)
+		end
+	elseif kind == "string" then
+		out[#out + 1] = QuoteJSON(value)
+	elseif kind == "boolean" then
+		out[#out + 1] = value and "true" or "false"
+	elseif kind ~= "table" then
+		out[#out + 1] = "null"
+	elseif seen[value] then
+		out[#out + 1] = "null"
+	else
+		seen[value] = true
+		local count = #value
+		local items = 0
+		local array = true
+		for key in pairs(value) do
+			items = items + 1
+			if type(key) ~= "number" or key < 1 or key > count or key ~= math.floor(key) then
+				array = false
+			end
+		end
+		if array and (items == count or items == 0) then
+			out[#out + 1] = "["
+			for i = 1, count do
+				if i > 1 then
+					out[#out + 1] = ","
+				end
+				AppendJSON(out, value[i], seen)
+			end
+			out[#out + 1] = "]"
+		else
+			out[#out + 1] = "{"
+			local first = true
+			for key, item in pairs(value) do
+				if type(key) == "string" or type(key) == "number" then
+					if not first then
+						out[#out + 1] = ","
+					end
+					first = false
+					out[#out + 1] = QuoteJSON(tostring(key))
+					out[#out + 1] = ":"
+					AppendJSON(out, item, seen)
+				end
+			end
+			out[#out + 1] = "}"
+		end
+		seen[value] = nil
+	end
+end
+
+-- Compact byte count. CBOR when the client has it, otherwise compact JSON.
+-- This is a lower bound. WoW writes the real saved file as formatted Lua.
+function ns.DB:EstimateBytes(value)
+	if value == nil then
+		return 0
+	end
+	local util = C_EncodingUtil
+	if util and util.SerializeCBOR then
+		local ok, encoded = pcall(util.SerializeCBOR, value)
+		if ok and type(encoded) == "string" then
+			return #encoded
+		end
+	end
+	if util and util.SerializeJSON then
+		local ok, encoded = pcall(util.SerializeJSON, value)
+		if ok and type(encoded) == "string" then
+			return #encoded
+		end
+	end
+	local out = {}
+	AppendJSON(out, value, {})
+	return #table.concat(out)
+end
+
+function ns.DB:EstimateCharacter()
+	local db = ZipperCharDB
+	if type(db) ~= "table" then
+		return 0
+	end
+	local log = db.sizeLog
+	db.sizeLog = nil
+	local ok, bytes = pcall(self.EstimateBytes, self, db)
+	db.sizeLog = log
+	if not ok or type(bytes) ~= "number" then
+		return nil
+	end
+	return bytes
+end
+
+function ns.DB:RememberSize(bytes, now)
+	if type(bytes) ~= "number" or type(now) ~= "number" or not self.char then
+		return
+	end
+	local log = self.char.sizeLog
+	if type(log) ~= "table" then
+		log = {}
+		self.char.sizeLog = log
+	end
+	local last = log[#log]
+	if type(last) == "table" and type(last[1]) == "number" and (now - last[1]) > (20 * 60) then
+		log = {}
+		self.char.sizeLog = log
+		last = nil
+	end
+	if type(last) == "table" and last[1] == now and last[2] == bytes then
+		return
+	end
+	log[#log + 1] = { now, math.floor(bytes) }
+	local cutoff = now - (24 * 3600)
+	local drop = 0
+	for i = 1, #log do
+		local sample = log[i]
+		if type(sample) == "table" and type(sample[1]) == "number" and sample[1] < cutoff then
+			drop = i
+		else
+			break
+		end
+	end
+	if drop > 0 then
+		local kept = {}
+		for i = drop + 1, #log do
+			kept[#kept + 1] = log[i]
+		end
+		log = kept
+		self.char.sizeLog = log
+	end
+	while #log > 300 do
+		table.remove(log, 1)
+	end
+end
+
+function ns.DB:SizeGrowth()
+	local log = self.char and self.char.sizeLog
+	if type(log) ~= "table" or #log < 2 then
+		return nil
+	end
+	local first, last = log[1], log[#log]
+	if type(first) ~= "table" or type(last) ~= "table" then
+		return nil
+	end
+	if type(first[1]) ~= "number" or type(last[1]) ~= "number" then
+		return nil
+	end
+	local span = last[1] - first[1]
+	if span < 300 then
+		return nil
+	end
+	local delta = (last[2] or 0) - (first[2] or 0)
+	return (delta / span) * 3600, span, delta
+end
+
+function ns.DB:Purge()
+	local fresh = {
+		version = 2,
+		sessions = {},
+		tracks = {},
+		nextId = 1,
+	}
+	ZipperCharDB = fresh
+	self.char = fresh
+	self.session = nil
+	self:Open(self:Now(), true)
+	if ns.Replay then
+		ns.Replay.playing = false
+		ns.Replay.statsKey = nil
+		if ns.Replay.playButton then
+			ns.Replay.playButton:SetText("Play")
+		end
+	end
+	if ns.OnDataChanged then
+		ns.OnDataChanged()
+	end
+end
+
 function ns.DB:SelectSessions(mode, index)
 	local sessions = self:Sessions()
 	if mode == "all" then

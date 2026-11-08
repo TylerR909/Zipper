@@ -19,6 +19,7 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		ns.GPS:Start(continued)
 		ns:Print("recording. /zipper opens the map replay.")
 		ns.Config:StartReminder()
+		ns.Config:StartSizePoll()
 	elseif event == "PLAYER_LOGOUT" then
 		ns.GPS:Stop()
 	end

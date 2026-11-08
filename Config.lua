@@ -292,7 +292,7 @@ function ns.Config:CreateFrame()
 	scroll:SetPoint("TOPLEFT", 0, -4)
 	scroll:SetPoint("BOTTOMRIGHT", -28, 4)
 	local panel = CreateFrame("Frame", nil, scroll)
-	panel:SetSize(640, 760)
+	panel:SetSize(640, 980)
 	scroll:SetScrollChild(panel)
 
 	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -426,6 +426,31 @@ function ns.Config:CreateFrame()
 	note:SetJustifyH("LEFT")
 	note:SetText("Unchecking a type stops new records of it. Saved history stays.")
 
+	local saved = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	saved:SetPoint("TOPLEFT", note, "BOTTOMLEFT", -4, -28)
+	saved:SetText("Saved data")
+
+	local sizeText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	sizeText:SetPoint("TOPLEFT", saved, "BOTTOMLEFT", 0, -8)
+	sizeText:SetWidth(520)
+	sizeText:SetJustifyH("LEFT")
+	sizeText:SetJustifyV("TOP")
+	sizeText:SetText("Measuring this character's saved data.")
+
+	local purge = CreateFrame("Button", "ZipperConfigPurge", panel, "UIPanelButtonTemplate")
+	purge:SetSize(180, 22)
+	purge:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -12)
+	purge:SetText("Purge this character")
+	purge:SetScript("OnClick", function()
+		ns.Config:ConfirmPurge()
+	end)
+
+	local purgeNote = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	purgeNote:SetPoint("TOPLEFT", purge, "BOTTOMLEFT", 0, -6)
+	purgeNote:SetWidth(520)
+	purgeNote:SetJustifyH("LEFT")
+	purgeNote:SetText("Deletes this character's journey. You will be asked to type gone forever.")
+
 	canvas:SetScript("OnShow", function()
 		ns.Config:Refresh()
 	end)
@@ -444,6 +469,7 @@ function ns.Config:CreateFrame()
 	self.sliderText = valueText
 	self.glanceSlider = glance
 	self.glanceText = glanceText
+	self.sizeText = sizeText
 	self.boxes = boxes
 end
 
@@ -468,6 +494,168 @@ function ns.Config:Refresh()
 			self.glanceText:SetText(self:GlanceLabel(cfg.glanceTrail))
 		end
 	end
+	self:RefreshSize()
+end
+
+local function FormatBytes(bytes)
+	if type(bytes) ~= "number" then
+		return "unknown"
+	end
+	if bytes < 0 then
+		bytes = 0
+	end
+	if bytes < 1024 then
+		return string.format("%d B", math.floor(bytes + 0.5))
+	end
+	if bytes < (1024 * 1024) then
+		return string.format("%.1f KB", bytes / 1024)
+	end
+	return string.format("%.2f MB", bytes / (1024 * 1024))
+end
+
+local function FormatSpan(seconds)
+	seconds = math.floor(seconds or 0)
+	if seconds < 3600 then
+		return string.format("%d minutes", math.max(1, math.floor(seconds / 60)))
+	end
+	local hours = seconds / 3600
+	if hours < 10 then
+		return string.format("%.1f hours", hours)
+	end
+	return string.format("%.0f hours", hours)
+end
+
+function ns.Config:GrowthText()
+	local perHour, span, delta = ns.DB:SizeGrowth()
+	if not perHour then
+		return "Watching how fast this grows. A per-hour figure shows up after a few minutes of play."
+	end
+	local watched = "over the last " .. FormatSpan(span)
+	if delta < 1 then
+		return "No new data " .. watched .. "."
+	end
+	if perHour < 0 then
+		return "It shrank " .. watched .. "."
+	end
+	return string.format("About %s per hour, %s.", FormatBytes(perHour), watched)
+end
+
+function ns.Config:PaintSize()
+	if not self.sizeText then
+		return
+	end
+	self.sizeText:SetText(string.format(
+		"This character is about %s.\nAccount options are about %s.\n%s\nLower bound from a compact encoding. The saved file on disk is larger.",
+		FormatBytes(self.characterBytes),
+		FormatBytes(self.accountBytes),
+		self:GrowthText()
+	))
+end
+
+-- Settings is one of the two places that measure saved data. The other is the quiet poll.
+function ns.Config:RefreshSize()
+	if not self.sizeText or not ns.DB or not ns.DB.EstimateCharacter then
+		return
+	end
+	self.characterBytes = ns.DB:EstimateCharacter()
+	self.accountBytes = ns.DB:EstimateBytes(ZipperDB)
+	self:PaintSize()
+end
+
+-- The other measurement. No chat output. A gap longer than 20 minutes starts the watch over.
+function ns.Config:SampleSize()
+	if not ns.DB or not ns.DB.char then
+		return
+	end
+	local bytes = ns.DB:EstimateCharacter()
+	if type(bytes) ~= "number" then
+		return
+	end
+	ns.DB:RememberSize(bytes, ns.DB:Now())
+	if self.sizeText and self.frame and self.frame:IsShown() then
+		self.characterBytes = bytes
+		self:PaintSize()
+	end
+end
+
+function ns.Config:StartSizePoll()
+	if self.sizePoll then
+		return
+	end
+	self:SampleSize()
+	self.sizePoll = C_Timer.NewTicker(5 * 60, function()
+		ns.Config:SampleSize()
+	end)
+end
+
+local function PurgePhrase(text)
+	text = tostring(text or ""):match("^%s*(.-)%s*$") or ""
+	return text == "gone forever"
+end
+
+local function DialogEditBox(dialog)
+	if dialog.GetEditBox then
+		return dialog:GetEditBox()
+	end
+	return dialog.editBox
+end
+
+local function DialogAccept(dialog)
+	if dialog.GetButton1 then
+		return dialog:GetButton1()
+	end
+	return dialog.button1
+end
+
+function ns.Config:ConfirmPurge()
+	if not StaticPopupDialogs or not StaticPopup_Show then
+		return
+	end
+	if not StaticPopupDialogs.ZIPPER_PURGE then
+		StaticPopupDialogs.ZIPPER_PURGE = {
+			text = "This deletes the journey saved for this character. Account options stay.\n\nType gone forever to confirm.",
+			button1 = "Purge",
+			button2 = "Cancel",
+			hasEditBox = true,
+			maxLetters = 32,
+			timeout = 0,
+			whileDead = true,
+			hideOnEscape = true,
+			preferredIndex = 3,
+			OnShow = function(dialog)
+				local box = DialogEditBox(dialog)
+				if box then
+					box:SetText("")
+					box:SetFocus()
+				end
+				local accept = DialogAccept(dialog)
+				if accept then
+					accept:Disable()
+				end
+			end,
+			EditBoxOnTextChanged = function(editBox)
+				local dialog = editBox:GetParent()
+				local accept = DialogAccept(dialog)
+				if accept then
+					if PurgePhrase(editBox:GetText()) then
+						accept:Enable()
+					else
+						accept:Disable()
+					end
+				end
+			end,
+			OnAccept = function(dialog)
+				local box = DialogEditBox(dialog)
+				if not box or not PurgePhrase(box:GetText()) then
+					return
+				end
+				ns.DB:Purge()
+				ns.Config:RefreshSize()
+				ns:Print("This character's history is gone.")
+			end,
+		}
+	end
+	StaticPopup_Show("ZIPPER_PURGE")
 end
 
 function ns.Config:Toggle()
