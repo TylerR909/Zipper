@@ -8,7 +8,11 @@ In progress. A death no longer draws a straight line to the graveyard. A red squ
 
 ## Level-up ceremony
 
-Not started.
+In progress. `PLAYER_LEVEL_UP` is stored on the journey and as a map mark. The replay list has a Levels view. Click a level to replay it. Shift-click a second level for a range. Time at each level is listed there and in the stats. Older sessions that crossed several levels without a recorded ding stay as one range. Pie charts of travel, combat, and AFK are later.
+
+## Level cap
+
+Not started. At max level there are no more dings, so time at the cap stays an open span. XP, renown, and item level are not a substitute yet. Decide what a "level" means once the character cannot gain another.
 
 ## Party and social
 

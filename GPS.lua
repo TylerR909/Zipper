@@ -460,6 +460,7 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 	frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 	frame:RegisterEvent("PLAYER_DEAD")
+	frame:RegisterEvent("PLAYER_LEVEL_UP")
 	frame:RegisterEvent("PLAYER_UNGHOST")
 	frame:RegisterEvent("QUEST_ACCEPTED")
 	frame:RegisterEvent("QUEST_TURNED_IN")
@@ -524,6 +525,12 @@ function ns.GPS:OnEvent(event, ...)
 		end
 	elseif event == "PLAYER_DEAD" then
 		self:Mark(Kind.DEATH, 0)
+	elseif event == "PLAYER_LEVEL_UP" then
+		local level = ...
+		if type(level) == "number" and not (issecretvalue and issecretvalue(level)) then
+			ns.DB:NoteLevelUp(level)
+			self:Mark(Kind.LEVEL, level)
+		end
 	elseif event == "PLAYER_UNGHOST" then
 		self:SyncGhost()
 	elseif event == "QUEST_ACCEPTED" then

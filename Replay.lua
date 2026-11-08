@@ -342,7 +342,9 @@ function ns.Replay:AcquireMarker()
 			else
 				GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
 			end
-			if pin.extra and (pin.kind == Kind.QUEST_ACCEPT or pin.kind == Kind.QUEST_TURNIN) and pin.extra > 0 then
+			if pin.kind == Kind.LEVEL and pin.extra and pin.extra > 0 then
+				GameTooltip:AddLine("Reached level " .. pin.extra, 1, 1, 1)
+			elseif pin.extra and (pin.kind == Kind.QUEST_ACCEPT or pin.kind == Kind.QUEST_TURNIN) and pin.extra > 0 then
 				local title = C_QuestLog.GetTitleForQuestID(pin.extra)
 				GameTooltip:AddLine(title or ("Quest " .. pin.extra), 1, 1, 1)
 			elseif pin.kind == Kind.ZONE and pin.mapID then
@@ -622,12 +624,19 @@ end
 -- Full history has no oldest bound. The fade tail sits just past the solid window.
 function ns.Replay:TrailSpan()
 	local nowT = self:TrailNow()
-	local window = self:TrailWindow()
-	if not window then
-		return nil, nowT
+	if self.t1 and nowT > self.t1 then
+		nowT = self.t1
 	end
-	local fade = math.min(45, math.max(10, window * 0.12))
-	return nowT - window - fade, nowT
+	local window = self:TrailWindow()
+	local oldest
+	if window then
+		local fade = math.min(45, math.max(10, window * 0.12))
+		oldest = nowT - window - fade
+	end
+	if self.t0 and (not oldest or oldest < self.t0) then
+		oldest = self.t0
+	end
+	return oldest, nowT
 end
 
 function ns.Replay:SegmentFade(older)
@@ -760,6 +769,11 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(0.86, 0.12, 0.10, 1)
 							size = elite and ELITE_PIP or KILL_PIP
+						elseif kind == Kind.LEVEL then
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(1, 0.92, 0.45, 1)
+							size = 7
 						elseif kind == Kind.DEATH then
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -993,12 +1007,15 @@ function ns.Replay:CollectStats(sessions)
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local endT = session.seen or session.s
-		if endT > session.s then
-			recorded = recorded + (endT - session.s)
+		local clip = self.mode == "level" and self.levelLo and self.t0 and self.t1
+		if not clip then
+			if endT > session.s then
+				recorded = recorded + (endT - session.s)
+			end
+			kills = kills + (session.kills or 0)
+			turnins = turnins + (session.quests or 0)
+			levels = levels + ns.DB:LevelsGained(session)
 		end
-		kills = kills + (session.kills or 0)
-		turnins = turnins + (session.quests or 0)
-		levels = levels + ns.DB:LevelsGained(session)
 		local track = ns.DB:Track(session)
 		samples = samples + #track.t
 		local modes = track.mode
@@ -1006,6 +1023,11 @@ function ns.Replay:CollectStats(sessions)
 			modes = self:InferModes(track)
 		end
 		for i = 1, #track.t do
+			local sampleT = session.s + (track.t[i] or 0)
+			if self.mode == "level" and self.levelLo and self.t0 and (sampleT < self.t0 or sampleT > self.t1) then
+				sampleT = nil
+			end
+			if sampleT then
 			local mapID = track.m[i]
 			if mapID and not zones[mapID] then
 				zones[mapID] = true
@@ -1046,13 +1068,19 @@ function ns.Replay:CollectStats(sessions)
 					end
 				end
 			end
+			end
 		end
 		local afkStart, instStart, instType
 		for i = 1, #(track.ek or {}) do
 			local kind = track.ek[i]
 			local t = session.s + (track.et[i] or 0)
 			local extra = track.ea[i]
-			if kind == Kind.AFK_START then
+			if self.mode == "level" and self.levelLo and self.t0 and (t < self.t0 or t > self.t1) then
+				kind = nil
+			end
+			if kind == Kind.KILL and self.mode == "level" and self.levelLo then
+				kills = kills + 1
+			elseif kind == Kind.AFK_START then
 				afkStart = t
 			elseif kind == Kind.AFK_END and afkStart then
 				if t > afkStart then
@@ -1095,6 +1123,9 @@ function ns.Replay:CollectStats(sessions)
 			inside[instType] = inside[instType] + (endT - instStart)
 		end
 	end
+	if self.mode == "level" and self.levelLo and self.t0 and self.t1 and self.t1 > self.t0 then
+		recorded = self.t1 - self.t0
+	end
 	local function yards(value)
 		if not yardsKnown then
 			return "—"
@@ -1113,7 +1144,7 @@ function ns.Replay:CollectStats(sessions)
 	end
 	local party, raid = ns.Instance.PARTY, ns.Instance.RAID
 	local pvp, arena, scenario, other = ns.Instance.PVP, ns.Instance.ARENA, ns.Instance.SCENARIO, ns.Instance.OTHER
-	return {
+	local rows = {
 		{ header = "Time" },
 		{ "Recorded", FormatClock(recorded) },
 		{ "On foot", FormatClock(footTime) },
@@ -1154,6 +1185,32 @@ function ns.Replay:CollectStats(sessions)
 		{ "Path samples", Comma(samples) },
 		{ "Sessions", Comma(#sessions) },
 	}
+	local levelRows = self:LevelStatRows()
+	for i = 1, #levelRows do
+		rows[#rows + 1] = levelRows[i]
+	end
+	return rows
+end
+
+function ns.Replay:LevelStatRows()
+	local spans = ns.DB:LevelSpans(ns.DB.char)
+	if #spans == 0 then
+		return {}
+	end
+	local rows = { { header = "Levels" } }
+	for i = 1, #spans do
+		local span = spans[i]
+		local top = span.lvTo or span.lv
+		if not self.levelLo or (top >= self.levelLo and span.lv <= (self.levelHi or self.levelLo)) then
+			local stop = ns.DB:SpanStop(span, ns.DB.char)
+			local label = (span.lvTo and span.lvTo ~= span.lv) and string.format("Lv %d–%d", span.lv, span.lvTo) or string.format("Lv %d", span.lv)
+			rows[#rows + 1] = { label, FormatClock((stop or span.t0) - span.t0) }
+		end
+	end
+	if #rows == 1 then
+		return {}
+	end
+	return rows
 end
 
 function ns.Replay:StatsKey(sessions)
@@ -1303,6 +1360,15 @@ function ns.Replay:ScopeCaption()
 	local count = #ns.DB:Sessions()
 	if other then
 		return string.format("%s's saved journey. %d sessions. Recording continues on this character.", who, count)
+	end
+	if self.mode == "level" then
+		if not self.levelLo then
+			return "Pick a level to replay it. Shift-click a second level for a range."
+		end
+		if self.levelHi and self.levelHi ~= self.levelLo then
+			return string.format("Levels %d–%d.", self.levelLo, self.levelHi)
+		end
+		return string.format("Level %d.", self.levelLo)
 	end
 	if self.mode == "all" then
 		if count <= 1 then
@@ -1768,6 +1834,12 @@ function ns.Replay:ReloadView()
 	self.sessions = sessions
 	self.index = index
 	local t0, t1 = Bounds(sessions)
+	if self.mode == "level" and self.levelLo then
+		local levelStart, levelStop = ns.DB:LevelBounds(ns.DB.char, self.levelLo, self.levelHi)
+		if levelStart then
+			t0, t1 = levelStart, levelStop or levelStart
+		end
+	end
 	self.t0, self.t1 = t0, t1
 	if not self.playhead or not t0 then
 		self.playhead = t1 or t0
@@ -1981,11 +2053,109 @@ function ns.Replay:StyleModeButtons()
 	end
 	paint(self.sessionButton, self.mode == "current")
 	paint(self.journeyButton, self.mode == "all")
+	if self.levelsButton then
+		paint(self.levelsButton, self.mode == "level")
+	end
+end
+
+function ns.Replay:SelectLevel(lo, hi, extend)
+	if extend and self.levelLo and lo then
+		hi = hi or lo
+		if lo < self.levelLo then
+			self.levelHi = self.levelHi or self.levelLo
+			self.levelLo = lo
+		else
+			self.levelHi = hi
+		end
+		if self.levelHi < self.levelLo then
+			self.levelLo, self.levelHi = self.levelHi, self.levelLo
+		end
+	else
+		self.levelLo = lo
+		self.levelHi = hi or lo
+	end
+	self:SetMode("level")
+	if self.t0 then
+		self.playhead = self.t0
+		self:UpdateDot()
+		self:UpdateReadout()
+		self:Redraw()
+	end
+end
+
+function ns.Replay:RefreshLevelList()
+	local content = self.listContent
+	local spans = ns.DB:LevelSpans(ns.DB.char)
+	local width = content:GetWidth()
+	if width < 40 then
+		width = 250
+	end
+	for i = 1, #spans do
+		local span = spans[#spans - i + 1]
+		local row = self.rows[i]
+		if not row then
+			row = CreateFrame("Button", nil, content)
+			row:SetHeight(22)
+			row.bar = row:CreateTexture(nil, "BACKGROUND")
+			row.bar:SetAllPoints()
+			row.bar:SetColorTexture(0.85, 0.68, 0.28, 0.16)
+			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.label:SetPoint("LEFT", 8, 0)
+			row.label:SetPoint("RIGHT", -6, 0)
+			row.label:SetJustifyH("LEFT")
+			row:SetScript("OnClick", function(button)
+				if button.level then
+					local shift = IsShiftKeyDown and IsShiftKeyDown()
+					if shift and issecretvalue and issecretvalue(shift) then
+						shift = false
+					end
+					ns.Replay:SelectLevel(button.level, button.levelTop or button.level, shift and true or false)
+					return
+				end
+				if button.sessionIndex then
+					ns.Replay:SetMode("one", button.sessionIndex)
+				end
+			end)
+			self.rows[i] = row
+		end
+		row.sessionIndex = nil
+		row.level = span.lv
+		row.levelTop = span.lvTo or span.lv
+		local selected = self.levelLo and row.levelTop >= self.levelLo and row.level <= (self.levelHi or self.levelLo)
+		row.label:SetText(self:LevelRowLabel(span))
+		row.bar:SetShown(selected)
+		if selected then
+			row.label:SetTextColor(1, 0.86, 0.45)
+		else
+			row.label:SetTextColor(0.82, 0.80, 0.74)
+		end
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 22))
+		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+		row:Show()
+	end
+	for i = #spans + 1, #self.rows do
+		self.rows[i]:Hide()
+	end
+	if self.charButton and ns.DB.char then
+		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+	end
+	content:SetHeight(math.max(22, #spans * 22))
+end
+
+function ns.Replay:LevelRowLabel(span)
+	local name = (span.lvTo and span.lvTo ~= span.lv) and string.format("Lv %d–%d", span.lv, span.lvTo) or string.format("Lv %d", span.lv)
+	local stop = ns.DB:SpanStop(span, ns.DB.char)
+	return string.format("%s    %s", name, FormatClock((stop or span.t0) - span.t0))
 end
 
 function ns.Replay:RefreshList()
 	local content = self.listContent
 	if not content then
+		return
+	end
+	if self.mode == "level" then
+		self:RefreshLevelList()
 		return
 	end
 	local sessions = ns.DB:Sessions()
@@ -2011,11 +2181,20 @@ function ns.Replay:RefreshList()
 			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
+				if button.level then
+					local shift = IsShiftKeyDown and IsShiftKeyDown()
+					if shift and issecretvalue and issecretvalue(shift) then
+						shift = false
+					end
+					ns.Replay:SelectLevel(button.level, button.levelTop or button.level, shift and true or false)
+					return
+				end
 				ns.Replay:SetMode("one", button.sessionIndex)
 			end)
 			self.rows[i] = row
 		end
 		row.sessionIndex = index
+		row.level = nil
 		local duration = (session.seen or session.s) - session.s
 		local selected = (self.mode == "one" and self.index == index) or (self.mode == "current" and session == ns.DB:Current())
 		local gained = ns.DB:LevelsGained(session)
@@ -2309,16 +2488,28 @@ function ns.Replay:CreateFrame()
 		ns.Config:Toggle()
 	end)
 
-	local sessionButton = MakeButton(frame, "This session", 148)
+	local sessionButton = MakeButton(frame, "Session", 100)
 	sessionButton:SetPoint("TOPLEFT", 14, -56)
 	sessionButton:SetScript("OnClick", function()
+		ns.Replay.levelLo = nil
+		ns.Replay.levelHi = nil
 		ns.Replay:SetMode("current")
 	end)
 
-	local journeyButton = MakeButton(frame, "All sessions", 148)
-	journeyButton:SetPoint("LEFT", sessionButton, "RIGHT", 8, 0)
+	local journeyButton = MakeButton(frame, "All", 72)
+	journeyButton:SetPoint("LEFT", sessionButton, "RIGHT", 6, 0)
 	journeyButton:SetScript("OnClick", function()
+		ns.Replay.levelLo = nil
+		ns.Replay.levelHi = nil
 		ns.Replay:SetMode("all")
+	end)
+
+	local levelsButton = MakeButton(frame, "Levels", 108)
+	levelsButton:SetPoint("LEFT", journeyButton, "RIGHT", 6, 0)
+	levelsButton:SetScript("OnClick", function()
+		ns.Replay.levelLo = nil
+		ns.Replay.levelHi = nil
+		ns.Replay:SetMode("level")
 	end)
 
 	local scope = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -2551,6 +2742,7 @@ function ns.Replay:CreateFrame()
 	self.charRows = {}
 	self.sessionButton = sessionButton
 	self.journeyButton = journeyButton
+	self.levelsButton = levelsButton
 	self.scroll = scroll
 	self.listContent = content
 	self.rows = {}
@@ -2752,6 +2944,7 @@ function ns.Replay:ApplySkin()
 		buttons[#buttons + 1] = self.chapterPrev
 		buttons[#buttons + 1] = self.chapterNext
 		buttons[#buttons + 1] = self.charButton
+		buttons[#buttons + 1] = self.levelsButton
 		for i = 1, #buttons do
 			local button = buttons[i]
 			if button then

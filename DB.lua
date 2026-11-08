@@ -665,6 +665,131 @@ function ns.DB:NoteProgress()
 	session.em = maxXP
 end
 
+function ns.DB:NoteLevelUp(level, now)
+	local host = self.record
+	if not host or type(level) ~= "number" or level <= 0 then
+		return
+	end
+	now = now or self:Now()
+	if type(host.levels) ~= "table" then
+		host.levels = {}
+	end
+	local last = host.levels[#host.levels]
+	if last and last.lv == level and type(last.t) == "number" and math.abs(last.t - now) < 5 then
+		return
+	end
+	host.levels[#host.levels + 1] = { lv = level, t = now }
+end
+
+function ns.DB:SpanStop(span, journey)
+	if span.t1 then
+		return span.t1
+	end
+	if journey == self.record then
+		return self:Now()
+	end
+	local sessions = journey and journey.sessions
+	local last = sessions and sessions[#sessions]
+	return (last and (last.seen or last.s)) or span.t0
+end
+
+function ns.DB:LevelSpans(journey)
+	journey = journey or self.char
+	if type(journey) ~= "table" then
+		return {}
+	end
+	local sessions = journey.sessions or {}
+	local dings = {}
+	if type(journey.levels) == "table" then
+		for i = 1, #journey.levels do
+			local row = journey.levels[i]
+			if type(row) == "table" and type(row.lv) == "number" and type(row.t) == "number" then
+				dings[#dings + 1] = row
+			end
+		end
+	end
+	table.sort(dings, function(a, b)
+		return a.t < b.t
+	end)
+	local spans = {}
+	local function add(lv, lvTo, t0, t1, exact)
+		if not lv or not t0 or t1 and t1 <= t0 then
+			return
+		end
+		spans[#spans + 1] = { lv = lv, lvTo = lvTo, t0 = t0, t1 = t1, exact = exact and true or false }
+	end
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local fromLevel = session.lv
+		if type(fromLevel) == "number" then
+			local segStart = session.s
+			local segLevel = fromLevel
+			local segTop = session.el or fromLevel
+			local windowEnd = session.seen or session.s
+			local inSession = {}
+			for i = 1, #dings do
+				local ding = dings[i]
+				if ding.t >= session.s and ding.t <= windowEnd + 1 then
+					inSession[#inSession + 1] = ding
+				end
+			end
+			if #inSession == 0 then
+				local open = session == self.session and segTop == fromLevel
+				if segTop > fromLevel then
+					add(fromLevel, segTop, segStart, windowEnd, false)
+				else
+					add(fromLevel, nil, segStart, open and nil or windowEnd, false)
+				end
+			else
+				for i = 1, #inSession do
+					local ding = inSession[i]
+					if ding.t > segStart and segLevel then
+						local jumped = ding.lv > segLevel + 1
+						add(segLevel, jumped and (ding.lv - 1) or nil, segStart, ding.t, not jumped and ding.lv == segLevel + 1)
+					end
+					segStart = ding.t
+					segLevel = ding.lv
+				end
+				if segLevel and windowEnd > segStart then
+					local open = session == self.session and (session.el or segLevel) == segLevel
+					local top = session.el
+					if top and top > segLevel then
+						add(segLevel, top, segStart, open and nil or windowEnd, false)
+					else
+						add(segLevel, nil, segStart, open and nil or windowEnd, true)
+					end
+				end
+			end
+		end
+	end
+	return spans
+end
+
+function ns.DB:LevelBounds(journey, lo, hi)
+	if not lo then
+		return nil
+	end
+	if not hi or hi < lo then
+		hi = lo
+	end
+	local t0, t1
+	local spans = self:LevelSpans(journey)
+	for i = 1, #spans do
+		local span = spans[i]
+		local top = span.lvTo or span.lv
+		if top >= lo and span.lv <= hi then
+			local stop = self:SpanStop(span, journey)
+			if not t0 or span.t0 < t0 then
+				t0 = span.t0
+			end
+			if stop and (not t1 or stop > t1) then
+				t1 = stop
+			end
+		end
+	end
+	return t0, t1
+end
+
 function ns.DB:LevelsGained(session)
 	if type(session) ~= "table" or type(session.lv) ~= "number" or type(session.el) ~= "number" then
 		return 0

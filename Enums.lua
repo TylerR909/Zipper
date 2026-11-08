@@ -17,6 +17,7 @@ ns.Kind = {
 	INSTANCE_ENTER = 13,
 	INSTANCE_LEAVE = 14,
 	ZONE = 15,
+	LEVEL = 16,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -43,6 +44,7 @@ ns.KindName = {
 	[13] = "Entered instance",
 	[14] = "Left instance",
 	[15] = "Zone",
+	[16] = "Level up",
 }
 
 ns.KindColor = {
@@ -61,6 +63,7 @@ ns.KindColor = {
 	[13] = { 1.00, 0.40, 0.70 },
 	[14] = { 0.60, 0.25, 0.45 },
 	[15] = { 0.92, 0.92, 0.92 },
+	[16] = { 1.00, 0.95, 0.55 },
 }
 
 ns.Instance = {
