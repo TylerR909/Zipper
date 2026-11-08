@@ -130,6 +130,34 @@ function ns.GPS:RememberWorld()
 	end
 end
 
+function ns.GPS:TravelMode()
+	if self.onTaxi then
+		return ns.Travel.FLIGHT
+	end
+	if self.mounted then
+		return ns.Travel.MOUNT
+	end
+	return ns.Travel.FOOT
+end
+
+function ns.GPS:SpeedPercent()
+	if not GetUnitSpeed then
+		return 100
+	end
+	local current, run = GetUnitSpeed("player")
+	if type(current) ~= "number" or type(run) ~= "number" or run <= 0 then
+		return 100
+	end
+	local pct = math.floor((current / run) * 100 + 0.5)
+	if pct < 0 then
+		return 0
+	end
+	if pct > 1000 then
+		return 1000
+	end
+	return pct
+end
+
 function ns.GPS:ConsiderSample(minYards, force)
 	local mapID, x, y = self:ReadPosition()
 	if not mapID then
@@ -140,7 +168,7 @@ function ns.GPS:ConsiderSample(minYards, force)
 	end
 	local now = ns.DB:Now()
 	local mapChanged = self.lastMap ~= mapID
-	local stored = ns.DB:AddSample(mapID, x, y, now)
+	local stored = ns.DB:AddSample(mapID, x, y, now, self:TravelMode(), self:SpeedPercent())
 	if mapChanged and ns.DB:AddEvent(Kind.ZONE, mapID, x, y, now, mapID) then
 		stored = true
 	end

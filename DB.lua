@@ -14,6 +14,8 @@ local function EmptyTrack()
 		ex = {},
 		ey = {},
 		ea = {},
+		mode = {},
+		spd = {},
 	}
 end
 
@@ -28,6 +30,8 @@ local function EnsureTrack(track)
 	track.ex = track.ex or {}
 	track.ey = track.ey or {}
 	track.ea = track.ea or {}
+	track.mode = track.mode or {}
+	track.spd = track.spd or {}
 	return track
 end
 
@@ -312,7 +316,7 @@ function ns.DB:AddKill()
 	session.seen = self:Now()
 end
 
-function ns.DB:AddSample(mapID, x, y, now)
+function ns.DB:AddSample(mapID, x, y, now, mode, speed)
 	if not ns.Config:Enabled("path") then
 		return false
 	end
@@ -344,6 +348,8 @@ function ns.DB:AddSample(mapID, x, y, now)
 	track.m[n] = mapID
 	track.x[n] = px
 	track.y[n] = py
+	track.mode[n] = mode or ns.Travel.FOOT
+	track.spd[n] = speed or 100
 	session.seen = now
 	return true
 end

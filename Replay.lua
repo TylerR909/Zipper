@@ -176,7 +176,55 @@ function ns.Replay:AcquireLine()
 	return line
 end
 
-function ns.Replay:PlaceLine(line, x1, y1, x2, y2)
+function ns.Replay:LineLook(mode, speed)
+	local heat = ((speed or 100) - 100) / 250
+	if heat < 0 then
+		heat = 0
+	elseif heat > 1 then
+		heat = 1
+	end
+	local thin = 1 - (0.4 * heat)
+	if mode == ns.Travel.FLIGHT then
+		return 0.62, 0.38, 1, 0.95, 0.7
+	end
+	if mode == ns.Travel.MOUNT then
+		return 0.95, 0.72 - (0.38 * heat), 0.22, 0.92, thin
+	end
+	return 0.25 + (0.70 * heat), 0.85 - (0.28 * heat), 1 - (0.72 * heat), 0.9, thin
+end
+
+function ns.Replay:InferModes(track)
+	local modes = {}
+	local taxi, mounted = false, false
+	local eventIndex = 1
+	local eventCount = track.ek and #track.ek or 0
+	for i = 1, #track.t do
+		local at = track.t[i]
+		while eventIndex <= eventCount and (track.et[eventIndex] or 0) <= at do
+			local kind = track.ek[eventIndex]
+			if kind == ns.Kind.FLIGHT_START then
+				taxi = true
+			elseif kind == ns.Kind.FLIGHT_END then
+				taxi = false
+			elseif kind == ns.Kind.MOUNT then
+				mounted = true
+			elseif kind == ns.Kind.DISMOUNT then
+				mounted = false
+			end
+			eventIndex = eventIndex + 1
+		end
+		if taxi then
+			modes[i] = ns.Travel.FLIGHT
+		elseif mounted then
+			modes[i] = ns.Travel.MOUNT
+		else
+			modes[i] = ns.Travel.FOOT
+		end
+	end
+	return modes
+end
+
+function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed)
 	local canvas = self:Canvas()
 	local width = canvas:GetWidth()
 	local height = canvas:GetHeight()
@@ -196,12 +244,14 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2)
 	if scale < 0.05 then
 		scale = 0.05
 	end
-	local thick = 2 / scale
-	if thick < 1.25 then
-		thick = 1.25
+	local r, g, b, a, mul = self:LineLook(mode, speed)
+	local thick = (2 * (mul or 1)) / scale
+	if thick < 1 then
+		thick = 1
 	elseif thick > 14 then
 		thick = 14
 	end
+	line:SetVertexColor(r, g, b, a or 0.9)
 	line:ClearAllPoints()
 	line:SetSize(length, thick)
 	line:SetPoint("CENTER", canvas, "TOPLEFT", (sx1 + sx2) / 2, (sy1 + sy2) / 2)
@@ -267,18 +317,27 @@ function ns.Replay:HideSpareMarkers()
 end
 
 function ns.Replay:CollectPath(sessions, minDist)
-	local xs, ys, brk = {}, {}, {}
+	local xs, ys, brk, modes, speeds = {}, {}, {}, {}, {}
 	local n = 0
 	local prevT
-	local lastX, lastY
+	local lastX, lastY, lastMode
 	local open = false
 	local minDistSq = minDist * minDist
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
+		local inferred
 		for i = 1, #track.t do
 			local t = session.s + track.t[i]
 			local px, py = self:Project(track.m[i], track.x[i] / ns.COORD_SCALE, track.y[i] / ns.COORD_SCALE)
+			local mode = track.mode and track.mode[i]
+			if mode == nil then
+				if not inferred then
+					inferred = self:InferModes(track)
+				end
+				mode = inferred[i] or ns.Travel.FOOT
+			end
+			local speed = (track.spd and track.spd[i]) or 100
 			local gap = prevT and (t - prevT) > ns.CONTINUE_SECONDS
 			if not px or gap then
 				open = false
@@ -286,28 +345,30 @@ function ns.Replay:CollectPath(sessions, minDist)
 				local keep = not open
 				if open then
 					local dx, dy = px - lastX, py - lastY
-					keep = (dx * dx + dy * dy) >= minDistSq
+					keep = (dx * dx + dy * dy) >= minDistSq or mode ~= lastMode
 				end
 				if keep then
 					n = n + 1
 					xs[n] = px
 					ys[n] = py
+					modes[n] = mode
+					speeds[n] = speed
 					brk[n] = not open
-					lastX, lastY = px, py
+					lastX, lastY, lastMode = px, py, mode
 					open = true
 				end
 			end
 			prevT = t
 		end
 	end
-	return xs, ys, brk, n
+	return xs, ys, brk, modes, speeds, n
 end
 
 function ns.Replay:DrawPath(sessions)
 	local minDist = 0.0015
-	local xs, ys, brk, n
+	local xs, ys, brk, modes, speeds, n
 	for _ = 1, 5 do
-		xs, ys, brk, n = self:CollectPath(sessions, minDist)
+		xs, ys, brk, modes, speeds, n = self:CollectPath(sessions, minDist)
 		if n <= LINE_CAP then
 			break
 		end
@@ -323,7 +384,7 @@ function ns.Replay:DrawPath(sessions)
 		if not brk[i] then
 			local line = self:AcquireLine()
 			if line then
-				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i])
+				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i])
 			end
 		end
 	end

@@ -19,6 +19,13 @@ ns.Kind = {
 	ZONE = 15,
 }
 
+-- How a path sample was traveled. Stored on the point, not as a string.
+ns.Travel = {
+	FOOT = 0,
+	MOUNT = 1,
+	FLIGHT = 2,
+}
+
 ns.KindName = {
 	[1] = "Kill",
 	[2] = "Quest accepted",
