@@ -130,7 +130,34 @@ function ns.GPS:RememberWorld()
 	end
 end
 
+function ns.GPS:IsGhost()
+	if not UnitIsGhost then
+		return false
+	end
+	local ghost = UnitIsGhost("player")
+	if ghost == nil or (issecretvalue and issecretvalue(ghost)) then
+		return self.ghost and true or false
+	end
+	return ghost and true or false
+end
+
+function ns.GPS:SyncGhost()
+	local ghost = self:IsGhost()
+	if self.ghostReady and ghost == self.ghost then
+		return
+	end
+	local changed = self.ghostReady and ghost ~= self.ghost
+	self.ghost = ghost
+	self.ghostReady = true
+	if changed then
+		self:ConsiderSample(0, true)
+	end
+end
+
 function ns.GPS:TravelMode()
+	if self.ghost then
+		return ns.Travel.GHOST
+	end
 	if self.onTaxi then
 		return ns.Travel.FLIGHT
 	end
@@ -433,6 +460,7 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 	frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 	frame:RegisterEvent("PLAYER_DEAD")
+	frame:RegisterEvent("PLAYER_UNGHOST")
 	frame:RegisterEvent("QUEST_ACCEPTED")
 	frame:RegisterEvent("QUEST_TURNED_IN")
 	frame:RegisterEvent("CONFIRM_SUMMON")
@@ -452,6 +480,7 @@ function ns.GPS:Tick()
 		self:EnsureEvents()
 	end
 	ns.DB:NoteProgress()
+	self:SyncGhost()
 	self:SyncTaxi()
 	self:SyncInstance()
 	self:CheckSummon()
@@ -491,9 +520,12 @@ function ns.GPS:OnEvent(event, ...)
 		local unit = ...
 		if unit == "player" then
 			self:SyncAFK()
+			self:SyncGhost()
 		end
 	elseif event == "PLAYER_DEAD" then
 		self:Mark(Kind.DEATH, 0)
+	elseif event == "PLAYER_UNGHOST" then
+		self:SyncGhost()
 	elseif event == "QUEST_ACCEPTED" then
 		local questID = ...
 		self:Mark(Kind.QUEST_ACCEPT, questID or 0)

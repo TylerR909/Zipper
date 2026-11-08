@@ -24,6 +24,7 @@ ns.Travel = {
 	FOOT = 0,
 	MOUNT = 1,
 	FLIGHT = 2,
+	GHOST = 3,
 }
 
 ns.KindName = {

@@ -214,6 +214,12 @@ function ns.Replay:LineLook(mode, speed)
 		heat = 1
 	end
 	local thin = 1 - (0.4 * heat)
+	if mode == ns.Travel.GHOST then
+		if ns.Config:GhostRed() then
+			return 0.55, 0.16, 0.16, 0.9, 1
+		end
+		return 0.42, 0.42, 0.46, 0.85, 1
+	end
 	if mode == ns.Travel.FLIGHT then
 		return 0.62, 0.38, 1, 0.95, 0.7
 	end
@@ -389,8 +395,38 @@ local function FirstIndexAtOrAfter(times, origin, threshold)
 	return found
 end
 
+function ns.Replay:CrossesDeath(prevT, t, times, index)
+	index = index or 1
+	local count = times and #times or 0
+	while index <= count and times[index] < prevT do
+		index = index + 1
+	end
+	local death = times[index]
+	if death and death >= prevT and death < t then
+		return true, index
+	end
+	return false, index
+end
+
+function ns.Replay:DeathTimes(sessions)
+	local times = {}
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		for i = 1, #(track.ek or {}) do
+			if track.ek[i] == Kind.DEATH then
+				times[#times + 1] = session.s + (track.et[i] or 0)
+			end
+		end
+	end
+	table.sort(times)
+	return times
+end
+
 function ns.Replay:CollectPath(sessions, minDist)
 	local oldest, newest = self:TrailSpan()
+	local deathTimes = self:DeathTimes(sessions)
+	local deathIndex = 1
 	local xs, ys, brk, modes, speeds, times, maps = {}, {}, {}, {}, {}, {}, {}
 	local n = 0
 	local prevT
@@ -428,13 +464,17 @@ function ns.Replay:CollectPath(sessions, minDist)
 					end
 					local speed = (track.spd and track.spd[i]) or 100
 					local gap = prevT and (t - prevT) > ns.CONTINUE_SECONDS
+					local crosses = false
+					if prevT then
+						crosses, deathIndex = self:CrossesDeath(prevT, t, deathTimes, deathIndex)
+					end
 					if not px or gap then
 						open = false
 					else
 						local keep = not open
 						if open then
 							local dx, dy = px - lastX, py - lastY
-							keep = (dx * dx + dy * dy) >= minDistSq or mode ~= lastMode
+							keep = (dx * dx + dy * dy) >= minDistSq or mode ~= lastMode or crosses
 						end
 						if keep then
 							n = n + 1
@@ -444,7 +484,7 @@ function ns.Replay:CollectPath(sessions, minDist)
 							speeds[n] = speed
 							times[n] = t
 							maps[n] = track.m[i]
-							brk[n] = not open
+							brk[n] = (not open) or crosses
 							lastX, lastY, lastMode = px, py, mode
 							open = true
 						end
@@ -693,7 +733,6 @@ function ns.Replay:DrawMarkers(sessions)
 		self:HideSpareMarkers()
 		return
 	end
-	local width, height = canvas:GetWidth(), canvas:GetHeight()
 	local function draw(wantKill, cap)
 		local shown = 0
 		for s = #sessions, 1, -1 do
@@ -721,6 +760,11 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(0.86, 0.12, 0.10, 1)
 							size = elite and ELITE_PIP or KILL_PIP
+						elseif kind == Kind.DEATH then
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(0.72, 0.08, 0.08, 1)
+							size = 8
 						else
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -1812,7 +1856,9 @@ function ns.Replay:HoverPath()
 	if info and info.name then
 		GameTooltip:AddLine(info.name, 1, 1, 1)
 	end
-	if best.mode == ns.Travel.FLIGHT then
+	if best.mode == ns.Travel.GHOST then
+		GameTooltip:AddLine("Ghost", 0.7, 0.7, 0.74)
+	elseif best.mode == ns.Travel.FLIGHT then
 		GameTooltip:AddLine("Flight path", 0.72, 0.55, 1)
 	elseif best.mode == ns.Travel.MOUNT then
 		GameTooltip:AddLine(string.format("Mounted, %d%% speed", best.speed or 100), 0.95, 0.75, 0.3)

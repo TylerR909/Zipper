@@ -110,6 +110,9 @@ function ns.Config:Get()
 	if cfg.showMarkers == nil then
 		cfg.showMarkers = true
 	end
+	if cfg.ghostRed == nil then
+		cfg.ghostRed = false
+	end
 	if cfg.glanceTrail == nil then
 		cfg.glanceTrail = 30
 	end
@@ -226,6 +229,17 @@ function ns.Config:SetTrack(key, on)
 		return
 	end
 	cfg.track[key] = on and true or false
+end
+
+function ns.Config:GhostRed()
+	return self:Get().ghostRed and true or false
+end
+
+function ns.Config:SetGhostRed(on)
+	self:Get().ghostRed = on and true or false
+	if ns.Replay and ns.Replay.route then
+		ns.Replay:Redraw()
+	end
 end
 
 function ns.Config:SetShowMarkers(on)
@@ -420,8 +434,14 @@ function ns.Config:CreateFrame()
 	end)
 	boxes.showMarkers = markers
 
+	local ghostRed = AddCheck(panel, "ZipperConfigGhostRed", "Red ghost trail", 12, markerY - 28)
+	ghostRed:SetScript("OnClick", function(self)
+		ns.Config:SetGhostRed(self:GetChecked())
+	end)
+	boxes.ghostRed = ghostRed
+
 	local note = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	note:SetPoint("TOPLEFT", markers, "BOTTOMLEFT", 4, -8)
+	note:SetPoint("TOPLEFT", ghostRed, "BOTTOMLEFT", 4, -8)
 	note:SetWidth(420)
 	note:SetJustifyH("LEFT")
 	note:SetText("Unchecking a type stops new records of it. Saved history stays.")
@@ -507,6 +527,9 @@ function ns.Config:Refresh()
 	self.boxes.remind:SetChecked(cfg.remind)
 	self.boxes.path:SetChecked(self:Enabled("path"))
 	self.boxes.showMarkers:SetChecked(self:ShowMarkers())
+	if self.boxes.ghostRed then
+		self.boxes.ghostRed:SetChecked(self:GhostRed())
+	end
 	for i = 1, #TRACKS do
 		local key = TRACKS[i].key
 		self.boxes[key]:SetChecked(self:Enabled(key))
