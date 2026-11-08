@@ -8,6 +8,7 @@ ns.Replay = {
 }
 
 local Kind = ns.Kind
+local PIP = 6
 local LINE_CAP = 500
 local MARKER_CAP = 300
 local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.9
@@ -153,8 +154,21 @@ function ns.Replay:PathLayer()
 	if layer:GetFrameLevel() ~= level then
 		layer:SetFrameLevel(level)
 	end
+	layer:EnableMouse(false)
 	layer:Show()
 	return layer
+end
+
+function ns.Replay:ScreenScale()
+	local canvas = self:Canvas()
+	if not canvas then
+		return 1
+	end
+	local scale = canvas:GetScale() or 1
+	if scale < 0.05 then
+		scale = 0.05
+	end
+	return 1 / scale
 end
 
 function ns.Replay:AcquireLine()
@@ -275,6 +289,7 @@ function ns.Replay:AcquireMarker()
 		marker.texture:SetAllPoints()
 		marker.texture:SetTexture("Interface\\BUTTONS\\WHITE8X8")
 		marker:EnableMouse(true)
+		marker.zipperPin = true
 		marker:SetScript("OnEnter", function(pin)
 			if not pin.kind then
 				return
@@ -317,7 +332,7 @@ function ns.Replay:HideSpareMarkers()
 end
 
 function ns.Replay:CollectPath(sessions, minDist)
-	local xs, ys, brk, modes, speeds = {}, {}, {}, {}, {}
+	local xs, ys, brk, modes, speeds, times, maps = {}, {}, {}, {}, {}, {}, {}
 	local n = 0
 	local prevT
 	local lastX, lastY, lastMode
@@ -353,6 +368,8 @@ function ns.Replay:CollectPath(sessions, minDist)
 					ys[n] = py
 					modes[n] = mode
 					speeds[n] = speed
+					times[n] = t
+					maps[n] = track.m[i]
 					brk[n] = not open
 					lastX, lastY, lastMode = px, py, mode
 					open = true
@@ -361,30 +378,44 @@ function ns.Replay:CollectPath(sessions, minDist)
 			prevT = t
 		end
 	end
-	return xs, ys, brk, modes, speeds, n
+	return xs, ys, brk, modes, speeds, times, maps, n
 end
 
 function ns.Replay:DrawPath(sessions)
 	local minDist = 0.0015
-	local xs, ys, brk, modes, speeds, n
+	local xs, ys, brk, modes, speeds, times, maps, n
 	for _ = 1, 5 do
-		xs, ys, brk, modes, speeds, n = self:CollectPath(sessions, minDist)
+		xs, ys, brk, modes, speeds, times, maps, n = self:CollectPath(sessions, minDist)
 		if n <= LINE_CAP then
 			break
 		end
 		minDist = minDist * 2
 	end
 	self.lineUsed = 0
+	self.segmentCount = 0
 	local canvas = self:Canvas()
 	if not canvas or canvas:GetWidth() <= 0 or not self:PathLayer() then
 		self:HideSpareLines()
 		return
 	end
+	self.segments = self.segments or {}
 	for i = 2, n do
 		if not brk[i] then
 			local line = self:AcquireLine()
 			if line then
 				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i])
+				self.segmentCount = self.segmentCount + 1
+				local seg = self.segments[self.segmentCount]
+				if not seg then
+					seg = {}
+					self.segments[self.segmentCount] = seg
+				end
+				seg.x1, seg.y1 = xs[i - 1], ys[i - 1]
+				seg.x2, seg.y2 = xs[i], ys[i]
+				seg.t1, seg.t2 = times[i - 1], times[i]
+				seg.map = maps[i]
+				seg.mode = modes[i]
+				seg.speed = speeds[i]
 			end
 		end
 	end
@@ -411,13 +442,18 @@ function ns.Replay:DrawMarkers(sessions)
 			if shown >= MARKER_CAP then
 				break
 			end
+			local kind = track.ek[i]
+			if kind ~= Kind.ZONE then
 			local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 			if px then
 				shown = shown + 1
 				local marker = self:AcquireMarker()
-				local color = ns.KindColor[track.ek[i]] or { 1, 1, 1 }
-				marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
-				marker.kind = track.ek[i]
+				marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+				marker.texture:SetTexCoord(0, 1, 0, 1)
+				marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
+				marker:SetSize(PIP, PIP)
+				marker:SetScale(self:ScreenScale())
+				marker.kind = kind
 				marker.extra = track.ea[i]
 				marker.mapID = track.em[i]
 				marker.when = session.s + track.et[i]
@@ -425,6 +461,7 @@ function ns.Replay:DrawMarkers(sessions)
 				marker:SetPoint("CENTER", canvas, "TOPLEFT", px * width, -py * height)
 				marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + 30)
 				marker:Show()
+			end
 			end
 		end
 	end
@@ -444,17 +481,8 @@ function ns.Replay:PositionDot(x, y)
 	if self.dot:GetParent() ~= canvas then
 		self.dot:SetParent(canvas)
 	end
-	local scale = canvas:GetScale() or 1
-	if scale < 0.05 then
-		scale = 0.05
-	end
-	local size = 10 / scale
-	if size < 6 then
-		size = 6
-	elseif size > 28 then
-		size = 28
-	end
-	self.dot:SetSize(size, size)
+	self.dot:SetSize(8, 8)
+	self.dot:SetScale(self:ScreenScale())
 	self.dot:ClearAllPoints()
 	self.dot:SetPoint("CENTER", canvas, "TOPLEFT", x * width, -y * height)
 	self.dot:SetFrameLevel((canvas:GetFrameLevel() or 1) + 40)
@@ -570,9 +598,31 @@ function ns.Replay:UpdateRecap(sessions)
 	self.summaryText:SetText(string.format("%s\nAFK %s    Dungeons %s    Raids %s", recap, FormatClock(afk), FormatClock(dungeon), FormatClock(raid)))
 end
 
+function ns.Replay:ScopeCaption()
+	local count = #ns.DB:Sessions()
+	if self.mode == "all" then
+		if count <= 1 then
+			return "Every session on this character, added together. There is only one so far, so this matches the recording in progress."
+		end
+		return string.format("Every session on this character, added together. %d sessions.", count)
+	end
+	if self.mode == "one" then
+		return "Only the session you picked in the list."
+	end
+	local session = ns.DB:Current()
+	local elapsed = 0
+	if session then
+		elapsed = (session.seen or session.s) - session.s
+	end
+	return "The recording in progress, including reloads a few minutes apart. " .. FormatClock(elapsed) .. " so far."
+end
+
 function ns.Replay:UpdateReadout()
 	if not self.timeText then
 		return
+	end
+	if self.scopeText then
+		self.scopeText:SetText(self:ScopeCaption())
 	end
 	local sessions = self.sessions or {}
 	if not self.t0 or not self.t1 then
@@ -637,9 +687,93 @@ function ns.Replay:ReloadView()
 	self:UpdateReadout()
 end
 
+function ns.Replay:HidePathTip()
+	local layer = self.pathLayer
+	if layer and GameTooltip:IsOwned(layer) then
+		GameTooltip:Hide()
+	end
+end
+
+function ns.Replay:HoverPath()
+	local layer = self.pathLayer
+	local canvas = self:Canvas()
+	local count = self.segmentCount or 0
+	if not self.frame or not self.frame:IsShown() or not layer or not canvas or count == 0 then
+		return
+	end
+	local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
+	if owner and owner ~= layer and not owner.zipperPin then
+		return
+	end
+	local scale = canvas:GetEffectiveScale()
+	local left, right = canvas:GetLeft(), canvas:GetRight()
+	local top, bottom = canvas:GetTop(), canvas:GetBottom()
+	if not scale or scale <= 0 or not left or not right or not top or not bottom then
+		return
+	end
+	local width, height = right - left, top - bottom
+	if width <= 0 or height <= 0 then
+		return
+	end
+	local cx, cy = GetCursorPosition()
+	cx, cy = cx / scale, cy / scale
+	if cx < left or cx > right or cy > top or cy < bottom then
+		self:HidePathTip()
+		return
+	end
+	local px = (cx - left) / width
+	local py = (top - cy) / height
+	local best, bestDist, bestAlong
+	for i = 1, count do
+		local seg = self.segments[i]
+		local dx, dy = seg.x2 - seg.x1, seg.y2 - seg.y1
+		local len2 = (dx * dx) + (dy * dy)
+		local along = 0
+		local qx, qy
+		if len2 < 0.0000001 then
+			qx, qy = seg.x1, seg.y1
+		else
+			along = ((px - seg.x1) * dx + (py - seg.y1) * dy) / len2
+			if along < 0 then
+				along = 0
+			elseif along > 1 then
+				along = 1
+			end
+			qx = seg.x1 + (dx * along)
+			qy = seg.y1 + (dy * along)
+		end
+		local dist = math.sqrt((((px - qx) * width) ^ 2) + (((py - qy) * height) ^ 2))
+		if not bestDist or dist < bestDist then
+			best, bestDist, bestAlong = seg, dist, along
+		end
+	end
+	if not best or not best.t1 or bestDist > 16 then
+		self:HidePathTip()
+		return
+	end
+	local when = best.t1 + ((best.t2 - best.t1) * bestAlong)
+	GameTooltip:SetOwner(layer, "ANCHOR_CURSOR")
+	GameTooltip:ClearLines()
+	GameTooltip:AddLine(date("%b %d, %H:%M", when), 1, 0.86, 0.45)
+	local info = best.map and C_Map.GetMapInfo(best.map)
+	if info and info.name then
+		GameTooltip:AddLine(info.name, 1, 1, 1)
+	end
+	if best.mode == ns.Travel.FLIGHT then
+		GameTooltip:AddLine("Flight path", 0.72, 0.55, 1)
+	elseif best.mode == ns.Travel.MOUNT then
+		GameTooltip:AddLine(string.format("Mounted, %d%% speed", best.speed or 100), 0.95, 0.75, 0.3)
+	elseif (best.speed or 100) > 105 then
+		GameTooltip:AddLine(string.format("%d%% speed", best.speed), 0.6, 0.85, 1)
+	end
+	GameTooltip:Show()
+end
+
 function ns.Replay:ClearOverlay()
 	self.lineUsed = 0
 	self.markerUsed = 0
+	self.segmentCount = 0
+	self:HidePathTip()
 	if self.lines then
 		self:HideSpareLines()
 	end
@@ -867,6 +1001,32 @@ function ns.Replay:HookMap()
 			ns.Replay:Redraw()
 		end)
 	end
+	if WorldMapFrame.OnCanvasScaleChanged then
+		hooksecurefunc(WorldMapFrame, "OnCanvasScaleChanged", function()
+			ns.Replay:RescalePins()
+		end)
+	end
+	local scroll = WorldMapFrame.ScrollContainer
+	if scroll and not self.cursorWatch then
+		self.cursorWatch = true
+		scroll:HookScript("OnUpdate", function()
+			if ns.Replay.frame and ns.Replay.frame:IsShown() and WorldMapFrame:IsShown() then
+				ns.Replay:HoverPath()
+			end
+		end)
+	end
+end
+
+function ns.Replay:RescalePins()
+	local scale = self:ScreenScale()
+	if self.markers then
+		for i = 1, self.markerUsed or 0 do
+			self.markers[i]:SetScale(scale)
+		end
+	end
+	if self.dot then
+		self.dot:SetScale(scale)
+	end
 end
 
 function ns.Replay:CreateFrame()
@@ -875,7 +1035,7 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(336, 468)
+	frame:SetSize(336, 508)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
@@ -954,7 +1114,7 @@ function ns.Replay:CreateFrame()
 
 	local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	hint:SetPoint("TOPLEFT", 16, -28)
-	hint:SetText("Journey replay")
+	hint:SetText("Where you have been")
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", 2, 2)
@@ -965,20 +1125,27 @@ function ns.Replay:CreateFrame()
 		ns.Config:Toggle()
 	end)
 
-	local sessionButton = MakeButton(frame, "This session", 140)
-	sessionButton:SetPoint("TOPLEFT", 14, -58)
+	local sessionButton = MakeButton(frame, "This session", 148)
+	sessionButton:SetPoint("TOPLEFT", 14, -56)
 	sessionButton:SetScript("OnClick", function()
 		ns.Replay:SetMode("current")
 	end)
 
-	local journeyButton = MakeButton(frame, "Journey", 140)
+	local journeyButton = MakeButton(frame, "All sessions", 148)
 	journeyButton:SetPoint("LEFT", sessionButton, "RIGHT", 8, 0)
 	journeyButton:SetScript("OnClick", function()
 		ns.Replay:SetMode("all")
 	end)
 
+	local scope = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	scope:SetPoint("TOPLEFT", 16, -84)
+	scope:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	scope:SetJustifyH("LEFT")
+	scope:SetWordWrap(true)
+	scope:SetText("The recording in progress.")
+
 	local inset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	inset:SetPoint("TOPLEFT", 14, -90)
+	inset:SetPoint("TOPLEFT", 14, -118)
 	inset:SetPoint("RIGHT", frame, "RIGHT", -14, 0)
 	inset:SetHeight(168)
 	inset:SetBackdrop({
@@ -997,7 +1164,7 @@ function ns.Replay:CreateFrame()
 	scroll:SetScrollChild(content)
 
 	local play = MakeButton(frame, "Play", 72)
-	play:SetPoint("TOPLEFT", 14, -270)
+	play:SetPoint("TOPLEFT", 14, -298)
 	play:SetScript("OnClick", function()
 		ns.Replay:TogglePlay()
 	end)
@@ -1046,19 +1213,20 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local timeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	timeText:SetPoint("TOPLEFT", 16, -304)
+	timeText:SetPoint("TOPLEFT", 16, -332)
 	timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	timeText:SetJustifyH("LEFT")
 	timeText:SetTextColor(0.85, 0.82, 0.70)
 
 	local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	summary:SetPoint("TOPLEFT", 16, -326)
+	summary:SetPoint("TOPLEFT", 16, -354)
 	summary:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	summary:SetJustifyH("LEFT")
 	summary:SetJustifyV("TOP")
 	summary:SetTextColor(0.78, 0.76, 0.70)
 
 	self.frame = frame
+	self.scopeText = scope
 	self.titleText = title
 	self.closeButton = close
 	self.optionsButton = options

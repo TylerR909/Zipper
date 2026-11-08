@@ -167,11 +167,7 @@ function ns.GPS:ConsiderSample(minYards, force)
 		return false
 	end
 	local now = ns.DB:Now()
-	local mapChanged = self.lastMap ~= mapID
 	local stored = ns.DB:AddSample(mapID, x, y, now, self:TravelMode(), self:SpeedPercent())
-	if mapChanged and ns.DB:AddEvent(Kind.ZONE, mapID, x, y, now, mapID) then
-		stored = true
-	end
 	self.lastMap = mapID
 	self.lastNormX = x
 	self.lastNormY = y
