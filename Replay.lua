@@ -1192,6 +1192,7 @@ function ns.Replay:UpdateReadout()
 		self:UpdateRecap(sessions)
 		self.playButton:SetText("Play")
 		self:SyncTrailSlider()
+		self:SyncJumps()
 		return
 	end
 	local at = self.playhead or self.t0
@@ -1206,6 +1207,7 @@ function ns.Replay:UpdateReadout()
 	end
 	self:UpdateScrub()
 	self:SyncTrailSlider()
+	self:SyncJumps()
 end
 
 function ns.Replay:UpdateScrub()
@@ -1224,14 +1226,86 @@ function ns.Replay:UpdateScrub()
 	self.lockScrub = false
 end
 
-function ns.Replay:SeekFraction(fraction)
+function ns.Replay:JumpSteps()
+	local minutes = 0
+	if self.t0 and self.t1 and self.t1 > self.t0 then
+		minutes = (self.t1 - self.t0) / 60
+	end
+	if minutes >= 360 then
+		return 60, 15
+	elseif minutes >= 120 then
+		return 30, 10
+	elseif minutes >= 30 then
+		return 10, 5
+	end
+	return 5, 1
+end
+
+function ns.Replay:JumpLabel(minutes, negative)
+	local prefix = negative and "-" or "+"
+	if minutes >= 60 and minutes % 60 == 0 then
+		local hours = minutes / 60
+		if hours == 1 then
+			return prefix .. "1 hr"
+		end
+		return prefix .. hours .. " hr"
+	end
+	return prefix .. minutes .. " m"
+end
+
+function ns.Replay:SyncJumps()
+	local buttons = self.jumpButtons
+	if not buttons then
+		return
+	end
+	local big, small = self:JumpSteps()
+	if self.jumpBig == big and self.jumpSmall == small then
+		return
+	end
+	self.jumpBig, self.jumpSmall = big, small
+	local steps = { -big, -small, small, big }
+	for i = 1, 4 do
+		local minutes = steps[i]
+		buttons[i]:SetText(self:JumpLabel(math.abs(minutes), minutes < 0))
+		buttons[i].jumpSeconds = minutes * 60
+	end
+end
+
+function ns.Replay:Jump(seconds)
+	if not self.t0 or not self.t1 or self.t1 <= self.t0 then
+		return
+	end
+	self.playing = false
+	if self.playButton then
+		self.playButton:SetText("Play")
+	end
+	local at = (self.playhead or self.t0) + seconds
+	if at < self.t0 then
+		at = self.t0
+	elseif at > self.t1 then
+		at = self.t1
+	end
+	self:SeekFraction((at - self.t0) / (self.t1 - self.t0), true)
+end
+
+function ns.Replay:SeekFraction(fraction, immediate)
 	if not self.t0 or not self.t1 then
 		return
 	end
 	self.playhead = self.t0 + ((self.t1 - self.t0) * fraction)
 	self:UpdateDot()
 	self:UpdateReadout()
-	self.trailDirty = true
+	if immediate then
+		self.trailDirty = false
+		self.lastTrailRedraw = GetTime()
+		if self.route then
+			self:Redraw()
+		end
+	else
+		-- The next frame rebuilds the trail from this playhead, including a skip backward.
+		self.trailDirty = true
+		self.lastTrailRedraw = 0
+	end
 end
 
 function ns.Replay:ReloadView()
@@ -1641,7 +1715,7 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(336, 640)
+	frame:SetSize(336, 668)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
@@ -1793,51 +1867,20 @@ function ns.Replay:CreateFrame()
 		end
 	end)
 
-	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
-	scrub:SetPoint("LEFT", speed, "RIGHT", 16, 0)
-	scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
-	scrub:SetHeight(16)
-	scrub:SetMinMaxValues(0, 1)
-	scrub:SetValueStep(0.001)
-	scrub:SetValue(1)
-	scrub:SetObeyStepOnDrag(true)
-	for _, key in ipairs({ "Low", "High", "Text" }) do
-		local label = scrub[key] or _G[scrub:GetName() .. key]
-		if label then
-			label:Hide()
-		end
-	end
-	scrub:SetScript("OnValueChanged", function(_, value)
-		if ns.Replay.lockScrub then
-			return
-		end
-		ns.Replay.playing = false
-		if ns.Replay.playButton then
-			ns.Replay.playButton:SetText("Play")
-		end
-		ns.Replay:SeekFraction(value)
-	end)
-
-	local timeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	timeText:SetPoint("TOPLEFT", 16, -332)
-	timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
-	timeText:SetJustifyH("LEFT")
-	timeText:SetTextColor(0.85, 0.82, 0.70)
-
 	local trailLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	trailLabel:SetPoint("TOPLEFT", 16, -354)
+	trailLabel:SetPoint("TOPLEFT", 16, -328)
 	trailLabel:SetText("Trail")
 	trailLabel:SetTextColor(0.85, 0.82, 0.70)
 
 	local trailValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	trailValue:SetPoint("LEFT", trailLabel, "RIGHT", 8, 0)
+	trailValue:SetPoint("LEFT", trailLabel, "RIGHT", 6, 0)
 	trailValue:SetTextColor(1, 0.86, 0.45)
 	trailValue:SetText("Full")
 
 	local trail = CreateFrame("Slider", "ZipperReplayTrail", frame, "UISliderTemplate")
-	trail:SetPoint("TOPLEFT", 16, -376)
-	trail:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
-	trail:SetHeight(16)
+	trail:SetPoint("LEFT", trailValue, "RIGHT", 10, 0)
+	trail:SetPoint("TOP", trailLabel, "TOP", 0, -1)
+	trail:SetSize(150, 16)
 	trail:SetMinMaxValues(1, #ns.Replay.TRAIL_STOPS)
 	trail:SetValueStep(1)
 	trail:SetValue(#ns.Replay.TRAIL_STOPS)
@@ -1867,16 +1910,57 @@ function ns.Replay:CreateFrame()
 		ns.Replay:SetReplayTrail(stops[index])
 	end)
 
-	local trailLow = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	trailLow:SetPoint("TOPLEFT", trail, "BOTTOMLEFT", 0, -1)
-	trailLow:SetText("2 min")
+	local jumpButtons = {}
+	local jumpWidth, jumpGap = 72, 6
+	for i = 1, 4 do
+		local jump = MakeButton(frame, "+0", jumpWidth)
+		jump:SetPoint("TOPLEFT", 14 + ((i - 1) * (jumpWidth + jumpGap)), -354)
+		jump:SetScript("OnClick", function(button)
+			ns.Replay:Jump(button.jumpSeconds or 0)
+		end)
+		jump:SetScript("OnLeave", function(self)
+			local font = self:GetFontString()
+			if font then
+				font:SetTextColor(1, 1, 1)
+			end
+		end)
+		jumpButtons[i] = jump
+	end
 
-	local trailHigh = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	trailHigh:SetPoint("TOPRIGHT", trail, "BOTTOMRIGHT", 0, -1)
-	trailHigh:SetText("Full")
+	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
+	scrub:SetPoint("TOPLEFT", 16, -386)
+	scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	scrub:SetHeight(16)
+	scrub:SetMinMaxValues(0, 1)
+	-- A nine-hour session needs a much finer step than one tenth of a percent.
+	scrub:SetValueStep(0.00001)
+	scrub:SetValue(1)
+	scrub:SetObeyStepOnDrag(true)
+	for _, key in ipairs({ "Low", "High", "Text" }) do
+		local label = scrub[key] or _G[scrub:GetName() .. key]
+		if label then
+			label:Hide()
+		end
+	end
+	scrub:SetScript("OnValueChanged", function(_, value)
+		if ns.Replay.lockScrub then
+			return
+		end
+		ns.Replay.playing = false
+		if ns.Replay.playButton then
+			ns.Replay.playButton:SetText("Play")
+		end
+		ns.Replay:SeekFraction(value)
+	end)
+
+	local timeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	timeText:SetPoint("TOPLEFT", 16, -408)
+	timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	timeText:SetJustifyH("LEFT")
+	timeText:SetTextColor(0.85, 0.82, 0.70)
 
 	local statInset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	statInset:SetPoint("TOPLEFT", 14, -408)
+	statInset:SetPoint("TOPLEFT", 14, -432)
 	statInset:SetPoint("BOTTOMRIGHT", -14, 12)
 	statInset:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -1906,6 +1990,7 @@ function ns.Replay:CreateFrame()
 	self.playButton = play
 	self.speedButton = speed
 	self.scrub = scrub
+	self.jumpButtons = jumpButtons
 	self.timeText = timeText
 	self.trailLabel = trailLabel
 	self.trailValue = trailValue
@@ -2083,6 +2168,11 @@ function ns.Replay:ApplySkin()
 			paint(skin.CloseButton, self.closeButton)
 		end
 		local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.speedButton, self.optionsButton }
+		if self.jumpButtons then
+			for j = 1, #self.jumpButtons do
+				buttons[#buttons + 1] = self.jumpButtons[j]
+			end
+		end
 		for i = 1, #buttons do
 			local button = buttons[i]
 			if button then
