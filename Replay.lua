@@ -657,9 +657,18 @@ function ns.Replay:StyleModeButtons()
 		local font = button:GetFontString()
 		if font then
 			if active then
-				font:SetTextColor(1, 0.9, 0.4)
+				font:SetTextColor(1, 0.86, 0.45)
 			else
-				font:SetTextColor(1, 1, 1)
+				font:SetTextColor(0.78, 0.76, 0.70)
+			end
+		end
+		if button.SetBackdropBorderColor then
+			if active then
+				button:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
+				button:SetBackdropColor(0.20, 0.16, 0.08, 1)
+			else
+				button:SetBackdropBorderColor(0.38, 0.32, 0.16, 0.9)
+				button:SetBackdropColor(0.12, 0.11, 0.10, 1)
 			end
 		end
 	end
@@ -683,9 +692,13 @@ function ns.Replay:RefreshList()
 		local row = self.rows[i]
 		if not row then
 			row = CreateFrame("Button", nil, content)
-			row:SetHeight(18)
+			row:SetHeight(22)
+			row.bar = row:CreateTexture(nil, "BACKGROUND")
+			row.bar:SetAllPoints()
+			row.bar:SetColorTexture(0.85, 0.68, 0.28, 0.16)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetAllPoints()
+			row.label:SetPoint("LEFT", 8, 0)
+			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
 				ns.Replay:SetMode("one", button.sessionIndex)
@@ -695,23 +708,23 @@ function ns.Replay:RefreshList()
 		row.sessionIndex = index
 		local duration = (session.seen or session.s) - session.s
 		local selected = (self.mode == "one" and self.index == index) or (self.mode == "current" and session == ns.DB:Current())
-		local prefix = selected and "> " or "  "
 		local gained = ns.DB:LevelsGained(session)
-		row.label:SetText(string.format("%s%s   %s   +%.2f lv   %d kills", prefix, date("%m/%d %H:%M", session.s), FormatClock(duration), gained, session.kills or 0))
+		row.label:SetText(string.format("%s    %s    +%.2f lv    %d kills", date("%m/%d %H:%M", session.s), FormatClock(duration), gained, session.kills or 0))
+		row.bar:SetShown(selected)
 		if selected then
-			row.label:SetTextColor(1, 0.9, 0.4)
+			row.label:SetTextColor(1, 0.86, 0.45)
 		else
-			row.label:SetTextColor(0.85, 0.85, 0.85)
+			row.label:SetTextColor(0.82, 0.80, 0.74)
 		end
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 18))
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 22))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 		row:Show()
 	end
 	for i = #sessions + 1, #self.rows do
 		self.rows[i]:Hide()
 	end
-	content:SetHeight(math.max(18, #sessions * 18))
+	content:SetHeight(math.max(22, #sessions * 22))
 end
 
 function ns.Replay:TogglePlay()
@@ -801,20 +814,20 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(300, 448)
+	frame:SetSize(336, 468)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
 	frame:EnableMouse(true)
 	frame:RegisterForDrag("LeftButton")
 	frame:SetBackdrop({
-		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-		tile = true,
-		tileSize = 32,
-		edgeSize = 32,
-		insets = { left = 11, right = 12, top = 12, bottom = 11 },
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+		insets = { left = 1, right = 1, top = 1, bottom = 1 },
 	})
+	frame:SetBackdropColor(0.07, 0.07, 0.08, 0.97)
+	frame:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.95)
 	frame:SetScript("OnDragStart", frame.StartMoving)
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
@@ -837,74 +850,129 @@ function ns.Replay:CreateFrame()
 	end)
 	tinsert(UISpecialFrames, "ZipperReplayFrame")
 
+	local function MakeButton(parent, text, width)
+		local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
+		button:SetSize(width, 22)
+		button:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Buttons\\WHITE8X8",
+			edgeSize = 1,
+		})
+		button:SetBackdropColor(0.12, 0.11, 0.10, 1)
+		button:SetBackdropBorderColor(0.38, 0.32, 0.16, 0.9)
+		local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("CENTER")
+		label:SetText(text)
+		button:SetFontString(label)
+		button:SetScript("OnEnter", function(self)
+			if self:GetFontString() then
+				self:GetFontString():SetTextColor(1, 0.9, 0.6)
+			end
+		end)
+		button:SetScript("OnLeave", function()
+			ns.Replay:StyleModeButtons()
+		end)
+		return button
+	end
+
+	local header = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
+	header:SetColorTexture(0.11, 0.10, 0.09, 1)
+	header:SetPoint("TOPLEFT", 1, -1)
+	header:SetPoint("TOPRIGHT", -1, -1)
+	header:SetHeight(46)
+
+	local rule = frame:CreateTexture(nil, "BORDER")
+	rule:SetColorTexture(0.62, 0.50, 0.22, 0.85)
+	rule:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+	rule:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
+	rule:SetHeight(1)
+
 	local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 18, -16)
+	title:SetPoint("TOPLEFT", 16, -8)
 	title:SetText("Zipper")
 
-	local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	hint:SetPoint("TOPLEFT", 18, -36)
-	hint:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
-	hint:SetJustifyH("LEFT")
-	hint:SetText("Replay draws on the world map.")
+	local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	hint:SetPoint("TOPLEFT", 16, -28)
+	hint:SetText("Journey replay")
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-	close:SetPoint("TOPRIGHT", -4, -4)
+	close:SetPoint("TOPRIGHT", 2, 2)
 
-	local options = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	options:SetSize(70, 20)
-	options:SetPoint("RIGHT", close, "LEFT", 2, 0)
-	options:SetText("Options")
+	local options = MakeButton(frame, "Options", 64)
+	options:SetPoint("RIGHT", close, "LEFT", 4, -2)
 	options:SetScript("OnClick", function()
 		ns.Config:Toggle()
 	end)
 
-	local sessionButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	sessionButton:SetSize(120, 22)
-	sessionButton:SetPoint("TOPLEFT", 18, -58)
-	sessionButton:SetText("This session")
+	local sessionButton = MakeButton(frame, "This session", 140)
+	sessionButton:SetPoint("TOPLEFT", 14, -58)
 	sessionButton:SetScript("OnClick", function()
 		ns.Replay:SetMode("current")
 	end)
 
-	local journeyButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	journeyButton:SetSize(120, 22)
+	local journeyButton = MakeButton(frame, "Journey", 140)
 	journeyButton:SetPoint("LEFT", sessionButton, "RIGHT", 8, 0)
-	journeyButton:SetText("Journey")
 	journeyButton:SetScript("OnClick", function()
 		ns.Replay:SetMode("all")
 	end)
 
-	local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", 18, -88)
-	scroll:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", -32, -250)
+	local inset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+	inset:SetPoint("TOPLEFT", 14, -90)
+	inset:SetPoint("RIGHT", frame, "RIGHT", -14, 0)
+	inset:SetHeight(168)
+	inset:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	inset:SetBackdropColor(0, 0, 0, 0.35)
+	inset:SetBackdropBorderColor(0.35, 0.30, 0.16, 0.85)
+
+	local scroll = CreateFrame("ScrollFrame", nil, inset, "UIPanelScrollFrameTemplate")
+	scroll:SetPoint("TOPLEFT", 6, -4)
+	scroll:SetPoint("BOTTOMRIGHT", -24, 4)
 	local content = CreateFrame("Frame", nil, scroll)
-	content:SetSize(250, 18)
+	content:SetSize(260, 22)
 	scroll:SetScrollChild(content)
 
-	local play = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	play:SetSize(72, 22)
-	play:SetPoint("TOPLEFT", 18, -262)
-	play:SetText("Play")
+	local play = MakeButton(frame, "Play", 72)
+	play:SetPoint("TOPLEFT", 14, -270)
 	play:SetScript("OnClick", function()
 		ns.Replay:TogglePlay()
 	end)
+	play:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 1, 1)
+		end
+	end)
 
-	local speed = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	speed:SetSize(64, 22)
+	local speed = MakeButton(frame, self.speed .. "x", 56)
 	speed:SetPoint("LEFT", play, "RIGHT", 8, 0)
-	speed:SetText(self.speed .. "x")
 	speed:SetScript("OnClick", function()
 		ns.Replay:CycleSpeed()
 	end)
+	speed:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 1, 1)
+		end
+	end)
 
 	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
-	scrub:SetPoint("TOPLEFT", 24, -300)
-	scrub:SetPoint("RIGHT", frame, "RIGHT", -24, 0)
+	scrub:SetPoint("LEFT", speed, "RIGHT", 16, 0)
+	scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	scrub:SetHeight(16)
 	scrub:SetMinMaxValues(0, 1)
 	scrub:SetValueStep(0.001)
 	scrub:SetValue(1)
 	scrub:SetObeyStepOnDrag(true)
+	for _, key in ipairs({ "Low", "High", "Text" }) do
+		local label = scrub[key] or _G[scrub:GetName() .. key]
+		if label then
+			label:Hide()
+		end
+	end
 	scrub:SetScript("OnValueChanged", function(_, value)
 		if ns.Replay.lockScrub then
 			return
@@ -917,17 +985,22 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local timeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	timeText:SetPoint("TOPLEFT", 18, -324)
+	timeText:SetPoint("TOPLEFT", 16, -304)
 	timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	timeText:SetJustifyH("LEFT")
+	timeText:SetTextColor(0.85, 0.82, 0.70)
 
 	local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	summary:SetPoint("TOPLEFT", 18, -344)
+	summary:SetPoint("TOPLEFT", 16, -326)
 	summary:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	summary:SetJustifyH("LEFT")
 	summary:SetJustifyV("TOP")
+	summary:SetTextColor(0.78, 0.76, 0.70)
 
 	self.frame = frame
+	self.titleText = title
+	self.closeButton = close
+	self.optionsButton = options
 	self.sessionButton = sessionButton
 	self.journeyButton = journeyButton
 	self.listContent = content
@@ -949,6 +1022,7 @@ function ns.Replay:CreateFrame()
 	else
 		frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 40)
 	end
+	self:ApplySkin()
 end
 
 function ns.Replay:EnsureDot()
@@ -998,17 +1072,18 @@ end
 function ns.Replay:StyleMapButton(button)
 	button:SetSize(32, 32)
 	self:RaiseMapButton(button)
+	local background = button:CreateTexture(nil, "BACKGROUND")
+	background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+	background:SetSize(25, 25)
+	background:SetPoint("TOPLEFT", 2, -4)
 	button.icon = button:CreateTexture(nil, "ARTWORK")
-	button.icon:SetTexture("Interface\\BUTTONS\\WHITE8X8")
-	button.icon:SetVertexColor(0.25, 0.85, 1, 1)
-	button.icon:SetSize(18, 3)
-	button.icon:SetPoint("CENTER", -1, -1)
-	button.icon:SetRotation(0.55)
-	button.dot = button:CreateTexture(nil, "OVERLAY")
-	button.dot:SetTexture("Interface\\BUTTONS\\WHITE8X8")
-	button.dot:SetVertexColor(1, 0.82, 0.2, 1)
-	button.dot:SetSize(7, 7)
-	button.dot:SetPoint("CENTER", 6, 4)
+	button.icon:SetTexture("Interface\\AddOns\\Zipper\\Media\\MapButton")
+	button.icon:SetSize(18, 18)
+	button.icon:SetPoint("CENTER", 0, 1)
+	local border = button:CreateTexture(nil, "OVERLAY")
+	border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+	border:SetSize(54, 54)
+	border:SetPoint("TOPLEFT")
 	button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
 	button:SetScript("OnClick", function()
 		ns.Replay:Toggle()
@@ -1048,10 +1123,56 @@ function ns.Replay:CreateMapButton()
 	self.mapButton = button
 end
 
+function ns.Replay:ApplySkin()
+	local skin = self.skin
+	local frame = self.frame
+	if not skin or not frame then
+		return
+	end
+	skin.Shell(frame)
+	if self.closeButton then
+		skin.CloseButton(self.closeButton)
+	end
+	local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.speedButton, self.optionsButton }
+	for i = 1, #buttons do
+		local button = buttons[i]
+		if button then
+			skin.Button(button)
+			skin.WhiteButtonLabel(button)
+		end
+	end
+	skin.ScrollBarsIn(frame)
+	if self.titleText then
+		skin.Font(self.titleText)
+	end
+	if self.timeText then
+		skin.Font(self.timeText)
+	end
+	if self.summaryText then
+		skin.Font(self.summaryText)
+	end
+end
+
+function ns.Replay:RegisterSkin()
+	if self.skinRegistered then
+		return
+	end
+	local eui = _G.EllesmereUI
+	if not eui or not eui.RegisterSkin then
+		return
+	end
+	self.skinRegistered = true
+	eui.RegisterSkin("Zipper", function(S)
+		ns.Replay.skin = S
+		ns.Replay:ApplySkin()
+	end)
+end
+
 function ns.Replay:Init()
 	ns.OnDataChanged = function()
 		ns.Replay:OnDataChanged()
 	end
+	self:RegisterSkin()
 	local waiter = CreateFrame("Frame")
 	waiter:RegisterEvent("PLAYER_LOGIN")
 	waiter:RegisterEvent("ADDON_LOADED")
