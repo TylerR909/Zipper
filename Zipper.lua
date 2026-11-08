@@ -11,6 +11,9 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		ZipperDB = ZipperDB or {}
 		ns.DB:Init()
 		ns.Replay:Init()
+		-- Before PLAYER_ENTERING_WORLD. That event can arrive already in combat,
+		-- and RegisterEvent is protected then.
+		ns.GPS:EnsureEvents()
 	elseif event == "PLAYER_ENTERING_WORLD" and not ns.started then
 		-- Once per UI load. Zoning also fires this event; the open session stays open.
 		-- A reload within a few minutes of the last logout stamp continues that session.

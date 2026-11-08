@@ -394,13 +394,24 @@ function ns.GPS:OnKill()
 	ns.DB:AddKill()
 end
 
+function ns.GPS:CombatLocked()
+	if not InCombatLockdown then
+		return false
+	end
+	local locked = InCombatLockdown()
+	-- In combat this boolean can be secret. A tainted `if locked` then falls
+	-- through, and the following RegisterEvent calls are forbidden.
+	if issecretvalue and issecretvalue(locked) then
+		return true
+	end
+	return locked and true or false
+end
+
 function ns.GPS:EnsureEvents()
 	if self.eventsReady then
 		return true
 	end
-	-- RegisterEvent is protected during combat lockdown. Logging back into a
-	-- fight makes the first PLAYER_ENTERING_WORLD hit that case.
-	if InCombatLockdown and InCombatLockdown() then
+	if self:CombatLocked() then
 		return false
 	end
 	if not self.frame then
@@ -529,8 +540,6 @@ function ns.GPS:Start(continued)
 	if self.continued then
 		self:RememberWorld()
 	end
-
-	self:EnsureEvents()
 
 	self:SyncMount()
 	self:SyncAFK()
