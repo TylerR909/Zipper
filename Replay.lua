@@ -1232,6 +1232,7 @@ function ns.Replay:CreateFrame()
 	self.optionsButton = options
 	self.sessionButton = sessionButton
 	self.journeyButton = journeyButton
+	self.scroll = scroll
 	self.listContent = content
 	self.rows = {}
 	self.playButton = play
@@ -1358,27 +1359,35 @@ function ns.Replay:ApplySkin()
 	if not skin or not frame then
 		return
 	end
-	skin.Shell(frame)
+	local function paint(fn, ...)
+		if type(fn) == "function" then
+			fn(...)
+		end
+	end
+	paint(skin.Shell, frame)
 	if self.closeButton then
-		skin.CloseButton(self.closeButton)
+		paint(skin.CloseButton, self.closeButton)
 	end
 	local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.speedButton, self.optionsButton }
 	for i = 1, #buttons do
 		local button = buttons[i]
 		if button then
-			skin.Button(button)
-			skin.WhiteButtonLabel(button)
+			paint(skin.Button, button)
+			paint(skin.WhiteButtonLabel, button)
 		end
 	end
-	skin.ScrollBarsIn(frame)
+	local bar = self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar)
+	if bar then
+		paint(skin.ScrollBar, bar)
+	end
 	if self.titleText then
-		skin.Font(self.titleText)
+		paint(skin.Font, self.titleText)
 	end
 	if self.timeText then
-		skin.Font(self.timeText)
+		paint(skin.Font, self.timeText)
 	end
 	if self.summaryText then
-		skin.Font(self.summaryText)
+		paint(skin.Font, self.summaryText)
 	end
 end
 
