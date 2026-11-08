@@ -15,6 +15,8 @@ local PIP = 6
 local PARK_SECONDS = 20
 local PARK_DIST = 0.0035
 local TRAVEL_GAP = 20
+local STAY_SECONDS = 240
+local CHAPTER_MERGE = 90
 local LINE_CAP = 500
 local MARKER_CAP = 300
 local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.9
@@ -1193,6 +1195,7 @@ function ns.Replay:UpdateReadout()
 		self.playButton:SetText("Play")
 		self:SyncTrailSlider()
 		self:SyncJumps()
+		self:SyncChapters()
 		return
 	end
 	local at = self.playhead or self.t0
@@ -1208,6 +1211,7 @@ function ns.Replay:UpdateReadout()
 	self:UpdateScrub()
 	self:SyncTrailSlider()
 	self:SyncJumps()
+	self:SyncChapters()
 end
 
 function ns.Replay:UpdateScrub()
@@ -1269,6 +1273,316 @@ function ns.Replay:SyncJumps()
 		buttons[i]:SetText(self:JumpLabel(math.abs(minutes), minutes < 0))
 		buttons[i].jumpSeconds = minutes * 60
 	end
+end
+
+function ns.Replay:MapTitle(mapID)
+	if not mapID or mapID == 0 then
+		return "Zone"
+	end
+	if C_Map and C_Map.GetMapInfo then
+		local info = C_Map.GetMapInfo(mapID)
+		if info and type(info.name) == "string" and info.name ~= "" then
+			return info.name
+		end
+	end
+	return "Zone"
+end
+
+function ns.Replay:ChapterName(kind, mapID)
+	local zone = self:MapTitle(mapID)
+	if kind == "hearth" then
+		return "Hearth · " .. zone
+	elseif kind == "land" then
+		return "Landed · " .. zone
+	end
+	return zone
+end
+
+function ns.Replay:CollectChapters(sessions)
+	local visits = {}
+	local open
+	local function closeVisit()
+		if not open then
+			return
+		end
+		visits[#visits + 1] = open
+		open = nil
+	end
+	local workKind = {
+		[Kind.QUEST_ACCEPT] = true,
+		[Kind.QUEST_TURNIN] = true,
+		[Kind.DEATH] = true,
+		[Kind.INSTANCE_ENTER] = true,
+	}
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		local modes = track.mode
+		if not modes or #modes < #track.t then
+			modes = self:InferModes(track)
+		end
+		for i = 1, #track.t do
+			local mapID = track.m[i]
+			local mode = modes[i] or ns.Travel.FOOT
+			local t = session.s + (track.t[i] or 0)
+			if not mapID or mode == ns.Travel.FLIGHT then
+				closeVisit()
+			elseif open and open.map == mapID then
+				open.last = t
+			else
+				closeVisit()
+				open = { map = mapID, first = t, last = t, work = false }
+			end
+		end
+		for i = 1, #(track.ek or {}) do
+			if workKind[track.ek[i]] then
+				local t = session.s + (track.et[i] or 0)
+				local mapID = track.em[i]
+				for v = 1, #visits do
+					local visit = visits[v]
+					if t >= visit.first - 30 and t <= visit.last + 30 and (not mapID or mapID == 0 or mapID == visit.map) then
+						visit.work = true
+					end
+				end
+				if open and t >= open.first - 30 and t <= open.last + 30 and (not mapID or mapID == 0 or mapID == open.map) then
+					open.work = true
+				end
+			end
+		end
+	end
+	closeVisit()
+
+	local chapters = {}
+	for i = 1, #visits do
+		local visit = visits[i]
+		if visit.work or (visit.last - visit.first) >= STAY_SECONDS then
+			chapters[#chapters + 1] = { t = visit.first, map = visit.map, kind = "zone" }
+		end
+	end
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		for i = 1, #(track.ek or {}) do
+			local kind = track.ek[i]
+			local chapterKind
+			if kind == Kind.FLIGHT_END then
+				chapterKind = "land"
+			elseif kind == Kind.HEARTH then
+				chapterKind = "hearth"
+			end
+			if chapterKind then
+				chapters[#chapters + 1] = {
+					t = session.s + (track.et[i] or 0),
+					map = track.em[i],
+					kind = chapterKind,
+				}
+			end
+		end
+	end
+	table.sort(chapters, function(a, b)
+		if a.t == b.t then
+			return a.kind < b.kind
+		end
+		return a.t < b.t
+	end)
+
+	local merged = {}
+	for i = 1, #chapters do
+		local chapter = chapters[i]
+		local previous = merged[#merged]
+		if previous and (chapter.t - previous.t) <= CHAPTER_MERGE then
+			if chapter.t < previous.t then
+				previous.t = chapter.t
+			end
+			if chapter.kind == "hearth" or previous.kind == "hearth" then
+				previous.kind = "hearth"
+			elseif chapter.kind == "zone" or previous.kind == "zone" then
+				previous.kind = "zone"
+			end
+			if chapter.map and chapter.map ~= 0 and (previous.kind ~= "hearth" or not previous.map) then
+				previous.map = chapter.map
+			end
+			if chapter.kind == "zone" and chapter.map then
+				previous.map = chapter.map
+			end
+		else
+			merged[#merged + 1] = { t = chapter.t, map = chapter.map, kind = chapter.kind }
+		end
+	end
+	for i = 1, #merged do
+		local chapter = merged[i]
+		chapter.name = self:ChapterName(chapter.kind, chapter.map)
+	end
+	return merged
+end
+
+function ns.Replay:SeekToTime(when)
+	if not self.t0 or not self.t1 or self.t1 <= self.t0 or not when then
+		return
+	end
+	self.playing = false
+	if self.playButton then
+		self.playButton:SetText("Play")
+	end
+	local fraction = (when - self.t0) / (self.t1 - self.t0)
+	if fraction < 0 then
+		fraction = 0
+	elseif fraction > 1 then
+		fraction = 1
+	end
+	self:SeekFraction(fraction, true)
+end
+
+function ns.Replay:SkipChapter(step)
+	local chapters = self.chapters
+	if not chapters or #chapters == 0 or not self.t0 then
+		return
+	end
+	local at = self.playhead or self.t0
+	local index
+	if step > 0 then
+		for i = 1, #chapters do
+			if chapters[i].t > at + 1 then
+				index = i
+				break
+			end
+		end
+	else
+		for i = #chapters, 1, -1 do
+			if chapters[i].t < at - 1 then
+				index = i
+				break
+			end
+		end
+	end
+	if index then
+		self:SeekToTime(chapters[index].t)
+	end
+end
+
+function ns.Replay:AcquirePip(index)
+	self.pips = self.pips or {}
+	local pip = self.pips[index]
+	if pip then
+		return pip
+	end
+	pip = CreateFrame("Button", nil, self.frame)
+	pip:SetSize(12, 12)
+	pip.mark = pip:CreateTexture(nil, "OVERLAY")
+	pip.mark:SetTexture("Interface\\Buttons\\WHITE8X8")
+	pip.mark:SetSize(3, 8)
+	pip.mark:SetPoint("CENTER")
+	pip:SetScript("OnClick", function(self)
+		ns.Replay:SeekToTime(self.when)
+	end)
+	pip:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine(self.title or "Stop", 1, 0.86, 0.45)
+		if self.when then
+			GameTooltip:AddLine(date("%b %d, %H:%M", self.when), 1, 1, 1)
+		end
+		GameTooltip:Show()
+	end)
+	pip:SetScript("OnLeave", function(self)
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+	self.pips[index] = pip
+	return pip
+end
+
+function ns.Replay:LayoutPips()
+	local scrub = self.scrub
+	local chapters = self.chapters or {}
+	if not scrub then
+		return
+	end
+	local width = scrub:GetWidth() or 0
+	local span = (self.t1 or 0) - (self.t0 or 0)
+	local shown = 0
+	if width > 20 and span > 0 then
+		local level = (scrub:GetFrameLevel() or 1) + 6
+		for i = 1, #chapters do
+			local chapter = chapters[i]
+			local fraction = (chapter.t - self.t0) / span
+			if fraction < 0 then
+				fraction = 0
+			elseif fraction > 1 then
+				fraction = 1
+			end
+			local pip = self:AcquirePip(i)
+			pip.when = chapter.t
+			pip.title = chapter.name
+			pip:SetParent(self.frame)
+			pip:SetFrameLevel(level)
+			pip:ClearAllPoints()
+			pip:SetPoint("BOTTOM", scrub, "TOPLEFT", fraction * width, 1)
+			pip:Show()
+			shown = i
+		end
+	end
+	if self.pips then
+		for i = shown + 1, #self.pips do
+			self.pips[i]:Hide()
+		end
+	end
+end
+
+function ns.Replay:PaintChapter()
+	local chapters = self.chapters or {}
+	local at = self.playhead or self.t0 or 0
+	local current = 0
+	for i = 1, #chapters do
+		if chapters[i].t <= at + 1 then
+			current = i
+		else
+			break
+		end
+	end
+	if self.chapterText then
+		if #chapters == 0 then
+			self.chapterText:SetText("No stops yet")
+		else
+			local shown = current > 0 and current or 1
+			local prefix = current > 0 and "" or "Next  "
+			self.chapterText:SetText(string.format("%s%d/%d  %s", prefix, shown, #chapters, chapters[shown].name))
+		end
+	end
+	if not self.pips then
+		return
+	end
+	for i = 1, #chapters do
+		local pip = self.pips[i]
+		if pip and pip.mark and pip:IsShown() then
+			if i == current then
+				pip.mark:SetVertexColor(1, 0.86, 0.35, 1)
+				pip.mark:SetSize(4, 10)
+			else
+				pip.mark:SetVertexColor(0.72, 0.58, 0.22, 0.95)
+				pip.mark:SetSize(3, 8)
+			end
+		end
+	end
+end
+
+function ns.Replay:SyncChapters()
+	if not self.chapterPrev then
+		return
+	end
+	local sessions = self.sessions or {}
+	local key = self:StatsKey(sessions)
+	local width = self.scrub and self.scrub:GetWidth() or 0
+	if key ~= self.chapterKey then
+		self.chapterKey = key
+		self.chapters = self:CollectChapters(sessions)
+		self.pipWidth = nil
+	end
+	if width ~= self.pipWidth then
+		self.pipWidth = width
+		self:LayoutPips()
+	end
+	self:PaintChapter()
 end
 
 function ns.Replay:Jump(seconds)
@@ -1715,7 +2029,7 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(336, 668)
+	frame:SetSize(336, 708)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
@@ -1927,8 +2241,64 @@ function ns.Replay:CreateFrame()
 		jumpButtons[i] = jump
 	end
 
+	local chapterPrev = MakeButton(frame, "<", 36)
+	chapterPrev:SetPoint("TOPLEFT", 14, -382)
+	chapterPrev:SetScript("OnClick", function()
+		ns.Replay:SkipChapter(-1)
+	end)
+	chapterPrev:SetScript("OnEnter", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 0.9, 0.6)
+		end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Previous stop")
+		GameTooltip:Show()
+	end)
+	chapterPrev:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 1, 1)
+		end
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+
+	local chapterNext = MakeButton(frame, ">", 36)
+	chapterNext:SetPoint("TOPRIGHT", -14, -382)
+	chapterNext:SetScript("OnClick", function()
+		ns.Replay:SkipChapter(1)
+	end)
+	chapterNext:SetScript("OnEnter", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 0.9, 0.6)
+		end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Next stop")
+		GameTooltip:Show()
+	end)
+	chapterNext:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 1, 1)
+		end
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+
+	local chapterText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	chapterText:SetPoint("LEFT", chapterPrev, "RIGHT", 6, 0)
+	chapterText:SetPoint("RIGHT", chapterNext, "LEFT", -6, 0)
+	chapterText:SetJustifyH("CENTER")
+	chapterText:SetWordWrap(false)
+	chapterText:SetTextColor(0.93, 0.90, 0.78)
+	chapterText:SetText("No stops yet")
+
 	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
-	scrub:SetPoint("TOPLEFT", 16, -386)
+	scrub:SetPoint("TOPLEFT", 16, -424)
 	scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	scrub:SetHeight(16)
 	scrub:SetMinMaxValues(0, 1)
@@ -1954,13 +2324,13 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local timeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	timeText:SetPoint("TOPLEFT", 16, -408)
+	timeText:SetPoint("TOPLEFT", 16, -448)
 	timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	timeText:SetJustifyH("LEFT")
 	timeText:SetTextColor(0.85, 0.82, 0.70)
 
 	local statInset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	statInset:SetPoint("TOPLEFT", 14, -432)
+	statInset:SetPoint("TOPLEFT", 14, -472)
 	statInset:SetPoint("BOTTOMRIGHT", -14, 12)
 	statInset:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -1991,6 +2361,9 @@ function ns.Replay:CreateFrame()
 	self.speedButton = speed
 	self.scrub = scrub
 	self.jumpButtons = jumpButtons
+	self.chapterPrev = chapterPrev
+	self.chapterNext = chapterNext
+	self.chapterText = chapterText
 	self.timeText = timeText
 	self.trailLabel = trailLabel
 	self.trailValue = trailValue
@@ -2173,6 +2546,8 @@ function ns.Replay:ApplySkin()
 				buttons[#buttons + 1] = self.jumpButtons[j]
 			end
 		end
+		buttons[#buttons + 1] = self.chapterPrev
+		buttons[#buttons + 1] = self.chapterNext
 		for i = 1, #buttons do
 			local button = buttons[i]
 			if button then
