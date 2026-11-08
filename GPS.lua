@@ -60,6 +60,18 @@ local function IsHearthSpell(spellID)
 	return type(name) == "string" and string.find(name, "Hearth", 1, true) ~= nil
 end
 
+local function IsPlainNumber(value)
+	if type(value) ~= "number" then
+		return false
+	end
+	-- Combat can hand back a secret number. type() still says "number", and any
+	-- compare or arithmetic on it errors while this addon is tainted.
+	if issecretvalue and issecretvalue(value) then
+		return false
+	end
+	return true
+end
+
 function ns.GPS:ReadPosition()
 	local mapID = C_Map.GetBestMapForUnit("player")
 	if not mapID then
@@ -72,7 +84,7 @@ function ns.GPS:ReadPosition()
 	elseif first then
 		x, y = first.x, first.y
 	end
-	if type(x) ~= "number" or type(y) ~= "number" then
+	if not IsPlainNumber(x) or not IsPlainNumber(y) then
 		return nil
 	end
 	if x <= 0 and y <= 0 then
@@ -86,7 +98,7 @@ function ns.GPS:FarEnough(mapID, x, y, minYards)
 		return true
 	end
 	local px, py, _, instance = UnitPosition("player")
-	if type(px) == "number" and type(py) == "number" and type(self.lastWorldX) == "number" and instance == self.lastInstance then
+	if IsPlainNumber(px) and IsPlainNumber(py) and IsPlainNumber(self.lastWorldX) and not (issecretvalue and issecretvalue(instance)) and instance == self.lastInstance then
 		local dx = px - self.lastWorldX
 		local dy = py - self.lastWorldY
 		return (dx * dx + dy * dy) >= (minYards * minYards)
@@ -117,14 +129,14 @@ end
 
 function ns.GPS:RememberWorld()
 	local px, py, _, instance = UnitPosition("player")
-	if type(px) == "number" and type(py) == "number" then
+	if IsPlainNumber(px) and IsPlainNumber(py) and not (issecretvalue and issecretvalue(instance)) then
 		self.lastWorldX = px
 		self.lastWorldY = py
 		self.lastInstance = instance
 	end
 	if GetPlayerFacing then
 		local facing = GetPlayerFacing()
-		if type(facing) == "number" then
+		if IsPlainNumber(facing) then
 			self.lastFacing = facing
 		end
 	end
@@ -142,19 +154,19 @@ end
 
 function ns.GPS:SpeedPercent()
 	if not GetUnitSpeed then
-		return 100
+		return self.lastSpeed or 100
 	end
 	local current, run = GetUnitSpeed("player")
-	if type(current) ~= "number" or type(run) ~= "number" or run <= 0 then
-		return 100
+	if not IsPlainNumber(current) or not IsPlainNumber(run) or run <= 0 then
+		return self.lastSpeed or 100
 	end
 	local pct = math.floor((current / run) * 100 + 0.5)
 	if pct < 0 then
-		return 0
+		pct = 0
+	elseif pct > 1000 then
+		pct = 1000
 	end
-	if pct > 1000 then
-		return 1000
-	end
+	self.lastSpeed = pct
 	return pct
 end
 
@@ -297,7 +309,7 @@ function ns.GPS:OnStopTurning()
 	end
 	if GetPlayerFacing and self.lastFacing then
 		local facing = GetPlayerFacing()
-		if type(facing) == "number" then
+		if IsPlainNumber(facing) and IsPlainNumber(self.lastFacing) then
 			local delta = math.abs(facing - self.lastFacing)
 			if delta > math.pi then
 				delta = (math.pi * 2) - delta
@@ -324,7 +336,7 @@ end
 function ns.GPS:OnConfirmSummon()
 	self.summonUntil = ns.DB:Now() + 120
 	local px, py, _, instance = UnitPosition("player")
-	if type(px) == "number" then
+	if IsPlainNumber(px) and IsPlainNumber(py) and not (issecretvalue and issecretvalue(instance)) then
 		self.summonX, self.summonY, self.summonInstance = px, py, instance
 	else
 		self.summonX = nil
@@ -353,7 +365,7 @@ function ns.GPS:CheckSummon()
 
 	local jumped = false
 	local px, py, _, instance = UnitPosition("player")
-	if type(px) == "number" and type(self.summonX) == "number" and instance == self.summonInstance then
+	if IsPlainNumber(px) and IsPlainNumber(py) and IsPlainNumber(self.summonX) and IsPlainNumber(self.summonY) and not (issecretvalue and issecretvalue(instance)) and instance == self.summonInstance then
 		local dx = px - self.summonX
 		local dy = py - self.summonY
 		jumped = (dx * dx + dy * dy) >= (80 * 80)
