@@ -2011,10 +2011,11 @@ function ns.Replay:StyleMapButton(button)
 	border:SetSize(54, 54)
 	border:SetPoint("TOPLEFT")
 	button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
-	button:RegisterForClicks("LeftButtonUp", "RightButtonUp", "Shift-RightButtonUp")
+	-- This client rejects modifier click names such as Shift-RightButtonUp.
+	button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	button:SetScript("OnClick", function(_, mouseButton)
-		local shift = mouseButton == "Shift-RightButton"
-		if not shift and mouseButton == "RightButton" and IsShiftKeyDown then
+		local shift = false
+		if mouseButton == "RightButton" and IsShiftKeyDown then
 			shift = IsShiftKeyDown()
 			if issecretvalue and issecretvalue(shift) then
 				shift = false
