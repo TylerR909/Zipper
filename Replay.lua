@@ -3243,6 +3243,7 @@ function ns.Replay:CreateFrame()
 	self.trailLabel = trailLabel
 	self.trailValue = trailValue
 	self.trailSlider = trail
+	self.statInset = statInset
 	self.statScroll = statScroll
 	self.statContent = statContent
 	self.statRows = {}
