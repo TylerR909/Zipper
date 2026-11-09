@@ -1901,6 +1901,111 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 	return list
 end
 
+function ns.DB:CompanyCacheKey(journey)
+	local with = journey and journey.with
+	local spans, open = 0, 0
+	if type(with) == "table" then
+		for _, list in pairs(with) do
+			if type(list) == "table" then
+				spans = spans + #list
+				if #list % 2 == 1 then
+					open = open + 1
+				end
+			end
+		end
+	end
+	local sessions = journey and journey.sessions or {}
+	local last = sessions[#sessions]
+	local seen = last and (last.seen or last.s) or 0
+	local kills, quests = 0, 0
+	for i = 1, #sessions do
+		local session = sessions[i]
+		kills = kills + (session.kills or 0)
+		quests = quests + (session.quests or 0)
+	end
+	local bucket = 0
+	if open > 0 and journey == self.record then
+		bucket = math.floor(self:Now() / 30)
+	end
+	return spans .. ":" .. #sessions .. ":" .. seen .. ":" .. kills .. ":" .. quests .. ":" .. bucket
+end
+
+function ns.DB:CompanySpanIndex(journey)
+	if type(journey) ~= "table" then
+		return {}
+	end
+	local key = self:CompanyCacheKey(journey)
+	if self.companySpanJourney == journey and self.companySpanKey == key and self.companySpans then
+		return self.companySpans
+	end
+	local with = journey.with
+	local people = ZipperDB and ZipperDB.people or {}
+	local liveEnd = CompanyLiveEnd(self, journey)
+	local index = {}
+	if type(with) == "table" then
+		for guid, spans in pairs(with) do
+			local kept = KeptSpans(self, journey, guid, spans, liveEnd)
+			if type(guid) == "string" and #kept > 0 then
+				local person = people[guid]
+				local name = type(person) == "table" and person.n or nil
+				if type(name) ~= "string" or name == "" then
+					name = L["Someone"]
+				end
+				index[#index + 1] = {
+					guid = guid,
+					name = name,
+					classFile = type(person) == "table" and person.c or nil,
+					spans = kept,
+					liveEnd = liveEnd,
+				}
+			end
+		end
+		table.sort(index, function(a, b)
+			return a.name < b.name
+		end)
+	end
+	self.companySpanJourney = journey
+	self.companySpanKey = key
+	self.companySpans = index
+	return index
+end
+
+function ns.DB:CompanyAt(journey, when)
+	local found = {}
+	if type(when) ~= "number" then
+		return found
+	end
+	local index = self:CompanySpanIndex(journey)
+	for i = 1, #index do
+		local row = index[i]
+		if self:CoveringStart(row.spans, when, row.liveEnd) then
+			found[#found + 1] = row
+		end
+	end
+	return found
+end
+
+function ns.DB:CompanyByGuid(journey, guid)
+	if type(journey) ~= "table" or type(guid) ~= "string" then
+		return nil
+	end
+	local key = self:CompanyCacheKey(journey)
+	if self.companyReportJourney ~= journey or self.companyReportKey ~= key or not self.companyByGuid then
+		local list = self:CompanyReport(journey, journey.sessions or {})
+		local byGuid = {}
+		for i = 1, #list do
+			local row = list[i]
+			if row.guid then
+				byGuid[row.guid] = row
+			end
+		end
+		self.companyReportJourney = journey
+		self.companyReportKey = key
+		self.companyByGuid = byGuid
+	end
+	return self.companyByGuid[guid]
+end
+
 function ns.DB:Stats()
 	local sessions = self:Sessions()
 	local points, events = 0, 0

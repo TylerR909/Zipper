@@ -12,7 +12,7 @@ Not started. Travel, combat, and AFK for a level.
 
 ## Party leftovers
 
-Not started. Leave pips, instance names, and a filter for the path while grouped with one person. There is no unit tooltip and no separate friends list. Company is only the stats section and the join square described below.
+Not started. Leave pips, instance names, a filter for the path while grouped with one person, and a friends list.
 
 ## Already built
 
@@ -28,7 +28,7 @@ A death does not draw a straight line to the graveyard. A red square marks the c
 
 A party is a time span per person on that character's journey. The name and the first meeting are saved only after a quest, a finished objective, a kill, a death, or an instance while they were within about 250 yards, or in the same instance. A different zone does not count. Stepping past 250 yards for under a minute and a half still does. A reload keeps that stretch if they are still here a few minutes later. Someone who joined during the reload starts when the roster is first readable.
 
-It shows in two places, both on the replay. The stats list ends with a Company section of up to eight people for the sessions on screen. A kept join is a blue square on the route, and hovering that square lists who joined.
+It shows in the replay and on player tooltips. The stats list ends with a Company section of up to eight people for the sessions on screen. A kept join is a blue square on the route, and hovering that square lists who joined. Hovering the route or another marker adds who was with you then. Mousing over a player adds time together, what you did, and where you first met.
 
 ### Localization
 

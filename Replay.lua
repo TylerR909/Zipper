@@ -368,6 +368,9 @@ function ns.Replay:AcquireMarker()
 			elseif (pin.kind == Kind.INSTANCE_ENTER or pin.kind == Kind.INSTANCE_LEAVE) and pin.extra and pin.extra > 0 then
 				GameTooltip:AddLine(ns.InstanceName[pin.extra] or L["Instance"], 1, 1, 1)
 			end
+			if pin.kind ~= Kind.GROUP and pin.when then
+				ns.Replay:AddCompanyLine(GameTooltip, ns.DB.char, pin.when)
+			end
 			if pin.when then
 				GameTooltip:AddLine(date("%m/%d %H:%M", pin.when), 0.7, 0.7, 0.7)
 			end
@@ -1385,8 +1388,8 @@ function ns.Replay:GroupTooltip(pin)
 	end
 end
 
-function ns.Replay:CompanyValue(person)
-	local parts = { FormatClock(person.seconds) }
+function ns.Replay:CompanyFacts(person)
+	local parts = {}
 	if person.quests > 0 then
 		parts[#parts + 1] = person.quests == 1 and L["1 quest"] or string.format(L["%d quests"], person.quests)
 	elseif person.accepts > 0 then
@@ -1410,6 +1413,15 @@ function ns.Replay:CompanyValue(person)
 	if person.deaths > 0 then
 		parts[#parts + 1] = person.deaths == 1 and L["1 death"] or string.format(L["%d deaths"], person.deaths)
 	end
+	return table.concat(parts, " · ")
+end
+
+function ns.Replay:CompanyValue(person)
+	local parts = { FormatClock(person.seconds) }
+	local facts = self:CompanyFacts(person)
+	if facts ~= "" then
+		parts[#parts + 1] = facts
+	end
 	if person.metByName then
 		local where = self:PlaceName(person.metMap)
 		if where then
@@ -1419,6 +1431,145 @@ function ns.Replay:CompanyValue(person)
 		end
 	end
 	return table.concat(parts, " · ")
+end
+
+function ns.Replay:FirstMetSentence(person)
+	local where = self:PlaceName(person.metMap)
+	if person.metByName then
+		if where then
+			return string.format(L["First met in %s on %s"], where, person.metByName)
+		end
+		return string.format(L["First met on %s"], person.metByName)
+	end
+	if where and person.metLevel and person.metLevel > 0 then
+		return string.format(L["First met in %s at level %d"], where, person.metLevel)
+	end
+	if where then
+		return string.format(L["First met in %s"], where)
+	end
+	return nil
+end
+
+function ns.Replay:CompanyLine(journey, when)
+	if not ns.Config:Enabled("party") or not journey or not when then
+		return nil
+	end
+	local people = ns.DB:CompanyAt(journey, when)
+	if #people == 0 then
+		return nil
+	end
+	local names = {}
+	local shown = math.min(3, #people)
+	for i = 1, shown do
+		names[#names + 1] = people[i].name
+	end
+	local text
+	if #people > shown then
+		text = string.format(L["With %s +%d"], table.concat(names, ", "), #people - shown)
+	else
+		text = string.format(L["With %s"], table.concat(names, ", "))
+	end
+	local r, g, b = 0.45, 0.75, 1
+	if #people == 1 then
+		r, g, b = self:ClassFileColor(people[1].classFile)
+	end
+	return text, r, g, b
+end
+
+function ns.Replay:AddCompanyLine(tooltip, journey, when)
+	local text, r, g, b = self:CompanyLine(journey, when)
+	if not text or not tooltip or (tooltip.IsForbidden and tooltip:IsForbidden()) then
+		return
+	end
+	tooltip:AddLine(text, r, g, b)
+end
+
+function ns.Replay:UnitGuid(tooltip)
+	local guid
+	if TooltipUtil and TooltipUtil.GetDisplayedUnit then
+		local _, _, displayed = TooltipUtil.GetDisplayedUnit(tooltip)
+		if type(displayed) == "string" and not (issecretvalue and issecretvalue(displayed)) then
+			guid = displayed
+		end
+	end
+	if not guid and tooltip.GetUnit then
+		local _, unit = tooltip:GetUnit()
+		if type(unit) == "string" and unit ~= "" and not (issecretvalue and issecretvalue(unit)) then
+			local raw = UnitGUID(unit)
+			if type(raw) == "string" and not (issecretvalue and issecretvalue(raw)) then
+				guid = raw
+			end
+		end
+	end
+	if not guid or guid:sub(1, 7) ~= "Player-" or guid == ns.DB.playerKey then
+		return nil
+	end
+	return guid
+end
+
+function ns.Replay:PaintUnitCompany(tooltip)
+	if not ns.Config:Enabled("party") then
+		return
+	end
+	local guid = self:UnitGuid(tooltip)
+	if not guid then
+		return
+	end
+	local journey = ns.DB.record or ns.DB.char
+	local person = journey and ns.DB:CompanyByGuid(journey, guid)
+	if not person then
+		return
+	end
+	local r, g, b = self:ClassFileColor(person.classFile)
+	tooltip:AddLine(" ")
+	if (person.seconds or 0) >= 1 then
+		tooltip:AddDoubleLine(L["Together"], FormatClock(person.seconds or 0), r, g, b, 0.93, 0.90, 0.78)
+	else
+		tooltip:AddLine(L["Together"], r, g, b)
+	end
+	local facts = self:CompanyFacts(person)
+	if facts ~= "" then
+		tooltip:AddLine(facts, 0.78, 0.76, 0.70)
+	end
+	local met = self:FirstMetSentence(person)
+	if met then
+		tooltip:AddLine(met, 0.75, 0.75, 0.75)
+	end
+	tooltip:Show()
+end
+
+function ns.Replay:EnsureUnitTip()
+	if self.unitTip then
+		return
+	end
+	local function OnUnitTooltip(tooltip)
+		if ns.Replay.paintingTip or tooltip ~= GameTooltip then
+			return
+		end
+		if tooltip.IsForbidden and tooltip:IsForbidden() then
+			return
+		end
+		ns.Replay.paintingTip = true
+		local ok, err = pcall(ns.Replay.PaintUnitCompany, ns.Replay, tooltip)
+		ns.Replay.paintingTip = false
+		if not ok and not ns.Replay.unitTipFailed then
+			ns.Replay.unitTipFailed = true
+			geterrorhandler()(err)
+		end
+	end
+	-- Forever builds unit tooltips through TooltipDataProcessor. The script
+	-- handler is only there if that API is missing.
+	if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Unit then
+		local ok = pcall(TooltipDataProcessor.AddTooltipPostCall, Enum.TooltipDataType.Unit, OnUnitTooltip)
+		if ok then
+			self.unitTip = true
+		end
+		return
+	end
+	if GameTooltip and GameTooltip.HookScript then
+		GameTooltip:HookScript("OnTooltipSetUnit", OnUnitTooltip)
+		self.unitTip = true
+	end
 end
 
 function ns.Replay:CompanyRows(sessions)
@@ -2457,6 +2608,7 @@ function ns.Replay:HoverPath()
 	elseif (best.speed or 100) > 105 then
 		GameTooltip:AddLine(string.format(L["%d%% speed"], best.speed), 0.6, 0.85, 1)
 	end
+	self:AddCompanyLine(GameTooltip, ns.DB.char, when)
 	GameTooltip:Show()
 end
 
@@ -3661,6 +3813,7 @@ function ns.Replay:Init()
 	ns.OnDataChanged = function()
 		ns.Replay:OnDataChanged()
 	end
+	self:EnsureUnitTip()
 	self:RegisterSkin()
 	local waiter = CreateFrame("Frame")
 	waiter:RegisterEvent("PLAYER_LOGIN")
@@ -3676,3 +3829,5 @@ function ns.Replay:Init()
 		ns.Replay:CreateMapButton()
 	end)
 end
+
+ns.Replay:EnsureUnitTip()
