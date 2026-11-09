@@ -200,11 +200,45 @@ function ns.GPS:SpeedPercent()
 	return pct
 end
 
+function ns.GPS:NoteReach()
+	local session = ns.DB.session
+	if not session or not UnitPosition then
+		return
+	end
+	local px, py, _, instance = UnitPosition("player")
+	if not IsPlainNumber(px) or not IsPlainNumber(py) or (issecretvalue and issecretvalue(instance)) then
+		return
+	end
+	if not IsPlainNumber(session.ax) or not IsPlainNumber(session.ay) or session.ai == nil then
+		session.ax = px
+		session.ay = py
+		session.ai = instance
+		if type(session.reach) ~= "number" then
+			session.reach = 0
+		end
+		return
+	end
+	if instance ~= session.ai then
+		local far = ns.QUIET_YARDS or 250
+		if (session.reach or 0) < far then
+			session.reach = far
+		end
+		return
+	end
+	local dx = px - session.ax
+	local dy = py - session.ay
+	local dist = math.sqrt((dx * dx) + (dy * dy))
+	if dist > (session.reach or 0) then
+		session.reach = math.floor(dist + 0.5)
+	end
+end
+
 function ns.GPS:ConsiderSample(minYards, force)
 	local mapID, x, y = self:ReadPosition()
 	if not mapID then
 		return false
 	end
+	self:NoteReach()
 	if not force and not self:FarEnough(mapID, x, y, minYards) then
 		return false
 	end

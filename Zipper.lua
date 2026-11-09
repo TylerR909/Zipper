@@ -17,6 +17,9 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		-- A reload within a few minutes of the last logout stamp continues that session.
 		ns.started = true
 		ns.DB:BindPlayer()
+		if ns.Config:SkipQuiet() and ns.DB:DropQuietTail() > 0 then
+			ns:Print(L["Skipped a quiet stop from the last login."])
+		end
 		local _, continued = ns.DB:Open(ns.DB:Now(), false)
 		ns.GPS:Start(continued)
 		ns.Social:Start()

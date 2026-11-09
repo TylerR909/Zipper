@@ -212,5 +212,7 @@ function ns.ClassLabel(classFile)
 end
 
 ns.CONTINUE_SECONDS = 180
+-- A finished stop closer than this to its first spot, with nothing else done, is quiet.
+ns.QUIET_YARDS = 250
 ns.SAMPLE_CAP = 20000
 ns.COORD_SCALE = 10000

@@ -127,6 +127,9 @@ function ns.Config:Get()
 	if cfg.ghostRed == nil then
 		cfg.ghostRed = false
 	end
+	if cfg.skipQuiet == nil then
+		cfg.skipQuiet = true
+	end
 	if cfg.glanceTrail == nil then
 		cfg.glanceTrail = 30
 	end
@@ -254,6 +257,14 @@ end
 
 function ns.Config:GhostRed()
 	return self:Get().ghostRed and true or false
+end
+
+function ns.Config:SkipQuiet()
+	return self:Get().skipQuiet and true or false
+end
+
+function ns.Config:SetSkipQuiet(on)
+	self:Get().skipQuiet = on and true or false
 end
 
 function ns.Config:SetGhostRed(on)
@@ -597,6 +608,37 @@ function ns.Config:CreateFrame()
 		ns.Config:ConfirmPurge()
 	end)
 
+	local quiet = AddCheck(pages.saved, "ZipperConfigSkipQuiet", L["Skip quiet stops"])
+	quiet:SetPoint("TOPLEFT", purgeDrop, "BOTTOMLEFT", -4, -16)
+	quiet:SetScript("OnClick", function(self)
+		ns.Config:SetSkipQuiet(self:GetChecked())
+	end)
+
+	local quietNote = pages.saved:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	quietNote:SetPoint("TOPLEFT", quiet, "BOTTOMLEFT", 28, 2)
+	quietNote:SetPoint("RIGHT", pages.saved, "RIGHT", -16, 0)
+	quietNote:SetJustifyH("LEFT")
+	quietNote:SetText(L["The next login drops a stop where you never turned in a quest, fought, died, or walked 250 yards from where you arrived. Checking mail or the auction house does not keep it."])
+
+	local dropQuiet = CreateFrame("Button", "ZipperConfigDropQuiet", pages.saved, "UIPanelButtonTemplate")
+	dropQuiet:SetSize(160, 22)
+	dropQuiet:SetPoint("TOPLEFT", quietNote, "BOTTOMLEFT", -28, -12)
+	dropQuiet:SetText(L["Drop quiet stops"])
+	dropQuiet:SetScript("OnClick", function()
+		local count = ns.DB:DropQuietSessions()
+		if count == 1 then
+			ns:Print(L["Dropped 1 quiet stop."])
+		elseif count > 1 then
+			ns:Print(string.format(L["Dropped %d quiet stops."], count))
+		else
+			ns:Print(L["No quiet stops to drop."])
+		end
+		if ns.OnDataChanged then
+			ns.OnDataChanged()
+		end
+		ns.Config:RefreshSize()
+	end)
+
 	self.pages = pages
 	self.navButtons = navButtons
 	self:ShowPage("general")
@@ -631,6 +673,7 @@ function ns.Config:CreateFrame()
 	self.purgeRows = {}
 	self.purgeButton = purge
 	self.boxes = boxes
+	boxes.skipQuiet = quiet
 end
 
 function ns.Config:Refresh()
@@ -643,6 +686,9 @@ function ns.Config:Refresh()
 	self.boxes.showMarkers:SetChecked(self:ShowMarkers())
 	if self.boxes.ghostRed then
 		self.boxes.ghostRed:SetChecked(self:GhostRed())
+	end
+	if self.boxes.skipQuiet then
+		self.boxes.skipQuiet:SetChecked(self:SkipQuiet())
 	end
 	for i = 1, #TRACKS do
 		local key = TRACKS[i].key

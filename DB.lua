@@ -835,6 +835,125 @@ function ns.DB:RecapText(sessions)
 	return string.format(L["You killed %s %s, finished %s %s, and gained %s."], Comma(kills), enemy, Comma(quests), quest, levelText)
 end
 
+local QUIET_KEEP = {
+	[ns.Kind.KILL] = true,
+	[ns.Kind.QUEST_ACCEPT] = true,
+	[ns.Kind.QUEST_TURNIN] = true,
+	[ns.Kind.DEATH] = true,
+	[ns.Kind.SUMMON] = true,
+	[ns.Kind.HEARTH] = true,
+	[ns.Kind.FLIGHT_START] = true,
+	[ns.Kind.INSTANCE_ENTER] = true,
+	[ns.Kind.LEVEL] = true,
+	[ns.Kind.PORTAL] = true,
+	[ns.Kind.TRAINER] = true,
+	[ns.Kind.CAMP] = true,
+	[ns.Kind.SLEEP] = true,
+}
+
+function ns.DB:SessionWorthKeeping(journey, session)
+	if not Usable(session) then
+		return true
+	end
+	if (session.kills or 0) > 0 or (session.quests or 0) > 0 then
+		return true
+	end
+	if type(session.lv) == "number" and type(session.el) == "number" and session.el > session.lv then
+		return true
+	end
+	if type(session.reach) == "number" and session.reach >= (ns.QUIET_YARDS or 250) then
+		return true
+	end
+	local track = self:Track(session)
+	for i = 1, #(track.ek or {}) do
+		local kind = track.ek[i]
+		local extra = track.ea[i] or 0
+		if kind == ns.Kind.CAMP or kind == ns.Kind.SLEEP then
+			if extra ~= 1 then
+				return true
+			end
+		elseif kind == ns.Kind.GROUP then
+			if extra >= self.GROUP_KEPT then
+				return true
+			end
+		elseif QUIET_KEEP[kind] then
+			return true
+		end
+	end
+	-- Older stops have no measured distance. Leave those alone.
+	if #(track.t or {}) > 0 and type(session.reach) ~= "number" then
+		return true
+	end
+	return false
+end
+
+function ns.DB:RemoveSession(journey, index)
+	local sessions = journey and journey.sessions
+	local session = sessions and sessions[index]
+	if not Usable(session) or session == self.session then
+		return false
+	end
+	table.remove(sessions, index)
+	if type(journey.tracks) == "table" and session.id then
+		journey.tracks[session.id] = nil
+	end
+	return true
+end
+
+function ns.DB:DropQuietTail()
+	local journey = self.record
+	local sessions = journey and journey.sessions
+	if type(sessions) ~= "table" then
+		return 0
+	end
+	local last = sessions[#sessions]
+	if not Usable(last) or last == self.session then
+		return 0
+	end
+	local seen = last.seen or last.s
+	if type(seen) == "number" and (self:Now() - seen) <= ns.CONTINUE_SECONDS then
+		return 0
+	end
+	if self:SessionWorthKeeping(journey, last) then
+		return 0
+	end
+	if not self:RemoveSession(journey, #sessions) then
+		return 0
+	end
+	self:PruneIdleCompany(false)
+	self.companySpanKey = nil
+	self.companyReportKey = nil
+	return 1
+end
+
+function ns.DB:DropQuietSessions()
+	self:EnsureStore()
+	local journeys = ZipperDB.journeys
+	if type(journeys) ~= "table" then
+		return 0
+	end
+	local dropped = 0
+	for _, journey in pairs(journeys) do
+		local sessions = type(journey) == "table" and journey.sessions or nil
+		if type(sessions) == "table" then
+			for i = #sessions, 1, -1 do
+				local session = sessions[i]
+				if session ~= self.session and not self:SessionWorthKeeping(journey, session) then
+					if self:RemoveSession(journey, i) then
+						dropped = dropped + 1
+					end
+				end
+			end
+		end
+	end
+	if dropped > 0 then
+		self:PruneIdleCompany(false)
+		self.companySpanKey = nil
+		self.companyReportKey = nil
+	end
+	return dropped
+end
+
 function ns.DB:Open(now, forceNew)
 	if not self.record then
 		self:BindPlayer()
