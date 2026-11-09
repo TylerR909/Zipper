@@ -1,0 +1,9 @@
+# WoW API lookups for this addon. Project-scoped on purpose: Forever is a
+# property of the repo, not a global identity the way GitHub or Datadog is.
+# `mise exec` is what puts Node on PATH for npx. First launch downloads the
+# package, so the startup timeout is longer than the default.
+[mcp_servers.wow-api]
+command = "/home/linuxbrew/.linuxbrew/bin/mise"
+args = ["exec", "--", "npx", "-y", "@nighthawk42/wow-api-mcp"]
+enabled = true
+startup_timeout_sec = 120
