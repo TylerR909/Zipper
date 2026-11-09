@@ -502,6 +502,10 @@ function ns.DB:BindPlayer()
 	end
 	journey.name = name
 	journey.realm = realm
+	local _, classFile = UnitClass and UnitClass("player") or nil
+	if type(classFile) == "string" and classFile ~= "" and not (issecretvalue and issecretvalue(classFile)) then
+		journey.class = classFile
+	end
 	if type(journey.sessions) ~= "table" then
 		journey.sessions = {}
 	end
@@ -521,6 +525,32 @@ function ns.DB:BindPlayer()
 		self.char = journey
 	end
 	return true
+end
+
+function ns.DB:JourneyClass(journey, key)
+	journey = journey or self.char
+	if type(journey) == "table" and type(journey.class) == "string" and journey.class ~= "" then
+		return journey.class
+	end
+	key = key or self.viewKey
+	local classFile
+	if type(key) == "string" and GetPlayerInfoByGUID then
+		local _, file = GetPlayerInfoByGUID(key)
+		if type(file) == "string" and file ~= "" and not (issecretvalue and issecretvalue(file)) then
+			classFile = file
+		end
+	end
+	if not classFile then
+		local people = ZipperDB and ZipperDB.people
+		local person = type(people) == "table" and type(key) == "string" and people[key] or nil
+		if type(person) == "table" and type(person.c) == "string" and person.c ~= "" then
+			classFile = person.c
+		end
+	end
+	if classFile and type(journey) == "table" then
+		journey.class = classFile
+	end
+	return classFile
 end
 
 function ns.DB:SetView(key)

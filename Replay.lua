@@ -850,14 +850,24 @@ function ns.Replay:DrawMarkers(sessions)
 end
 
 function ns.Replay:ClassColor()
-	local _, classFile = UnitClass("player")
-	if issecretvalue and issecretvalue(classFile) then
-		classFile = nil
+	-- The line belongs to the journey on screen. UnitClass is only the logged-in character.
+	local viewKey = ns.DB.viewKey or ns.DB.playerKey
+	local other = viewKey and ns.DB.playerKey and viewKey ~= ns.DB.playerKey
+	local classFile
+	if other then
+		classFile = ns.DB:JourneyClass(ns.DB.char, viewKey)
+	else
+		local _, live = UnitClass("player")
+		if type(live) == "string" and live ~= "" and not (issecretvalue and issecretvalue(live)) then
+			classFile = live
+			if ns.DB.record then
+				ns.DB.record.class = live
+			end
+		else
+			classFile = ns.DB:JourneyClass(ns.DB.record, ns.DB.playerKey)
+		end
 	end
-	if not classFile then
-		classFile = self.classFile
-	end
-	if classFile and classFile == self.classFile and self.classR then
+	if classFile and viewKey == self.colorView and classFile == self.classFile and self.classR then
 		return self.classR, self.classG, self.classB
 	end
 	local r, g, b
@@ -874,6 +884,7 @@ function ns.Replay:ClassColor()
 	if not r or (issecretvalue and issecretvalue(r)) then
 		r, g, b = 0.9, 0.9, 0.9
 	end
+	self.colorView = viewKey
 	self.classFile = classFile
 	self.classR, self.classG, self.classB = r, g, b
 	return r, g, b
