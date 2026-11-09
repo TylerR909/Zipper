@@ -334,11 +334,21 @@ function ns.Replay:AcquireMarker()
 			end
 			GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
 			if pin.kind == Kind.KILL then
-				local mobID, elite = ns.DB:ReadKill(pin.extra)
-				GameTooltip:SetText(elite and "Elite kill" or "Kill", 1, 0.25, 0.2)
+				local mobID, elite, rare = ns.DB:ReadKill(pin.extra)
+				local title = "Kill"
+				if elite and rare then
+					title = "Rare elite kill"
+				elseif elite then
+					title = "Elite kill"
+				elseif rare then
+					title = "Rare kill"
+				end
+				GameTooltip:SetText(title, 1, 0.25, 0.2)
 				if mobID > 0 then
 					GameTooltip:AddLine("Mob " .. mobID, 1, 1, 1)
 				end
+			elseif pin.kind == Kind.GROUP then
+				ns.Replay:GroupTooltip(pin)
 			else
 				GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
 			end
@@ -785,6 +795,12 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(0.72, 0.08, 0.08, 1)
 							size = 8
+						elseif kind == Kind.GROUP then
+							local color = ns.KindColor[Kind.GROUP]
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
+							size = 7
 						else
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -1195,6 +1211,122 @@ function ns.Replay:CollectStats(sessions)
 	for i = 1, #levelRows do
 		rows[#rows + 1] = levelRows[i]
 	end
+	local companyRows = self:CompanyRows(sessions)
+	for i = 1, #companyRows do
+		rows[#rows + 1] = companyRows[i]
+	end
+	return rows
+end
+
+function ns.Replay:ClassFileColor(classFile)
+	if classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile] then
+		local color = RAID_CLASS_COLORS[classFile]
+		if color and not (issecretvalue and issecretvalue(color.r)) then
+			return color.r, color.g, color.b
+		end
+	end
+	return 0.78, 0.76, 0.70
+end
+
+function ns.Replay:PlaceName(mapID)
+	if not mapID or mapID == 0 or not C_Map or not C_Map.GetMapInfo then
+		return nil
+	end
+	local info = C_Map.GetMapInfo(mapID)
+	if info and type(info.name) == "string" and info.name ~= "" and not (issecretvalue and issecretvalue(info.name)) then
+		return info.name
+	end
+	return nil
+end
+
+function ns.Replay:GroupTooltip(pin)
+	GameTooltip:SetText("Joined", 0.45, 0.75, 1)
+	local people = ns.DB:JoinsAt(ns.DB.char, pin.when or 0)
+	if #people == 0 then
+		local count = tonumber(pin.extra) or 0
+		if count > 1 then
+			GameTooltip:AddLine(count .. " people", 1, 1, 1)
+		else
+			GameTooltip:AddLine("Party", 1, 1, 1)
+		end
+	end
+	for i = 1, #people do
+		local person = people[i]
+		local r, g, b = self:ClassFileColor(person.classFile)
+		local line = person.name
+		if person.className then
+			line = person.className .. "   " .. person.name
+		end
+		if person.first then
+			if person.level and person.level > 0 then
+				line = line .. "   · first time, level " .. person.level
+			else
+				line = line .. "   · first time"
+			end
+		end
+		GameTooltip:AddLine(line, r, g, b)
+	end
+	local where = self:PlaceName(pin.mapID)
+	if where then
+		GameTooltip:AddLine(where, 0.75, 0.75, 0.75)
+	end
+end
+
+function ns.Replay:CompanyValue(person)
+	local parts = { FormatClock(person.seconds) }
+	if person.quests > 0 then
+		parts[#parts + 1] = person.quests == 1 and "1 quest" or (person.quests .. " quests")
+	elseif person.accepts > 0 then
+		parts[#parts + 1] = person.accepts == 1 and "1 pickup" or (person.accepts .. " pickups")
+	end
+	if person.elites > 0 then
+		parts[#parts + 1] = person.elites == 1 and "1 elite" or (person.elites .. " elites")
+	end
+	if person.rares > 0 then
+		parts[#parts + 1] = person.rares == 1 and "1 rare" or (person.rares .. " rares")
+	end
+	if person.elites == 0 and person.rares == 0 and person.kills > 0 then
+		parts[#parts + 1] = person.kills == 1 and "1 kill" or (person.kills .. " kills")
+	end
+	if person.dungeons > 0 then
+		parts[#parts + 1] = person.dungeons == 1 and "1 dungeon" or (person.dungeons .. " dungeons")
+	end
+	if person.raids > 0 then
+		parts[#parts + 1] = person.raids == 1 and "1 raid" or (person.raids .. " raids")
+	end
+	if person.deaths > 0 then
+		parts[#parts + 1] = person.deaths == 1 and "1 death" or (person.deaths .. " deaths")
+	end
+	if person.metByName then
+		local where = self:PlaceName(person.metMap)
+		if where then
+			parts[#parts + 1] = "met in " .. where .. " on " .. person.metByName
+		else
+			parts[#parts + 1] = "met on " .. person.metByName
+		end
+	end
+	return table.concat(parts, " · ")
+end
+
+function ns.Replay:CompanyRows(sessions)
+	local t0, t1
+	if self.mode == "level" and self.levelLo and self.t0 and self.t1 then
+		t0, t1 = self.t0, self.t1
+	end
+	local report = ns.DB:CompanyReport(ns.DB.char, sessions, t0, t1)
+	if #report == 0 then
+		return {}
+	end
+	local rows = { { header = "Company" } }
+	local shown = math.min(8, #report)
+	for i = 1, shown do
+		local person = report[i]
+		local r, g, b = self:ClassFileColor(person.classFile)
+		rows[#rows + 1] = { person.name, self:CompanyValue(person), r = r, g = g, b = b }
+	end
+	if #report > shown then
+		rows[#rows + 1] = { string.format("%d more", #report - shown), "" }
+	end
 	return rows
 end
 
@@ -1235,6 +1367,30 @@ function ns.Replay:StatsKey(sessions)
 			#track.t,
 			#(track.ek or {})
 		)
+	end
+	parts[#parts + 1] = string.format(
+		"%s.%s.%s.%s.%s",
+		self.mode or "",
+		self.levelLo or "",
+		self.levelHi or "",
+		self.t0 or "",
+		self.t1 or ""
+	)
+	local with = ns.DB.char and ns.DB.char.with
+	local spans, open = 0, 0
+	if type(with) == "table" then
+		for _, list in pairs(with) do
+			if type(list) == "table" then
+				spans = spans + #list
+				if #list % 2 == 1 then
+					open = open + 1
+				end
+			end
+		end
+	end
+	parts[#parts + 1] = "c" .. spans
+	if open > 0 then
+		parts[#parts + 1] = "o" .. math.floor(ns.DB:Now() / 5)
 	end
 	return table.concat(parts, ":")
 end
@@ -1280,7 +1436,11 @@ function ns.Replay:RefreshStats(sessions)
 			row.value:SetText("")
 		else
 			row.label:SetText(info[1])
-			row.label:SetTextColor(0.78, 0.76, 0.70)
+			if info.r ~= nil then
+				row.label:SetTextColor(info.r, info.g, info.b)
+			else
+				row.label:SetTextColor(0.78, 0.76, 0.70)
+			end
 			row.value:SetText(info[2] or "")
 			row.value:SetTextColor(0.93, 0.90, 0.78)
 		end

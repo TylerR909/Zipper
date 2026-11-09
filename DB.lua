@@ -883,6 +883,7 @@ function ns.DB:Touch(now)
 end
 
 ns.DB.KILL_ELITE = 16777216
+ns.DB.KILL_RARE = 33554432
 
 function ns.DB:CreatureID(guid)
 	if type(guid) ~= "string" or guid == "" then
@@ -895,23 +896,39 @@ function ns.DB:CreatureID(guid)
 	return 0
 end
 
-function ns.DB:PackKill(mobID, elite)
+function ns.DB:PackKill(mobID, elite, rare)
 	mobID = tonumber(mobID) or 0
 	if mobID < 0 then
 		mobID = 0
 	end
+	if mobID >= self.KILL_ELITE then
+		mobID = mobID % self.KILL_ELITE
+	end
 	if elite then
-		return mobID + self.KILL_ELITE
+		mobID = mobID + self.KILL_ELITE
+	end
+	if rare then
+		mobID = mobID + self.KILL_RARE
 	end
 	return mobID
 end
 
 function ns.DB:ReadKill(extra)
 	extra = tonumber(extra) or 0
-	if extra >= self.KILL_ELITE then
-		return extra - self.KILL_ELITE, true
+	if extra < 0 then
+		extra = 0
 	end
-	return extra, false
+	local rare = false
+	if extra >= self.KILL_RARE then
+		rare = true
+		extra = extra - self.KILL_RARE
+	end
+	local elite = false
+	if extra >= self.KILL_ELITE then
+		elite = true
+		extra = extra - self.KILL_ELITE
+	end
+	return extra, elite, rare
 end
 
 function ns.DB:AddKill()
@@ -1026,6 +1043,378 @@ function ns.DB:CloseInstance(session, extra)
 	return self:AddEventOn(session, ns.Kind.INSTANCE_LEAVE, mapID, x, y, session.seen or session.s, extra or 0)
 end
 
+-- Company is a time span per person, not a pile of counters.
+-- journey.with[guid] = { join, leave, join, leave, ... }. An odd length is still grouped.
+-- Names and the first meeting live once on ZipperDB.people, shared by every character.
+-- Quests, kills, deaths, and instances are counted from the path when something asks.
+
+function ns.DB:TouchPerson(guid, info, now, mapID)
+	self:EnsureStore()
+	if type(ZipperDB.people) ~= "table" then
+		ZipperDB.people = {}
+	end
+	local row = ZipperDB.people[guid]
+	if type(row) ~= "table" then
+		row = {}
+		ZipperDB.people[guid] = row
+	end
+	info = info or {}
+	if type(info.n) == "string" and info.n ~= "" then
+		row.n = info.n
+	end
+	if type(info.c) == "string" and info.c ~= "" then
+		row.c = info.c
+	end
+	if type(row.t) ~= "number" then
+		row.t = now
+		row.map = mapID or 0
+		local level = tonumber(info.lv) or 0
+		if level < 0 then
+			level = 0
+		end
+		row.lv = level
+		row.by = self.playerKey
+		if self.record and type(self.record.name) == "string" and self.record.name ~= "" then
+			row.bn = self.record.name
+		end
+	end
+	return row
+end
+
+function ns.DB:SealStaleCompany(now)
+	local journey = self.record
+	local with = journey and journey.with
+	if type(with) ~= "table" or type(now) ~= "number" then
+		return
+	end
+	local current = self.session
+	local sessions = journey.sessions
+	for _, spans in pairs(with) do
+		if type(spans) == "table" and (#spans % 2 == 1) then
+			local start = spans[#spans]
+			local owner
+			if type(start) == "number" and type(sessions) == "table" then
+				for i = 1, #sessions do
+					local session = sessions[i]
+					local seen = session.seen or session.s
+					if type(session.s) == "number" and start >= session.s and type(seen) == "number" and start <= seen + 1 then
+						owner = session
+					end
+				end
+			end
+			if owner ~= current then
+				local stop = start
+				if owner then
+					stop = owner.seen or owner.s or start
+				end
+				if type(stop) ~= "number" or stop < start then
+					stop = start
+				end
+				spans[#spans + 1] = stop
+			end
+		end
+	end
+end
+
+function ns.DB:CloseCompany(now)
+	local journey = self.record
+	local with = journey and journey.with
+	if type(with) ~= "table" or type(now) ~= "number" then
+		return false
+	end
+	local changed = false
+	for _, spans in pairs(with) do
+		if type(spans) == "table" and (#spans % 2 == 1) then
+			local start = spans[#spans]
+			local stop = now
+			if type(start) == "number" and stop < start then
+				stop = start
+			end
+			spans[#spans + 1] = stop
+			changed = true
+		end
+	end
+	if changed then
+		self:Touch(now)
+	end
+	return changed
+end
+
+-- members[guid] = { n = name, c = classFile, lv = their level }.
+-- Returns the guids who actually joined, and whether any span opened or closed.
+-- A leave within the reload window is the same stretch, not a new join.
+function ns.DB:ApplyRoster(members, now, mapID)
+	local journey = self.record
+	if type(journey) ~= "table" or type(now) ~= "number" or type(members) ~= "table" then
+		return {}, false
+	end
+	local with = journey.with
+	if type(with) ~= "table" then
+		if not next(members) then
+			return {}, false
+		end
+		with = {}
+		journey.with = with
+	end
+	local joined = {}
+	local changed = false
+	for guid, spans in pairs(with) do
+		if guid ~= self.playerKey and type(spans) == "table" and (#spans % 2 == 1) and not members[guid] then
+			local start = spans[#spans]
+			local stop = now
+			if type(start) == "number" and stop < start then
+				stop = start
+			end
+			spans[#spans + 1] = stop
+			changed = true
+		end
+	end
+	for guid, info in pairs(members) do
+		if type(guid) == "string" and guid ~= self.playerKey then
+			self:TouchPerson(guid, info, now, mapID)
+			local spans = with[guid]
+			if type(spans) ~= "table" then
+				spans = {}
+				with[guid] = spans
+			end
+			if #spans % 2 == 0 then
+				local last = spans[#spans]
+				if type(last) == "number" and now >= last and (now - last) <= ns.CONTINUE_SECONDS then
+					spans[#spans] = nil
+					changed = true
+				else
+					spans[#spans + 1] = now
+					joined[#joined + 1] = guid
+					changed = true
+				end
+			end
+		end
+	end
+	if changed then
+		self:Touch(now)
+	end
+	return joined, changed
+end
+
+function ns.DB:JoinsAt(journey, when)
+	local found = {}
+	local with = journey and journey.with
+	local people = ZipperDB and ZipperDB.people
+	if type(with) ~= "table" or type(when) ~= "number" then
+		return found
+	end
+	for guid, spans in pairs(with) do
+		if type(spans) == "table" then
+			for i = 1, #spans, 2 do
+				local start = spans[i]
+				if type(start) == "number" and math.abs(start - when) <= 2 then
+					local person = type(people) == "table" and people[guid] or nil
+					local name = type(person) == "table" and person.n or nil
+					local classFile = type(person) == "table" and person.c or nil
+					local level = type(person) == "table" and tonumber(person.lv) or 0
+					local first = type(person) == "table" and type(person.t) == "number" and math.abs(person.t - when) <= 2
+					if type(name) ~= "string" or name == "" then
+						name = "Someone"
+					end
+					found[#found + 1] = {
+						guid = guid,
+						name = name,
+						classFile = type(classFile) == "string" and classFile or nil,
+						className = ns.ClassName and ns.ClassName[classFile] or nil,
+						first = first and true or false,
+						level = level,
+					}
+					break
+				end
+			end
+		end
+	end
+	table.sort(found, function(a, b)
+		return a.name < b.name
+	end)
+	return found
+end
+
+local function CompanyLiveEnd(self, journey)
+	if journey == self.record and self.session then
+		return self:Now()
+	end
+	local sessions = journey and journey.sessions
+	local last = sessions and sessions[#sessions]
+	return (last and (last.seen or last.s)) or 0
+end
+
+local function CompanyWindow(self, journey, session, t0, t1, liveEnd)
+	if type(session) ~= "table" or type(session.s) ~= "number" then
+		return nil
+	end
+	local startAt = session.s
+	local stopAt = session.seen or session.s
+	if session == self.session and journey == self.record then
+		stopAt = math.max(stopAt, liveEnd)
+	end
+	if type(t0) == "number" and t0 > startAt then
+		startAt = t0
+	end
+	if type(t1) == "number" and t1 < stopAt then
+		stopAt = t1
+	end
+	if stopAt < startAt then
+		return nil
+	end
+	return startAt, stopAt
+end
+
+local function SpanCovers(spans, when, liveEnd)
+	for i = 1, #spans, 2 do
+		local startAt = spans[i]
+		local stopAt = spans[i + 1]
+		if type(stopAt) ~= "number" then
+			stopAt = liveEnd
+		end
+		if type(startAt) == "number" and when >= startAt and when <= stopAt then
+			return true
+		end
+	end
+	return false
+end
+
+local function SpanOverlap(spans, startAt, stopAt, liveEnd)
+	local total = 0
+	for i = 1, #spans, 2 do
+		local left = spans[i]
+		local right = spans[i + 1]
+		if type(right) ~= "number" then
+			right = liveEnd
+		end
+		if type(left) == "number" then
+			if left < startAt then
+				left = startAt
+			end
+			if right > stopAt then
+				right = stopAt
+			end
+			if right > left then
+				total = total + (right - left)
+			end
+		end
+	end
+	return total
+end
+
+local function JourneyKey(journey)
+	if not ZipperDB or type(ZipperDB.journeys) ~= "table" then
+		return nil
+	end
+	for key, item in pairs(ZipperDB.journeys) do
+		if item == journey then
+			return key
+		end
+	end
+	return nil
+end
+
+function ns.DB:CompanyReport(journey, sessions, t0, t1)
+	local list = {}
+	local with = journey and journey.with
+	if type(journey) ~= "table" or type(with) ~= "table" or type(sessions) ~= "table" then
+		return list
+	end
+	local people = ZipperDB and ZipperDB.people or {}
+	local liveEnd = CompanyLiveEnd(self, journey)
+	local rows = {}
+	for guid, spans in pairs(with) do
+		if type(guid) == "string" and type(spans) == "table" and #spans > 0 then
+			local person = people[guid]
+			local name = type(person) == "table" and person.n or nil
+			if type(name) ~= "string" or name == "" then
+				name = "Someone"
+			end
+			rows[guid] = {
+				guid = guid,
+				name = name,
+				classFile = type(person) == "table" and person.c or nil,
+				seconds = 0,
+				quests = 0,
+				accepts = 0,
+				elites = 0,
+				rares = 0,
+				kills = 0,
+				deaths = 0,
+				dungeons = 0,
+				raids = 0,
+				spans = spans,
+				metMap = type(person) == "table" and person.map or 0,
+				metBy = type(person) == "table" and person.by or nil,
+				metName = type(person) == "table" and person.bn or nil,
+				metLevel = type(person) == "table" and person.lv or 0,
+			}
+		end
+	end
+	local viewer = JourneyKey(journey)
+	for i = 1, #sessions do
+		local session = sessions[i]
+		local startAt, stopAt = CompanyWindow(self, journey, session, t0, t1, liveEnd)
+		if startAt then
+			for _, row in pairs(rows) do
+				row.seconds = row.seconds + SpanOverlap(row.spans, startAt, stopAt, liveEnd)
+			end
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				local when = session.s + (track.et[n] or 0)
+				if when >= startAt and when <= stopAt then
+					local kind = track.ek[n]
+					local extra = track.ea[n]
+					for _, row in pairs(rows) do
+						if SpanCovers(row.spans, when, liveEnd) then
+							if kind == ns.Kind.QUEST_TURNIN then
+								row.quests = row.quests + 1
+							elseif kind == ns.Kind.QUEST_ACCEPT then
+								row.accepts = row.accepts + 1
+							elseif kind == ns.Kind.KILL then
+								row.kills = row.kills + 1
+								local _, elite, rare = self:ReadKill(extra)
+								if elite then
+									row.elites = row.elites + 1
+								elseif rare then
+									row.rares = row.rares + 1
+								end
+							elseif kind == ns.Kind.DEATH then
+								row.deaths = row.deaths + 1
+							elseif kind == ns.Kind.INSTANCE_ENTER and extra == ns.Instance.PARTY then
+								row.dungeons = row.dungeons + 1
+							elseif kind == ns.Kind.INSTANCE_ENTER and extra == ns.Instance.RAID then
+								row.raids = row.raids + 1
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	for _, row in pairs(rows) do
+		row.spans = nil
+		if row.metBy and row.metBy ~= viewer then
+			local other = ZipperDB.journeys and ZipperDB.journeys[row.metBy]
+			row.metByName = (type(other) == "table" and other.name) or row.metName
+			if type(row.metByName) ~= "string" or row.metByName == "" then
+				row.metByName = "another character"
+			end
+		end
+		row.metName = nil
+		if row.seconds >= 1 or row.quests > 0 or row.accepts > 0 or row.kills > 0 or row.deaths > 0 or row.dungeons > 0 or row.raids > 0 then
+			list[#list + 1] = row
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.seconds ~= b.seconds then
+			return a.seconds > b.seconds
+		end
+		return a.name < b.name
+	end)
+	return list
+end
+
 function ns.DB:Stats()
 	local sessions = self:Sessions()
 	local points, events = 0, 0
@@ -1114,6 +1503,43 @@ local function AppendJSON(out, value, seen)
 	end
 end
 
+local function MeasureWith(with)
+	if type(with) ~= "table" then
+		return 0
+	end
+	local bytes = 0
+	for guid, spans in pairs(with) do
+		bytes = bytes + 24 + #tostring(guid)
+		if type(spans) == "table" then
+			bytes = bytes + (#spans * 8)
+		end
+	end
+	return bytes
+end
+
+function ns.DB:MeasurePeople()
+	local people = ZipperDB and ZipperDB.people
+	if type(people) ~= "table" then
+		return 0
+	end
+	local bytes = 0
+	for guid, row in pairs(people) do
+		bytes = bytes + 32 + #tostring(guid)
+		if type(row) == "table" then
+			if type(row.n) == "string" then
+				bytes = bytes + #row.n
+			end
+			if type(row.bn) == "string" then
+				bytes = bytes + #row.bn
+			end
+			if type(row.c) == "string" then
+				bytes = bytes + #row.c
+			end
+		end
+	end
+	return bytes
+end
+
 -- Compact byte count. CBOR when the client has it, otherwise compact JSON.
 -- This is a lower bound. WoW writes the real saved file as formatted Lua.
 function ns.DB:EstimateBytes(value)
@@ -1143,6 +1569,7 @@ function ns.DB:MeasureJourney(journey)
 		return 0
 	end
 	local bytes = #(journey.sessions or {}) * 48
+	bytes = bytes + MeasureWith(journey.with)
 	for _, track in pairs(journey.tracks) do
 		if type(track) == "string" then
 			bytes = bytes + #track
@@ -1190,7 +1617,7 @@ end
 
 function ns.DB:EstimateAll()
 	self:EnsureStore()
-	local total = 0
+	local total = self:MeasurePeople()
 	for _, journey in pairs(ZipperDB.journeys) do
 		total = total + self:JourneyBytes(journey)
 	end

@@ -18,10 +18,12 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		ns.DB:BindPlayer()
 		local _, continued = ns.DB:Open(ns.DB:Now(), false)
 		ns.GPS:Start(continued)
+		ns.Social:Start()
 		ns:Print("recording. /zipper opens the map replay.")
 		ns.Config:StartReminder()
 		ns.Config:StartSizePoll()
 	elseif event == "PLAYER_LOGOUT" then
+		ns.Social:Stop()
 		ns.GPS:Stop()
 		ns.DB:Flush()
 	end
@@ -30,6 +32,7 @@ end)
 -- File load, not the ADDON_LOADED handler. RegisterEvent is protected from
 -- inside that handler on this client, which is what spammed the forbidden-action error.
 ns.GPS:EnsureEvents()
+ns.Social:EnsureEvents()
 
 function ns:Print(...)
 	print("|cff33ddffZipper|r:", ...)

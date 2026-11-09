@@ -16,7 +16,7 @@ Not started. At max level there are no more dings, so time at the cap stays an o
 
 ## Party and social
 
-Not started.
+In progress. A party is a time span per person on that character's journey, plus one account-wide record of who they are and which character met them first. Quest turn-ins, kills, deaths, and dungeon or raid entries are counted from the path when the replay asks. The map gets a blue pip where someone joined. The stats list shows up to eight companions for the session or level on screen. Time with them on another character stays on that character. Not built: objective ticks, leave pips, instance names, and a filter for the path while grouped with one person.
 
 ## Localization
 

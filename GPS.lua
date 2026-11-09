@@ -404,15 +404,25 @@ function ns.GPS:CheckSummon()
 	end
 end
 
-function ns.GPS:TargetIsElite()
+function ns.GPS:TargetClassification()
 	if not UnitExists or not UnitExists("target") or not UnitClassification then
-		return false
+		return nil
 	end
 	local class = UnitClassification("target")
 	if not class or (issecretvalue and issecretvalue(class)) then
-		return false
+		return nil
 	end
+	return class
+end
+
+function ns.GPS:TargetIsElite()
+	local class = self:TargetClassification()
 	return class == "elite" or class == "rareelite" or class == "worldboss"
+end
+
+function ns.GPS:TargetIsRare()
+	local class = self:TargetClassification()
+	return class == "rare" or class == "rareelite"
 end
 
 function ns.GPS:OnKill(attackerGUID, targetGUID)
@@ -429,7 +439,7 @@ function ns.GPS:OnKill(attackerGUID, targetGUID)
 		targetGUID = nil
 	end
 	local mobID = ns.DB:CreatureID(targetGUID)
-	local extra = ns.DB:PackKill(mobID, self:TargetIsElite())
+	local extra = ns.DB:PackKill(mobID, self:TargetIsElite(), self:TargetIsRare())
 	if not self:Mark(Kind.KILL, extra) then
 		ns.DB:AddKill()
 	end
@@ -489,6 +499,9 @@ function ns.GPS:Tick()
 	end
 	if not self.eventsReady then
 		self:EnsureEvents()
+	end
+	if ns.Social and ns.Social.active and not ns.Social.eventsReady then
+		ns.Social:EnsureEvents()
 	end
 	ns.DB:NoteProgress()
 	self:SyncGhost()

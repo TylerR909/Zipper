@@ -18,6 +18,7 @@ ns.Kind = {
 	INSTANCE_LEAVE = 14,
 	ZONE = 15,
 	LEVEL = 16,
+	GROUP = 17,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -45,6 +46,7 @@ ns.KindName = {
 	[14] = "Left instance",
 	[15] = "Zone",
 	[16] = "Level up",
+	[17] = "Joined",
 }
 
 ns.KindColor = {
@@ -64,6 +66,24 @@ ns.KindColor = {
 	[14] = { 0.60, 0.25, 0.45 },
 	[15] = { 0.92, 0.92, 0.92 },
 	[16] = { 1.00, 0.95, 0.55 },
+	[17] = { 0.45, 0.75, 1.00 },
+}
+
+-- Class file from UnitClass. Stored once per person, not on every path event.
+ns.ClassName = {
+	WARRIOR = "Warrior",
+	PALADIN = "Paladin",
+	HUNTER = "Hunter",
+	ROGUE = "Rogue",
+	PRIEST = "Priest",
+	DEATHKNIGHT = "Death Knight",
+	SHAMAN = "Shaman",
+	MAGE = "Mage",
+	WARLOCK = "Warlock",
+	MONK = "Monk",
+	DRUID = "Druid",
+	DEMONHUNTER = "Demon Hunter",
+	EVOKER = "Evoker",
 }
 
 ns.Instance = {

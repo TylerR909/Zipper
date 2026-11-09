@@ -18,6 +18,7 @@ local TRACK_DEFAULTS = {
 	afk = true,
 	instance = true,
 	zone = true,
+	party = true,
 }
 
 local KIND_KEY = {
@@ -36,6 +37,7 @@ local KIND_KEY = {
 	[ns.Kind.INSTANCE_ENTER] = "instance",
 	[ns.Kind.INSTANCE_LEAVE] = "instance",
 	[ns.Kind.ZONE] = "zone",
+	[ns.Kind.GROUP] = "party",
 }
 
 local TRACKS = {
@@ -49,6 +51,7 @@ local TRACKS = {
 	{ key = "mount", label = "Mount and dismount" },
 	{ key = "afk", label = "AFK" },
 	{ key = "instance", label = "Dungeons and raids" },
+	{ key = "party", label = "Party members" },
 	{ key = "zone", label = "Zone changes" },
 }
 
@@ -229,6 +232,13 @@ function ns.Config:SetTrack(key, on)
 		return
 	end
 	cfg.track[key] = on and true or false
+	if key == "party" and ns.Social and ns.Social.active then
+		if cfg.track.party then
+			ns.Social:Schedule()
+		else
+			ns.Social:Disable()
+		end
+	end
 end
 
 function ns.Config:GhostRed()
@@ -306,7 +316,7 @@ function ns.Config:CreateFrame()
 	scroll:SetPoint("TOPLEFT", 0, -4)
 	scroll:SetPoint("BOTTOMRIGHT", -28, 4)
 	local panel = CreateFrame("Frame", nil, scroll)
-	panel:SetSize(640, 980)
+	panel:SetSize(640, 1040)
 	scroll:SetScrollChild(panel)
 
 	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
