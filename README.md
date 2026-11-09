@@ -2,6 +2,8 @@
 
 *The long way, still on the map.*
 
+[Screencast From 2026-11-08 03-05-25.webm](https://github.com/user-attachments/assets/d6d97043-e956-4aa7-a77c-9362b85fc63c)
+
 You dinged in the wetlands, died to something embarrassing, and grouped with a priest whose name you will not remember next week. Zipper keeps the road and the moments on it, then plays them back on the world map: a dot, a line in your class color, and the marks that made the day worth keeping.
 
 ## On the map
