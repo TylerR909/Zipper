@@ -584,6 +584,7 @@ end
 
 function ns.DB:Flush()
 	self:EnsureStore()
+	self:PruneIdleCompany(false)
 	for _, journey in pairs(ZipperDB.journeys) do
 		if type(journey) == "table" and type(journey.tracks) == "table" then
 			for id, track in pairs(journey.tracks) do
@@ -1010,6 +1011,9 @@ function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 	track.ey[n] = self:PackCoord(y)
 	track.ea[n] = extra or 0
 	session.seen = now
+	if kind ~= ns.Kind.GROUP and self:CompanyQualifies(kind) then
+		self:CreditCompany(now)
+	end
 	return true
 end
 
@@ -1045,8 +1049,22 @@ end
 
 -- Company is a time span per person, not a pile of counters.
 -- journey.with[guid] = { join, leave, join, leave, ... }. An odd length is still grouped.
--- Names and the first meeting live once on ZipperDB.people, shared by every character.
--- Quests, kills, deaths, and instances are counted from the path when something asks.
+-- A span is saved only after something happened inside it: a quest, a finished
+-- objective, a kill, a death, or an instance. Standing in a group does not.
+-- Names and the first meeting live once on ZipperDB.people, and only then.
+-- people[guid].ok is the join time of the stretch that earned the record.
+-- A join pip uses GROUP_KEPT on top of the headcount so a later prune can
+-- tell it from a pip that was written just for being invited.
+
+ns.DB.GROUP_KEPT = 16777216
+
+function ns.DB:CompanyQualifies(kind)
+	return kind == ns.Kind.QUEST_ACCEPT
+		or kind == ns.Kind.QUEST_TURNIN
+		or kind == ns.Kind.KILL
+		or kind == ns.Kind.DEATH
+		or kind == ns.Kind.INSTANCE_ENTER
+end
 
 function ns.DB:TouchPerson(guid, info, now, mapID)
 	self:EnsureStore()
@@ -1143,7 +1161,7 @@ end
 -- members[guid] = { n = name, c = classFile, lv = their level }.
 -- Returns the guids who actually joined, and whether any span opened or closed.
 -- A leave within the reload window is the same stretch, not a new join.
-function ns.DB:ApplyRoster(members, now, mapID)
+function ns.DB:ApplyRoster(members, now)
 	local journey = self.record
 	if type(journey) ~= "table" or type(now) ~= "number" or type(members) ~= "table" then
 		return {}, false
@@ -1169,9 +1187,8 @@ function ns.DB:ApplyRoster(members, now, mapID)
 			changed = true
 		end
 	end
-	for guid, info in pairs(members) do
+	for guid in pairs(members) do
 		if type(guid) == "string" and guid ~= self.playerKey then
-			self:TouchPerson(guid, info, now, mapID)
 			local spans = with[guid]
 			if type(spans) ~= "table" then
 				spans = {}
@@ -1192,8 +1209,353 @@ function ns.DB:ApplyRoster(members, now, mapID)
 	end
 	if changed then
 		self:Touch(now)
+		self:PruneIdleCompany(true)
 	end
 	return joined, changed
+end
+
+function ns.DB:CoveringStart(spans, when, liveEnd)
+	if type(spans) ~= "table" or type(when) ~= "number" then
+		return nil
+	end
+	for i = 1, #spans, 2 do
+		local startAt = spans[i]
+		local stopAt = spans[i + 1]
+		if type(stopAt) ~= "number" then
+			stopAt = liveEnd or when
+		end
+		if type(startAt) == "number" and when >= startAt and when <= stopAt then
+			return startAt
+		end
+	end
+	return nil
+end
+
+function ns.DB:RangeHasWork(journey, startAt, stopAt)
+	local sessions = journey and journey.sessions
+	if type(sessions) ~= "table" or type(startAt) ~= "number" or type(stopAt) ~= "number" then
+		return false
+	end
+	for i = 1, #sessions do
+		local session = sessions[i]
+		if type(session) == "table" and type(session.s) == "number" and session.s <= stopAt then
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				local when = session.s + (track.et[n] or 0)
+				if when >= startAt and when <= stopAt and self:CompanyQualifies(track.ek[n]) then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+function ns.DB:HasKeptMarker(journey, startAt)
+	local sessions = journey and journey.sessions
+	if type(sessions) ~= "table" or type(startAt) ~= "number" then
+		return false
+	end
+	for i = 1, #sessions do
+		local session = sessions[i]
+		if type(session) == "table" and type(session.s) == "number" then
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				if track.ek[n] == ns.Kind.GROUP then
+					local when = session.s + (track.et[n] or 0)
+					local extra = track.ea[n] or 0
+					if extra >= self.GROUP_KEPT and math.abs(when - startAt) <= 2 then
+						return true
+					end
+				end
+			end
+		end
+	end
+	return false
+end
+
+function ns.DB:SpanWorthKeeping(journey, guid, startAt, stopAt)
+	if self:RangeHasWork(journey, startAt, stopAt) or self:HasKeptMarker(journey, startAt) then
+		return true
+	end
+	local people = ZipperDB and ZipperDB.people
+	local row = type(people) == "table" and people[guid] or nil
+	return type(row) == "table" and type(row.ok) == "number" and math.abs(row.ok - startAt) <= 2
+end
+
+function ns.DB:JoinPlace(guid, when)
+	local recall, mapID, x, y
+	if ns.Social and ns.Social.Recall then
+		recall, mapID, x, y = ns.Social:Recall(guid)
+	end
+	if type(recall) == "table" and type(recall.t) == "number" and math.abs(recall.t - when) <= 2 and type(x) == "number" and type(y) == "number" then
+		return mapID or 0, x, y
+	end
+	return self:SampleNear(self.record, when)
+end
+
+function ns.DB:SampleNear(journey, when)
+	local sessions = journey and journey.sessions
+	if type(sessions) ~= "table" or type(when) ~= "number" then
+		return nil
+	end
+	local best, mapID, x, y
+	for i = 1, #sessions do
+		local session = sessions[i]
+		if type(session) == "table" and type(session.s) == "number" then
+			local track = self:Track(session)
+			for n = 1, #track.t do
+				local dist = math.abs((session.s + (track.t[n] or 0)) - when)
+				if not best or dist < best then
+					best = dist
+					mapID = track.m[n]
+					x = (track.x[n] or 0) / ns.COORD_SCALE
+					y = (track.y[n] or 0) / ns.COORD_SCALE
+				end
+			end
+		end
+	end
+	if best and best <= 30 and mapID and mapID ~= 0 then
+		return mapID, x, y
+	end
+	return nil
+end
+
+function ns.DB:SessionCovering(journey, when)
+	local sessions = journey and journey.sessions
+	local found
+	if type(sessions) == "table" and type(when) == "number" then
+		for i = 1, #sessions do
+			local session = sessions[i]
+			if type(session) == "table" and type(session.s) == "number" and when >= session.s then
+				if session == self.session or when <= (session.seen or session.s) + 2 then
+					found = session
+				end
+			end
+		end
+	end
+	return found or self.session
+end
+
+function ns.DB:HasJoinMarker(journey, when)
+	local sessions = journey and journey.sessions
+	if type(sessions) ~= "table" or type(when) ~= "number" then
+		return false
+	end
+	for i = 1, #sessions do
+		local session = sessions[i]
+		if type(session) == "table" and type(session.s) == "number" then
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				if track.ek[n] == ns.Kind.GROUP then
+					local at = session.s + (track.et[n] or 0)
+					if math.abs(at - when) <= 2 then
+						return true
+					end
+				end
+			end
+		end
+	end
+	return false
+end
+
+function ns.DB:WriteJoinMarker(when)
+	local journey = self.record
+	if not journey or self:HasJoinMarker(journey, when) then
+		return false
+	end
+	local session = self:SessionCovering(journey, when)
+	if not session then
+		return false
+	end
+	local count = 0
+	local mapID, x, y
+	local with = journey.with
+	if type(with) == "table" then
+		for guid, spans in pairs(with) do
+			if type(spans) == "table" then
+				for i = 1, #spans, 2 do
+					local startAt = spans[i]
+					if type(startAt) == "number" and math.abs(startAt - when) <= 2 then
+						count = count + 1
+						if not mapID then
+							mapID, x, y = self:JoinPlace(guid, startAt)
+						end
+					end
+				end
+			end
+		end
+	end
+	if not mapID or type(x) ~= "number" or type(y) ~= "number" then
+		mapID, x, y = 0, 0, 0
+	end
+	if count < 1 then
+		count = 1
+	end
+	return self:AddEventOn(session, ns.Kind.GROUP, mapID, x, y, when, count + self.GROUP_KEPT)
+end
+
+-- The event at `when` already happened. Anyone whose span covers it has now
+-- done something together, so their name is worth saving and the join pip
+-- belongs at the spot they were picked up.
+function ns.DB:CreditCompany(when)
+	local journey = self.record
+	local with = journey and journey.with
+	if type(with) ~= "table" or type(when) ~= "number" then
+		return false
+	end
+	local starts = {}
+	local any = false
+	for guid, spans in pairs(with) do
+		local startAt = self:CoveringStart(spans, when, when)
+		if startAt then
+			local info, mapID = nil, nil
+			if ns.Social and ns.Social.Recall then
+				local recall, recalledMap = ns.Social:Recall(guid)
+				info = recall
+				mapID = recalledMap
+			end
+			if type(info) ~= "table" or type(info.t) ~= "number" or math.abs(info.t - startAt) > 2 then
+				mapID = select(1, self:JoinPlace(guid, startAt))
+			end
+			self:TouchPerson(guid, info, startAt, mapID)
+			local row = ZipperDB.people and ZipperDB.people[guid]
+			if type(row) == "table" and type(row.ok) ~= "number" then
+				row.ok = startAt
+			end
+			starts[startAt] = true
+			any = true
+		end
+	end
+	for startAt in pairs(starts) do
+		self:WriteJoinMarker(startAt)
+	end
+	return any
+end
+
+local function MarkerNear(when, starts)
+	for i = 1, #starts do
+		if math.abs(starts[i] - when) <= 2 then
+			return true
+		end
+	end
+	return false
+end
+
+local function DropIdleMarkers(self, journey, starts)
+	local sessions = journey.sessions
+	if type(sessions) ~= "table" then
+		return
+	end
+	for i = 1, #sessions do
+		local session = sessions[i]
+		if type(session) == "table" and type(session.s) == "number" and journey.tracks and journey.tracks[session.id] then
+			local track = self:Track(session)
+			local et, ek, em, ex, ey, ea = {}, {}, {}, {}, {}, {}
+			local count = 0
+			local dropped = false
+			for n = 1, #(track.ek or {}) do
+				local kind = track.ek[n]
+				local when = session.s + (track.et[n] or 0)
+				if kind == ns.Kind.GROUP and not MarkerNear(when, starts) then
+					dropped = true
+				else
+					count = count + 1
+					et[count] = track.et[n]
+					ek[count] = kind
+					em[count] = track.em[n]
+					ex[count] = track.ex[n]
+					ey[count] = track.ey[n]
+					ea[count] = track.ea[n]
+				end
+			end
+			if dropped then
+				track.et, track.ek, track.em = et, ek, em
+				track.ex, track.ey, track.ea = ex, ey, ea
+			end
+		end
+	end
+end
+
+-- closedOnly leaves an open stretch in memory so a later quest can still claim it.
+-- A full prune runs on login and on logout, after open stretches have been closed.
+function ns.DB:PruneIdleCompany(closedOnly)
+	self:EnsureStore()
+	local journeys = ZipperDB.journeys
+	if type(journeys) ~= "table" then
+		return
+	end
+	for _, journey in pairs(journeys) do
+		local with = type(journey) == "table" and journey.with or nil
+		if type(with) == "table" then
+			local liveEnd = 0
+			if journey == self.record and self.session then
+				liveEnd = self:Now()
+			else
+				local sessions = journey.sessions
+				local last = type(sessions) == "table" and sessions[#sessions] or nil
+				liveEnd = (last and (last.seen or last.s)) or 0
+			end
+			local starts = {}
+			for guid, spans in pairs(with) do
+				if type(spans) == "table" then
+					local fresh = {}
+					for i = 1, #spans, 2 do
+						local startAt = spans[i]
+						local stopAt = spans[i + 1]
+						local open = type(stopAt) ~= "number"
+						local keep = false
+						if type(startAt) == "number" then
+							if open and closedOnly then
+								keep = true
+							else
+								local endAt = open and liveEnd or stopAt
+								keep = self:SpanWorthKeeping(journey, guid, startAt, endAt)
+							end
+						end
+						if keep then
+							fresh[#fresh + 1] = startAt
+							starts[#starts + 1] = startAt
+							if not open then
+								fresh[#fresh + 1] = stopAt
+							end
+						end
+					end
+					if #fresh > 0 then
+						with[guid] = fresh
+					else
+						with[guid] = nil
+					end
+				else
+					with[guid] = nil
+				end
+			end
+			if not next(with) then
+				journey.with = nil
+			end
+			DropIdleMarkers(self, journey, starts)
+		end
+	end
+	local people = ZipperDB.people
+	if type(people) ~= "table" then
+		return
+	end
+	for guid in pairs(people) do
+		local used = false
+		for _, journey in pairs(journeys) do
+			local with = type(journey) == "table" and journey.with or nil
+			if type(with) == "table" and type(with[guid]) == "table" and #with[guid] > 0 then
+				used = true
+				break
+			end
+		end
+		if not used then
+			people[guid] = nil
+		end
+	end
+	if not next(people) then
+		ZipperDB.people = nil
+	end
 end
 
 function ns.DB:JoinsAt(journey, when)
@@ -1314,6 +1676,24 @@ local function JourneyKey(journey)
 	return nil
 end
 
+local function KeptSpans(self, journey, guid, spans, liveEnd)
+	local copy = {}
+	if type(spans) ~= "table" then
+		return copy
+	end
+	for i = 1, #spans, 2 do
+		local startAt = spans[i]
+		local stopAt = spans[i + 1]
+		local open = type(stopAt) ~= "number"
+		local endAt = open and liveEnd or stopAt
+		if type(startAt) == "number" and type(endAt) == "number" and self:SpanWorthKeeping(journey, guid, startAt, endAt) then
+			copy[#copy + 1] = startAt
+			copy[#copy + 1] = endAt
+		end
+	end
+	return copy
+end
+
 function ns.DB:CompanyReport(journey, sessions, t0, t1)
 	local list = {}
 	local with = journey and journey.with
@@ -1324,7 +1704,9 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 	local liveEnd = CompanyLiveEnd(self, journey)
 	local rows = {}
 	for guid, spans in pairs(with) do
-		if type(guid) == "string" and type(spans) == "table" and #spans > 0 then
+		local kept = KeptSpans(self, journey, guid, spans, liveEnd)
+		if type(guid) == "string" and #kept > 0 then
+			spans = kept
 			local person = people[guid]
 			local name = type(person) == "table" and person.n or nil
 			if type(name) ~= "string" or name == "" then
@@ -1348,6 +1730,7 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 				metBy = type(person) == "table" and person.by or nil,
 				metName = type(person) == "table" and person.bn or nil,
 				metLevel = type(person) == "table" and person.lv or 0,
+				earned = type(person) == "table" and person.ok or nil,
 			}
 		end
 	end
@@ -1402,7 +1785,15 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 			end
 		end
 		row.metName = nil
-		if row.seconds >= 1 or row.quests > 0 or row.accepts > 0 or row.kills > 0 or row.deaths > 0 or row.dungeons > 0 or row.raids > 0 then
+		local earnedHere = type(row.earned) == "number"
+		if earnedHere and type(t0) == "number" and row.earned < t0 then
+			earnedHere = false
+		end
+		if earnedHere and type(t1) == "number" and row.earned > t1 then
+			earnedHere = false
+		end
+		row.earned = nil
+		if earnedHere or row.seconds >= 1 or row.quests > 0 or row.accepts > 0 or row.kills > 0 or row.deaths > 0 or row.dungeons > 0 or row.raids > 0 then
 			list[#list + 1] = row
 		end
 	end

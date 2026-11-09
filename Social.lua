@@ -1,9 +1,13 @@
 local _, ns = ...
 
--- Roster only. How long you were together is the span list on the journey.
--- Quest turn-ins, kills, deaths, and instance doors are already on the path,
--- so those totals are counted when the replay asks. Objective ticks are not
--- stored: they cannot be rebuilt later, and they fire too often to keep.
+-- Roster only. A person is saved after a quest, a finished objective, a kill,
+-- a death, or an instance while their span covers that moment. Being invited
+-- is not enough, and the logout save drops anyone who never crossed that line.
+-- Objective ticks are not stored. Finishing one only marks the span as worth keeping.
+--
+-- A reload does not guess who joined while the UI was down. People already
+-- worth saving are the same stretch if they are still here within a few minutes.
+-- Anyone new starts when the roster can first be read.
 
 ns.Social = {
 	active = false,
@@ -54,14 +58,19 @@ function ns.Social:EnsureEvents()
 	end
 	if not self.frame then
 		self.frame = CreateFrame("Frame")
-		self.frame:SetScript("OnEvent", function()
-			self:OnEvent()
+		self.frame:SetScript("OnEvent", function(_, event, ...)
+			if event == "QUEST_LOG_CRITERIA_UPDATE" then
+				self:OnCriteria(...)
+			else
+				self:OnEvent()
+			end
 		end)
 	end
 	local frame = self.frame
 	frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 	frame:RegisterEvent("GROUP_JOINED")
 	frame:RegisterEvent("GROUP_LEFT")
+	frame:RegisterEvent("QUEST_LOG_CRITERIA_UPDATE")
 	self.eventsReady = true
 	return true
 end
@@ -88,7 +97,85 @@ function ns.Social:Schedule()
 end
 
 function ns.Social:Disable()
-	if ns.DB:CloseCompany(ns.DB:Now()) then
+	ns.DB:CloseCompany(ns.DB:Now())
+	ns.DB:PruneIdleCompany(false)
+	Notify()
+end
+
+function ns.Social:Remember(members, joined, now)
+	self.seen = self.seen or {}
+	local mapID, x, y
+	if ns.GPS and ns.GPS.ReadPosition then
+		mapID, x, y = ns.GPS:ReadPosition()
+	end
+	if not mapID then
+		mapID = self:MapID()
+		x, y = x or 0, y or 0
+	end
+	local fresh = {}
+	for i = 1, #joined do
+		fresh[joined[i]] = true
+	end
+	for guid, info in pairs(members) do
+		local row = self.seen[guid]
+		if type(row) ~= "table" then
+			row = {}
+			self.seen[guid] = row
+		end
+		if type(info.n) == "string" and info.n ~= "" then
+			row.n = info.n
+		end
+		if type(info.c) == "string" and info.c ~= "" then
+			row.c = info.c
+		end
+		if type(info.lv) == "number" and info.lv > 0 and type(row.lv) ~= "number" then
+			row.lv = info.lv
+		end
+		if fresh[guid] or type(row.t) ~= "number" then
+			row.t = now
+			row.map = mapID or 0
+			row.x = x
+			row.y = y
+		end
+		local people = ZipperDB and ZipperDB.people
+		if type(people) == "table" and type(people[guid]) == "table" then
+			ns.DB:TouchPerson(guid, row, row.t or now, row.map)
+		end
+	end
+end
+
+function ns.Social:Recall(guid)
+	local row = self.seen and self.seen[guid]
+	if type(row) ~= "table" then
+		return nil
+	end
+	return row, row.map, row.x, row.y
+end
+
+function ns.Social:OnCriteria(questID, treeID, _, fulfilled, required)
+	if not self.active or not ns.Config:Enabled("party") then
+		return
+	end
+	fulfilled = PlainNumber(fulfilled)
+	if not fulfilled then
+		return
+	end
+	questID = PlainNumber(questID) or 0
+	treeID = PlainNumber(treeID) or 0
+	required = PlainNumber(required)
+	local key = questID .. ":" .. treeID
+	self.progress = self.progress or {}
+	local previous = self.progress[key]
+	self.progress[key] = fulfilled
+	-- The first sight of a criteria is a baseline. Login replays objectives
+	-- that were already finished, and those must not count as a new moment.
+	if not self.synced or type(previous) ~= "number" or fulfilled <= previous then
+		return
+	end
+	if not required or required <= 0 or fulfilled < required then
+		return
+	end
+	if ns.DB:CreditCompany(ns.DB:Now()) then
 		Notify()
 	end
 end
@@ -194,14 +281,22 @@ function ns.Social:Sync()
 		end
 		return
 	end
+	-- Right after login an empty roster is often just late, not a real leave.
+	-- Wait out a few tries before closing the people who were already saved.
+	if not next(members) and not self.settled then
+		self.tries = (self.tries or 0) + 1
+		if self.tries <= MAX_TRIES then
+			self:Schedule()
+			return
+		end
+	end
+	self.settled = true
+	self.synced = true
 	self.tries = 0
 	local now = ns.DB:Now()
-	local joined, changed = ns.DB:ApplyRoster(members, now, self:MapID())
-	if #joined > 0 then
-		if not ns.GPS:Mark(ns.Kind.GROUP, #joined) then
-			Notify()
-		end
-	elseif changed then
+	local joined, changed = ns.DB:ApplyRoster(members, now)
+	self:Remember(members, joined, now)
+	if changed then
 		Notify()
 	end
 end
@@ -210,7 +305,10 @@ function ns.Social:Start()
 	self.active = true
 	self:EnsureEvents()
 	local now = ns.DB:Now()
+	self.settled = false
+	self.synced = false
 	ns.DB:SealStaleCompany(now)
+	ns.DB:PruneIdleCompany(false)
 	if not ns.Config:Enabled("party") then
 		self:Disable()
 		return
