@@ -301,14 +301,90 @@ local function CheckText(box)
 	end
 end
 
-local function AddCheck(parent, name, label, x, y)
+local PAGES = {
+	{ key = "general", label = "General" },
+	{ key = "road", label = "The road" },
+	{ key = "moments", label = "Moments" },
+	{ key = "saved", label = "Saved data" },
+}
+
+local ROAD = {
+	{ key = "path", label = "Movement" },
+	{ key = "mount", label = "Mount and dismount" },
+	{ key = "flight", label = "Flights" },
+	{ key = "zone", label = "Zone changes" },
+	{ key = "afk", label = "AFK" },
+}
+
+local MOMENTS = {
+	{ key = "kills", label = "Kills" },
+	{ key = "questAccept", label = "Quest pickups" },
+	{ key = "questTurnin", label = "Quest turn-ins" },
+	{ key = "death", label = "Deaths" },
+	{ key = "hearth", label = "Hearths" },
+	{ key = "summon", label = "Summons" },
+	{ key = "portal", label = "Mage portals" },
+	{ key = "trainer", label = "Trainers" },
+	{ key = "instance", label = "Dungeons and raids" },
+	{ key = "party", label = "Party members" },
+}
+
+local function AddCheck(parent, name, label)
 	local box = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
-	box:SetPoint("TOPLEFT", x, y)
 	local text = CheckText(box)
 	if text then
 		text:SetText(label)
 	end
 	return box
+end
+
+local function HideSliderLabels(slider)
+	for _, key in ipairs({ "Low", "High", "Text" }) do
+		local label = slider[key] or _G[slider:GetName() .. key]
+		if label then
+			label:Hide()
+		end
+	end
+end
+
+local function PageFrame(parent)
+	local page = CreateFrame("Frame", nil, parent)
+	page:SetAllPoints()
+	page:Hide()
+	return page
+end
+
+local function PageNote(parent, text)
+	local note = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	note:SetPoint("TOPLEFT", 16, -16)
+	note:SetPoint("RIGHT", parent, "RIGHT", -16, 0)
+	note:SetJustifyH("LEFT")
+	note:SetText(text)
+	return note
+end
+
+function ns.Config:ShowPage(key)
+	self.page = key
+	if self.pages then
+		for name, page in pairs(self.pages) do
+			page:SetShown(name == key)
+		end
+	end
+	if self.navButtons then
+		for i = 1, #self.navButtons do
+			local button = self.navButtons[i]
+			local selected = button.pageKey == key
+			button.bar:SetShown(selected)
+			if selected then
+				button.label:SetTextColor(1, 1, 1)
+			else
+				button.label:SetTextColor(1, 0.82, 0)
+			end
+		end
+	end
+	if self.purgeList and key ~= "saved" then
+		self.purgeList:Hide()
+	end
 end
 
 function ns.Config:CreateFrame()
@@ -318,46 +394,71 @@ function ns.Config:CreateFrame()
 	-- Same registration Forever Quest Tint uses. The name is what the AddOns list shows.
 	local canvas = CreateFrame("Frame")
 	canvas.name = "Zipper"
-	local scroll = CreateFrame("ScrollFrame", nil, canvas, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", 0, -4)
-	scroll:SetPoint("BOTTOMRIGHT", -28, 4)
-	local panel = CreateFrame("Frame", nil, scroll)
-	panel:SetSize(640, 1040)
-	scroll:SetScrollChild(panel)
 
-	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 16, -16)
-	title:SetText("Zipper")
+	local nav = CreateFrame("Frame", nil, canvas, "BackdropTemplate")
+	nav:SetPoint("TOPLEFT", 8, -8)
+	nav:SetPoint("BOTTOMLEFT", 8, 8)
+	nav:SetWidth(168)
+	nav:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	nav:SetBackdropColor(0, 0, 0, 0.35)
+	nav:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.9)
 
-	local sub = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-	sub:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
-	sub:SetJustifyH("LEFT")
-	sub:SetText("Records this character's journey and replays it on the world map.")
+	local body = CreateFrame("Frame", nil, canvas, "BackdropTemplate")
+	body:SetPoint("TOPLEFT", nav, "TOPRIGHT", 8, 0)
+	body:SetPoint("BOTTOMRIGHT", -8, 8)
+	body:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	body:SetBackdropColor(0, 0, 0, 0.2)
+	body:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.9)
 
-	local remind = AddCheck(panel, "ZipperConfigRemind", "Remind me to /reload", 12, -72)
+	local pages = {}
+	local navButtons = {}
+	for i = 1, #PAGES do
+		local entry = PAGES[i]
+		local button = CreateFrame("Button", nil, nav)
+		button:SetHeight(26)
+		button:SetPoint("TOPLEFT", 6, -8 - ((i - 1) * 26))
+		button:SetPoint("RIGHT", nav, "RIGHT", -6, 0)
+		button.pageKey = entry.key
+		button.bar = button:CreateTexture(nil, "BACKGROUND")
+		button.bar:SetAllPoints()
+		button.bar:SetColorTexture(0.18, 0.40, 0.72, 0.9)
+		button.bar:Hide()
+		button.label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		button.label:SetPoint("LEFT", 10, 0)
+		button.label:SetText(entry.label)
+		button:SetScript("OnClick", function(self)
+			ns.Config:ShowPage(self.pageKey)
+		end)
+		navButtons[i] = button
+		pages[entry.key] = PageFrame(body)
+	end
+
+	local general = pages.general
+	local remind = AddCheck(general, "ZipperConfigRemind", "Remind me to /reload")
+	remind:SetPoint("TOPLEFT", 12, -16)
 	remind:SetScript("OnClick", function(self)
 		ns.Config:SetRemind(self:GetChecked())
 	end)
 
-	local slider = CreateFrame("Slider", "ZipperConfigRemindSlider", panel, "UISliderTemplate")
-	slider:SetPoint("TOPLEFT", 28, -112)
+	local remindLabel = general:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	remindLabel:SetPoint("TOPLEFT", 20, -52)
+	remindLabel:SetText("How often")
+
+	local slider = CreateFrame("Slider", "ZipperConfigRemindSlider", general, "UISliderTemplate")
+	slider:SetPoint("TOPLEFT", 28, -76)
 	slider:SetSize(220, 16)
 	slider:SetMinMaxValues(30, 180)
 	slider:SetValueStep(15)
 	slider:SetObeyStepOnDrag(true)
-	local lowLabel = slider.Low or _G[slider:GetName() .. "Low"]
-	local highLabel = slider.High or _G[slider:GetName() .. "High"]
-	local titleLabel = slider.Text or _G[slider:GetName() .. "Text"]
-	if lowLabel then
-		lowLabel:Hide()
-	end
-	if highLabel then
-		highLabel:Hide()
-	end
-	if titleLabel then
-		titleLabel:Hide()
-	end
+	HideSliderLabels(slider)
 	slider:SetScript("OnValueChanged", function(_, value)
 		if ns.Config.lock then
 			return
@@ -369,36 +470,25 @@ function ns.Config:CreateFrame()
 		end
 	end)
 
-	local valueText = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	local valueText = general:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	valueText:SetPoint("LEFT", slider, "RIGHT", 16, 0)
 	valueText:SetText("1 hour")
 
-	local glanceLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	glanceLabel:SetPoint("TOPLEFT", 16, -148)
+	local glanceLabel = general:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	glanceLabel:SetPoint("TOPLEFT", 16, -112)
 	glanceLabel:SetText("Trail on the map")
 
-	local glanceText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	local glanceText = general:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 	glanceText:SetPoint("LEFT", glanceLabel, "RIGHT", 10, 0)
 	glanceText:SetText(ns.Config:GlanceLabel(ns.Config:GlanceTrail()))
 
-	local glance = CreateFrame("Slider", "ZipperConfigGlanceSlider", panel, "UISliderTemplate")
-	glance:SetPoint("TOPLEFT", 28, -176)
+	local glance = CreateFrame("Slider", "ZipperConfigGlanceSlider", general, "UISliderTemplate")
+	glance:SetPoint("TOPLEFT", 28, -140)
 	glance:SetSize(220, 16)
 	glance:SetMinMaxValues(1, #ns.Config.GLANCE_STOPS)
 	glance:SetValueStep(1)
 	glance:SetObeyStepOnDrag(true)
-	local glanceLow = glance.Low or _G[glance:GetName() .. "Low"]
-	local glanceHigh = glance.High or _G[glance:GetName() .. "High"]
-	local glanceTitle = glance.Text or _G[glance:GetName() .. "Text"]
-	if glanceLow then
-		glanceLow:Hide()
-	end
-	if glanceHigh then
-		glanceHigh:Hide()
-	end
-	if glanceTitle then
-		glanceTitle:Hide()
-	end
+	HideSliderLabels(glance)
 	glance:SetScript("OnValueChanged", function(slider, value)
 		if ns.Config.lock then
 			return
@@ -417,25 +507,45 @@ function ns.Config:CreateFrame()
 		ns.Config:SetGlanceTrail(ns.Config.GLANCE_STOPS[index])
 	end)
 
-	local glanceHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	glanceHint:SetPoint("TOPLEFT", 28, -196)
-	glanceHint:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+	local glanceHint = general:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	glanceHint:SetPoint("TOPLEFT", 28, -162)
+	glanceHint:SetPoint("RIGHT", general, "RIGHT", -16, 0)
 	glanceHint:SetJustifyH("LEFT")
 	glanceHint:SetText("Solid back to this point, then a short fade. The replay panel has its own slider.")
 
-	local record = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	record:SetPoint("TOPLEFT", 16, -230)
-	record:SetText("Record")
-
-	local path = AddCheck(panel, "ZipperConfigPath", "Movement", 12, -254)
-	path:SetScript("OnClick", function(self)
-		ns.Config:SetTrack("path", self:GetChecked())
+	local markers = AddCheck(general, "ZipperConfigMarkers", "Show event markers on the map")
+	markers:SetPoint("TOPLEFT", 12, -196)
+	markers:SetScript("OnClick", function(self)
+		ns.Config:SetShowMarkers(self:GetChecked())
 	end)
 
-	local boxes = { remind = remind, path = path }
-	for i = 1, #TRACKS do
-		local entry = TRACKS[i]
-		local box = AddCheck(panel, "ZipperConfig" .. entry.key, entry.label, 12, -254 - (i * 28))
+	local ghostRed = AddCheck(general, "ZipperConfigGhostRed", "Red ghost trail")
+	ghostRed:SetPoint("TOPLEFT", 12, -228)
+	ghostRed:SetScript("OnClick", function(self)
+		ns.Config:SetGhostRed(self:GetChecked())
+	end)
+
+	local boxes = { remind = remind, showMarkers = markers, ghostRed = ghostRed }
+	local roadNote = PageNote(pages.road, "Unchecking a type stops new records of it. Saved history stays.")
+	for i = 1, #ROAD do
+		local entry = ROAD[i]
+		local box = AddCheck(pages.road, "ZipperConfig" .. entry.key, entry.label)
+		box:SetPoint("TOPLEFT", 12, -36 - ((i - 1) * 28))
+		box.trackKey = entry.key
+		box:SetScript("OnClick", function(self)
+			ns.Config:SetTrack(self.trackKey, self:GetChecked())
+		end)
+		boxes[entry.key] = box
+	end
+	roadNote:SetShown(true)
+
+	PageNote(pages.moments, "Unchecking a type stops new records of it. Saved history stays.")
+	for i = 1, #MOMENTS do
+		local entry = MOMENTS[i]
+		local column = (i - 1) % 2
+		local row = math.floor((i - 1) / 2)
+		local box = AddCheck(pages.moments, "ZipperConfig" .. entry.key, entry.label)
+		box:SetPoint("TOPLEFT", 12 + (column * 230), -36 - (row * 28))
 		box.trackKey = entry.key
 		box:SetScript("OnClick", function(self)
 			ns.Config:SetTrack(self.trackKey, self:GetChecked())
@@ -443,39 +553,16 @@ function ns.Config:CreateFrame()
 		boxes[entry.key] = box
 	end
 
-	local markerY = -254 - ((#TRACKS + 1) * 28)
-	local markers = AddCheck(panel, "ZipperConfigMarkers", "Show event markers on the map", 12, markerY)
-	markers:SetScript("OnClick", function(self)
-		ns.Config:SetShowMarkers(self:GetChecked())
-	end)
-	boxes.showMarkers = markers
-
-	local ghostRed = AddCheck(panel, "ZipperConfigGhostRed", "Red ghost trail", 12, markerY - 28)
-	ghostRed:SetScript("OnClick", function(self)
-		ns.Config:SetGhostRed(self:GetChecked())
-	end)
-	boxes.ghostRed = ghostRed
-
-	local note = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	note:SetPoint("TOPLEFT", ghostRed, "BOTTOMLEFT", 4, -8)
-	note:SetWidth(420)
-	note:SetJustifyH("LEFT")
-	note:SetText("Unchecking a type stops new records of it. Saved history stays.")
-
-	local saved = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	saved:SetPoint("TOPLEFT", note, "BOTTOMLEFT", -4, -28)
-	saved:SetText("Saved data")
-
-	local sizeText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	sizeText:SetPoint("TOPLEFT", saved, "BOTTOMLEFT", 0, -8)
-	sizeText:SetWidth(520)
+	local sizeText = pages.saved:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	sizeText:SetPoint("TOPLEFT", 16, -20)
+	sizeText:SetPoint("RIGHT", pages.saved, "RIGHT", -16, 0)
 	sizeText:SetJustifyH("LEFT")
 	sizeText:SetJustifyV("TOP")
 	sizeText:SetText("Saved journeys")
 
-	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", panel, "UIPanelButtonTemplate")
+	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", pages.saved, "UIPanelButtonTemplate")
 	purgeDrop:SetSize(280, 22)
-	purgeDrop:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -10)
+	purgeDrop:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -16)
 	purgeDrop:SetText("Saved characters")
 	purgeDrop:SetScript("OnClick", function()
 		ns.Config:TogglePurgeList()
@@ -496,7 +583,7 @@ function ns.Config:CreateFrame()
 	purgeList:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
 	purgeList:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
 
-	local purge = CreateFrame("Button", "ZipperConfigPurge", panel, "UIPanelButtonTemplate")
+	local purge = CreateFrame("Button", "ZipperConfigPurge", pages.saved, "UIPanelButtonTemplate")
 	purge:SetSize(80, 22)
 	purge:SetPoint("LEFT", purgeDrop, "RIGHT", 8, 0)
 	purge:SetText("Delete")
@@ -504,7 +591,12 @@ function ns.Config:CreateFrame()
 		ns.Config:ConfirmPurge()
 	end)
 
+	self.pages = pages
+	self.navButtons = navButtons
+	self:ShowPage("general")
+
 	canvas:SetScript("OnShow", function()
+		ns.Config:ShowPage(ns.Config.page or "general")
 		ns.Config:Refresh()
 	end)
 	canvas:SetScript("OnHide", function()
