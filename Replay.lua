@@ -1924,6 +1924,15 @@ function ns.Replay:ScopeCaption()
 		end
 		return string.format(L["Every session on this character, added together. %d sessions."], count)
 	end
+	if self.mode == "span" then
+		local lo = self.sessionLo or self.index or 1
+		local hi = self.sessionHi or lo
+		local picked = hi - lo + 1
+		if picked < 1 then
+			picked = 1
+		end
+		return string.format(L["%d sessions selected."], picked)
+	end
 	if self.mode == "one" then
 		return L["Only the session you picked in the list."]
 	end
@@ -2531,7 +2540,7 @@ end
 
 function ns.Replay:ReloadView()
 	local followTail = (not self.playing) and self.playhead and self.t1 and math.abs(self.playhead - self.t1) < 1
-	local sessions, index = ns.DB:SelectSessions(self.mode, self.index)
+	local sessions, index = ns.DB:SelectSessions(self.mode, self.index, self.sessionHi)
 	self.sessions = sessions
 	self.index = index
 	local t0, t1 = Bounds(sessions)
@@ -2707,7 +2716,7 @@ function ns.Replay:OnDataChanged()
 		self.dirty = true
 		return
 	end
-	if self.frame and self.frame:IsShown() and self.mode ~= "current" and self.mode ~= "all" then
+	if self.frame and self.frame:IsShown() and self.mode ~= "current" and self.mode ~= "all" and self.mode ~= "span" then
 		self.dirty = true
 		return
 	end
@@ -2730,9 +2739,120 @@ function ns.Replay:SetMode(mode, index)
 	if self.t1 then
 		self.playhead = self.t1
 	end
+	self:SyncSessionAnchor()
 	self:StyleModeButtons()
 	self:UpdateReadout()
 	self:Redraw()
+end
+
+function ns.Replay:SyncSessionAnchor()
+	if self.mode == "span" then
+		return
+	end
+	local sessions = ns.DB:Sessions()
+	if self.mode == "all" then
+		self.sessionLo = 1
+		self.sessionHi = #sessions
+		return
+	end
+	if self.mode == "one" and self.index then
+		self.sessionLo = self.index
+		self.sessionHi = self.index
+		return
+	end
+	if self.mode == "current" then
+		local current = ns.DB:Current()
+		for i = 1, #sessions do
+			if sessions[i] == current then
+				self.sessionLo = i
+				self.sessionHi = i
+				return
+			end
+		end
+	end
+end
+
+function ns.Replay:ShowSessions()
+	if self.mode ~= "level" then
+		self:RefreshList()
+		self:StyleModeButtons()
+		return
+	end
+	self.levelLo = nil
+	self.levelHi = nil
+	local other = ns.DB.viewKey and ns.DB.playerKey and ns.DB.viewKey ~= ns.DB.playerKey
+	if other then
+		self:SetMode("all")
+	else
+		self:SetMode("current")
+	end
+end
+
+function ns.Replay:SelectAll()
+	if self.mode == "level" then
+		local groups = self:LevelGroups()
+		local lo, hi
+		for i = 1, #groups do
+			local group = groups[i]
+			local top = group.lvTo or group.lv
+			if not lo or group.lv < lo then
+				lo = group.lv
+			end
+			if not hi or top > hi then
+				hi = top
+			end
+		end
+		if lo then
+			self:SelectLevel(lo, hi, false)
+		end
+		return
+	end
+	self:SetMode("all")
+end
+
+function ns.Replay:SelectSession(index, extend)
+	if not index then
+		return
+	end
+	local count = #ns.DB:Sessions()
+	if count < 1 then
+		return
+	end
+	if index < 1 then
+		index = 1
+	elseif index > count then
+		index = count
+	end
+	if extend and self.sessionLo then
+		if index < self.sessionLo then
+			self.sessionHi = self.sessionHi or self.sessionLo
+			self.sessionLo = index
+		else
+			self.sessionHi = index
+		end
+		if self.sessionHi < self.sessionLo then
+			self.sessionLo, self.sessionHi = self.sessionHi, self.sessionLo
+		end
+	else
+		self.sessionLo = index
+		self.sessionHi = index
+	end
+	local lo = self.sessionLo
+	local hi = self.sessionHi or lo
+	if lo <= 1 and hi >= count then
+		self:SetMode("all")
+		return
+	end
+	if lo == hi then
+		local sessions = ns.DB:Sessions()
+		if sessions[lo] == ns.DB:Current() then
+			self:SetMode("current")
+			return
+		end
+		self:SetMode("one", lo)
+		return
+	end
+	self:SetMode("span", lo)
 end
 
 function ns.Replay:StyleModeButtons()
@@ -2755,10 +2875,12 @@ function ns.Replay:StyleModeButtons()
 			end
 		end
 	end
-	paint(self.sessionButton, self.mode == "current")
-	paint(self.journeyButton, self.mode == "all")
+	paint(self.sessionButton, self.mode ~= "level")
 	if self.levelsButton then
 		paint(self.levelsButton, self.mode == "level")
+	end
+	if self.selectAllButton then
+		paint(self.selectAllButton, false)
 	end
 end
 
@@ -2808,16 +2930,16 @@ function ns.Replay:RefreshLevelList()
 			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
+				local shift = IsShiftKeyDown and IsShiftKeyDown()
+				if shift and issecretvalue and issecretvalue(shift) then
+					shift = false
+				end
 				if button.level then
-					local shift = IsShiftKeyDown and IsShiftKeyDown()
-					if shift and issecretvalue and issecretvalue(shift) then
-						shift = false
-					end
 					ns.Replay:SelectLevel(button.level, button.levelTop or button.level, shift and true or false)
 					return
 				end
 				if button.sessionIndex then
-					ns.Replay:SetMode("one", button.sessionIndex)
+					ns.Replay:SelectSession(button.sessionIndex, shift and true or false)
 				end
 			end)
 			self.rows[i] = row
@@ -2883,22 +3005,35 @@ function ns.Replay:RefreshList()
 			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
+				local shift = IsShiftKeyDown and IsShiftKeyDown()
+				if shift and issecretvalue and issecretvalue(shift) then
+					shift = false
+				end
 				if button.level then
-					local shift = IsShiftKeyDown and IsShiftKeyDown()
-					if shift and issecretvalue and issecretvalue(shift) then
-						shift = false
-					end
 					ns.Replay:SelectLevel(button.level, button.levelTop or button.level, shift and true or false)
 					return
 				end
-				ns.Replay:SetMode("one", button.sessionIndex)
+				if button.sessionIndex then
+					ns.Replay:SelectSession(button.sessionIndex, shift and true or false)
+				end
 			end)
 			self.rows[i] = row
 		end
 		row.sessionIndex = index
 		row.level = nil
 		local duration = (session.seen or session.s) - session.s
-		local selected = (self.mode == "one" and self.index == index) or (self.mode == "current" and session == ns.DB:Current())
+		local lo = self.sessionLo
+		local hi = self.sessionHi or lo
+		local selected = false
+		if self.mode == "all" then
+			selected = true
+		elseif self.mode == "span" and lo and hi then
+			selected = index >= lo and index <= hi
+		elseif self.mode == "one" then
+			selected = self.index == index
+		elseif self.mode == "current" then
+			selected = session == ns.DB:Current()
+		end
 		local gained = ns.DB:LevelsGained(session)
 		row.label:SetText(string.format(L["%s    %s    +%.2f lv    %d kills"], date("%m/%d %H:%M", session.s), FormatClock(duration), gained, session.kills or 0))
 		row.bar:SetShown(selected)
@@ -3352,28 +3487,24 @@ function ns.Replay:CreateFrame()
 		ns.Config:Toggle()
 	end)
 
-	local sessionButton = MakeButton(frame, L["Session"], 100)
+	local sessionButton = MakeButton(frame, L["Sessions"], 96)
 	sessionButton:SetPoint("TOPLEFT", 14, -56)
 	sessionButton:SetScript("OnClick", function()
-		ns.Replay.levelLo = nil
-		ns.Replay.levelHi = nil
-		ns.Replay:SetMode("current")
+		ns.Replay:ShowSessions()
 	end)
 
-	local journeyButton = MakeButton(frame, L["All"], 72)
-	journeyButton:SetPoint("LEFT", sessionButton, "RIGHT", 6, 0)
-	journeyButton:SetScript("OnClick", function()
-		ns.Replay.levelLo = nil
-		ns.Replay.levelHi = nil
-		ns.Replay:SetMode("all")
-	end)
-
-	local levelsButton = MakeButton(frame, L["Levels"], 108)
-	levelsButton:SetPoint("LEFT", journeyButton, "RIGHT", 6, 0)
+	local levelsButton = MakeButton(frame, L["Levels"], 88)
+	levelsButton:SetPoint("LEFT", sessionButton, "RIGHT", 6, 0)
 	levelsButton:SetScript("OnClick", function()
 		ns.Replay.levelLo = nil
 		ns.Replay.levelHi = nil
 		ns.Replay:SetMode("level")
+	end)
+
+	local selectAll = MakeButton(frame, L["Select all"], 104)
+	selectAll:SetPoint("TOPRIGHT", -14, -56)
+	selectAll:SetScript("OnClick", function()
+		ns.Replay:SelectAll()
 	end)
 
 	local scope = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3606,8 +3737,8 @@ function ns.Replay:CreateFrame()
 	self.charPicker = charPicker
 	self.charRows = {}
 	self.sessionButton = sessionButton
-	self.journeyButton = journeyButton
 	self.levelsButton = levelsButton
+	self.selectAllButton = selectAll
 	self.scroll = scroll
 	self.listContent = content
 	self.rows = {}
@@ -3810,7 +3941,7 @@ function ns.Replay:ApplySkin()
 		if self.closeButton then
 			paint(skin.CloseButton, self.closeButton)
 		end
-		local buttons = { self.sessionButton, self.journeyButton, self.playButton, self.optionsButton }
+		local buttons = { self.sessionButton, self.selectAllButton, self.playButton, self.optionsButton }
 		if self.speedButtons then
 			for j = 1, #self.speedButtons do
 				buttons[#buttons + 1] = self.speedButtons[j]

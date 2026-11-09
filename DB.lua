@@ -2457,10 +2457,24 @@ function ns.DB:Purge(key)
 	return true
 end
 
-function ns.DB:SelectSessions(mode, index)
+function ns.DB:SelectSessions(mode, index, indexHi)
 	local sessions = self:Sessions()
 	if mode == "all" then
 		return sessions
+	end
+	if mode == "span" and index then
+		local hi = indexHi or index
+		local lo = index
+		if hi < lo then
+			lo, hi = hi, lo
+		end
+		local picked = {}
+		for i = lo, hi do
+			if sessions[i] then
+				picked[#picked + 1] = sessions[i]
+			end
+		end
+		return picked, lo
 	end
 	if mode == "one" and sessions[index] then
 		return { sessions[index] }, index
