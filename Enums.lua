@@ -1,5 +1,10 @@
 local _, ns = ...
 
+if not ns.L then
+	ns.L = setmetatable({}, { __index = function(_, key) return key end })
+end
+local L = ns.L
+
 -- Stored as numbers. Names and colors are for code and the replay, not the saved data.
 ns.Kind = {
 	KILL = 1,
@@ -34,27 +39,27 @@ ns.Travel = {
 }
 
 ns.KindName = {
-	[1] = "Kill",
-	[2] = "Quest accepted",
-	[3] = "Quest turned in",
-	[4] = "Death",
-	[5] = "Summon",
-	[6] = "Hearth",
-	[7] = "Flight start",
-	[8] = "Flight end",
-	[9] = "Mounted",
-	[10] = "Dismounted",
-	[11] = "AFK start",
-	[12] = "AFK end",
-	[13] = "Entered instance",
-	[14] = "Left instance",
-	[15] = "Zone",
-	[16] = "Level up",
-	[17] = "Joined",
-	[18] = "Portal",
-	[19] = "Trainer",
-	[20] = "Campfire",
-	[21] = "Sleeping bag",
+	[1] = L["Kill"],
+	[2] = L["Quest accepted"],
+	[3] = L["Quest turned in"],
+	[4] = L["Death"],
+	[5] = L["Summon"],
+	[6] = L["Hearth"],
+	[7] = L["Flight start"],
+	[8] = L["Flight end"],
+	[9] = L["Mounted"],
+	[10] = L["Dismounted"],
+	[11] = L["AFK start"],
+	[12] = L["AFK end"],
+	[13] = L["Entered instance"],
+	[14] = L["Left instance"],
+	[15] = L["Zone"],
+	[16] = L["Level up"],
+	[17] = L["Joined"],
+	[18] = L["Portal"],
+	[19] = L["Trainer"],
+	[20] = L["Campfire"],
+	[21] = L["Sleeping bag"],
 }
 
 ns.KindColor = {
@@ -114,20 +119,20 @@ end
 
 -- Profession trainers. The number is stored. The name is only for the tooltip.
 ns.ProfessionName = {
-	[1] = "Alchemy",
-	[2] = "Blacksmithing",
-	[3] = "Enchanting",
-	[4] = "Engineering",
-	[5] = "Herbalism",
-	[6] = "Inscription",
-	[7] = "Jewelcrafting",
-	[8] = "Leatherworking",
-	[9] = "Mining",
-	[10] = "Skinning",
-	[11] = "Tailoring",
-	[12] = "Cooking",
-	[13] = "First Aid",
-	[14] = "Fishing",
+	[1] = L["Alchemy"],
+	[2] = L["Blacksmithing"],
+	[3] = L["Enchanting"],
+	[4] = L["Engineering"],
+	[5] = L["Herbalism"],
+	[6] = L["Inscription"],
+	[7] = L["Jewelcrafting"],
+	[8] = L["Leatherworking"],
+	[9] = L["Mining"],
+	[10] = L["Skinning"],
+	[11] = L["Tailoring"],
+	[12] = L["Cooking"],
+	[13] = L["First Aid"],
+	[14] = L["Fishing"],
 }
 
 local PROFESSION_WORD = {
@@ -190,13 +195,21 @@ ns.Instance = {
 }
 
 ns.InstanceName = {
-	[1] = "Dungeon",
-	[2] = "Raid",
-	[3] = "PvP",
-	[4] = "Arena",
-	[5] = "Scenario",
-	[6] = "Instance",
+	[1] = L["Dungeon"],
+	[2] = L["Raid"],
+	[3] = L["PvP"],
+	[4] = L["Arena"],
+	[5] = L["Scenario"],
+	[6] = L["Instance"],
 }
+
+function ns.ClassLabel(classFile)
+	local names = LOCALIZED_CLASS_NAMES_MALE or LOCALIZED_CLASS_NAMES_FEMALE
+	if classFile and type(names) == "table" and names[classFile] then
+		return names[classFile]
+	end
+	return ns.ClassName and ns.ClassName[classFile]
+end
 
 ns.CONTINUE_SECONDS = 180
 ns.SAMPLE_CAP = 20000

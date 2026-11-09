@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 ns.DB = {}
 
@@ -823,15 +824,15 @@ end
 
 function ns.DB:RecapText(sessions)
 	local kills, quests, levels = self:RecapNumbers(sessions or {})
-	local enemy = (kills == 1) and "enemy" or "enemies"
-	local quest = (quests == 1) and "quest" or "quests"
+	local enemy = (kills == 1) and L["enemy"] or L["enemies"]
+	local quest = (quests == 1) and L["quest"] or L["quests"]
 	local levelText
 	if math.abs(levels - 1) < 0.005 then
-		levelText = "1 level"
+		levelText = L["1 level"]
 	else
-		levelText = string.format("%.2f levels", levels)
+		levelText = string.format(L["%.2f levels"], levels)
 	end
-	return string.format("You killed %s %s, finished %s %s, and gained %s.", Comma(kills), enemy, Comma(quests), quest, levelText)
+	return string.format(L["You killed %s %s, finished %s %s, and gained %s."], Comma(kills), enemy, Comma(quests), quest, levelText)
 end
 
 function ns.DB:Open(now, forceNew)
@@ -1670,13 +1671,13 @@ function ns.DB:JoinsAt(journey, when)
 					local level = type(person) == "table" and tonumber(person.lv) or 0
 					local first = type(person) == "table" and type(person.t) == "number" and math.abs(person.t - when) <= 2
 					if type(name) ~= "string" or name == "" then
-						name = "Someone"
+						name = L["Someone"]
 					end
 					found[#found + 1] = {
 						guid = guid,
 						name = name,
 						classFile = type(classFile) == "string" and classFile or nil,
-						className = ns.ClassName and ns.ClassName[classFile] or nil,
+						className = ns.ClassLabel and ns.ClassLabel(classFile) or nil,
 						first = first and true or false,
 						level = level,
 					}
@@ -1804,7 +1805,7 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 			local person = people[guid]
 			local name = type(person) == "table" and person.n or nil
 			if type(name) ~= "string" or name == "" then
-				name = "Someone"
+				name = L["Someone"]
 			end
 			rows[guid] = {
 				guid = guid,
@@ -1875,7 +1876,7 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 			local other = ZipperDB.journeys and ZipperDB.journeys[row.metBy]
 			row.metByName = (type(other) == "table" and other.name) or row.metName
 			if type(row.metByName) ~= "string" or row.metByName == "" then
-				row.metByName = "another character"
+				row.metByName = L["another character"]
 			end
 		end
 		row.metName = nil
@@ -2217,7 +2218,7 @@ function ns.DB:Purge(key)
 		ns.Replay.statsKey = nil
 		ns.Replay.chapterKey = nil
 		if removingCurrent and ns.Replay.playButton then
-			ns.Replay.playButton:SetText("Play")
+			ns.Replay.playButton:SetText(L["Play"])
 		end
 		if ns.Replay.RefreshCharacters then
 			ns.Replay:RefreshCharacters()

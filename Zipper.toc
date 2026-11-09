@@ -6,6 +6,10 @@
 ## SavedVariables: ZipperDB
 ## SavedVariablesPerCharacter: ZipperCharDB
 
+Libs/LibStub/LibStub.lua
+Libs/AceLocale-3.0/AceLocale-3.0.lua
+Locales/Locales.xml
+
 Enums.lua
 Config.lua
 DB.lua

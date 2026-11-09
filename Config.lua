@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 ns.Config = {}
 
@@ -85,28 +86,28 @@ end
 function ns.Config:IntervalLabel(minutes)
 	minutes = self:ClampMinutes(minutes)
 	if minutes == 60 then
-		return "1 hour"
+		return L["1 hour"]
 	end
 	if minutes % 60 == 0 then
-		return (minutes / 60) .. " hours"
+		return string.format(L["%d hours"], minutes / 60)
 	end
 	if minutes > 60 then
-		return string.format("%d hr %d min", math.floor(minutes / 60), minutes % 60)
+		return string.format(L["%d hr %d min"], math.floor(minutes / 60), minutes % 60)
 	end
-	return minutes .. " min"
+	return string.format(L["%d min"], minutes)
 end
 
 function ns.Config:ReminderText()
 	local minutes = self:Get().remindMinutes
 	local span
 	if minutes == 60 then
-		span = "an hour"
+		span = L["an hour"]
 	elseif minutes % 60 == 0 then
-		span = (minutes / 60) .. " hours"
+		span = string.format(L["%d hours"], minutes / 60)
 	else
-		span = minutes .. " minutes"
+		span = string.format(L["%d minutes"], minutes)
 	end
-	return string.format("Zipper has accumulated %s of data which can be lost. Suggest `/reload` to save it forever.", span)
+	return string.format(L["Zipper has accumulated %s of data which can be lost. Suggest `/reload` to save it forever."], span)
 end
 
 function ns.Config:Get()
@@ -180,9 +181,9 @@ end
 
 function ns.Config:GlanceLabel(minutes)
 	if not minutes or minutes <= 0 then
-		return "Full"
+		return L["Full"]
 	end
-	return minutes .. " min"
+	return string.format(L["%d min"], minutes)
 end
 
 function ns.Config:SetGlanceTrail(minutes)
@@ -306,32 +307,32 @@ local function CheckText(box)
 end
 
 local PAGES = {
-	{ key = "general", label = "General" },
-	{ key = "road", label = "The road" },
-	{ key = "moments", label = "Moments" },
-	{ key = "saved", label = "Saved data" },
+	{ key = "general", label = L["General"] },
+	{ key = "road", label = L["The road"] },
+	{ key = "moments", label = L["Moments"] },
+	{ key = "saved", label = L["Saved data"] },
 }
 
 local ROAD = {
-	{ key = "path", label = "Movement" },
-	{ key = "mount", label = "Mount and dismount" },
-	{ key = "flight", label = "Flights" },
-	{ key = "zone", label = "Zone changes" },
-	{ key = "afk", label = "AFK" },
-	{ key = "rest", label = "Camps and sleeping bags" },
+	{ key = "path", label = L["Movement"] },
+	{ key = "mount", label = L["Mount and dismount"] },
+	{ key = "flight", label = L["Flights"] },
+	{ key = "zone", label = L["Zone changes"] },
+	{ key = "afk", label = L["AFK"] },
+	{ key = "rest", label = L["Camps and sleeping bags"] },
 }
 
 local MOMENTS = {
-	{ key = "kills", label = "Kills" },
-	{ key = "questAccept", label = "Quest pickups" },
-	{ key = "questTurnin", label = "Quest turn-ins" },
-	{ key = "death", label = "Deaths" },
-	{ key = "hearth", label = "Hearths" },
-	{ key = "summon", label = "Summons" },
-	{ key = "portal", label = "Mage portals" },
-	{ key = "trainer", label = "Trainers" },
-	{ key = "instance", label = "Dungeons and raids" },
-	{ key = "party", label = "Party members" },
+	{ key = "kills", label = L["Kills"] },
+	{ key = "questAccept", label = L["Quest pickups"] },
+	{ key = "questTurnin", label = L["Quest turn-ins"] },
+	{ key = "death", label = L["Deaths"] },
+	{ key = "hearth", label = L["Hearths"] },
+	{ key = "summon", label = L["Summons"] },
+	{ key = "portal", label = L["Mage portals"] },
+	{ key = "trainer", label = L["Trainers"] },
+	{ key = "instance", label = L["Dungeons and raids"] },
+	{ key = "party", label = L["Party members"] },
 }
 
 local function AddCheck(parent, name, label)
@@ -447,7 +448,7 @@ function ns.Config:CreateFrame()
 	end
 
 	local general = pages.general
-	local remind = AddCheck(general, "ZipperConfigRemind", "Remind me to /reload")
+	local remind = AddCheck(general, "ZipperConfigRemind", L["Remind me to /reload"])
 	remind:SetPoint("TOPLEFT", 12, -16)
 	remind:SetScript("OnClick", function(self)
 		ns.Config:SetRemind(self:GetChecked())
@@ -455,7 +456,7 @@ function ns.Config:CreateFrame()
 
 	local remindLabel = general:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	remindLabel:SetPoint("TOPLEFT", 20, -52)
-	remindLabel:SetText("How often")
+	remindLabel:SetText(L["How often"])
 
 	local slider = CreateFrame("Slider", "ZipperConfigRemindSlider", general, "UISliderTemplate")
 	slider:SetPoint("TOPLEFT", 28, -76)
@@ -477,11 +478,11 @@ function ns.Config:CreateFrame()
 
 	local valueText = general:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	valueText:SetPoint("LEFT", slider, "RIGHT", 16, 0)
-	valueText:SetText("1 hour")
+	valueText:SetText(L["1 hour"])
 
 	local glanceLabel = general:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	glanceLabel:SetPoint("TOPLEFT", 16, -112)
-	glanceLabel:SetText("Trail on the map")
+	glanceLabel:SetText(L["Trail on the map"])
 
 	local glanceText = general:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 	glanceText:SetPoint("LEFT", glanceLabel, "RIGHT", 10, 0)
@@ -516,22 +517,22 @@ function ns.Config:CreateFrame()
 	glanceHint:SetPoint("TOPLEFT", 28, -162)
 	glanceHint:SetPoint("RIGHT", general, "RIGHT", -16, 0)
 	glanceHint:SetJustifyH("LEFT")
-	glanceHint:SetText("Solid back to this point, then a short fade. The replay panel has its own slider.")
+	glanceHint:SetText(L["Solid back to this point, then a short fade. The replay panel has its own slider."])
 
-	local markers = AddCheck(general, "ZipperConfigMarkers", "Show event markers on the map")
+	local markers = AddCheck(general, "ZipperConfigMarkers", L["Show event markers on the map"])
 	markers:SetPoint("TOPLEFT", 12, -196)
 	markers:SetScript("OnClick", function(self)
 		ns.Config:SetShowMarkers(self:GetChecked())
 	end)
 
-	local ghostRed = AddCheck(general, "ZipperConfigGhostRed", "Red ghost trail")
+	local ghostRed = AddCheck(general, "ZipperConfigGhostRed", L["Red ghost trail"])
 	ghostRed:SetPoint("TOPLEFT", 12, -228)
 	ghostRed:SetScript("OnClick", function(self)
 		ns.Config:SetGhostRed(self:GetChecked())
 	end)
 
 	local boxes = { remind = remind, showMarkers = markers, ghostRed = ghostRed }
-	local roadNote = PageNote(pages.road, "Unchecking a type stops new records of it. Saved history stays.")
+	local roadNote = PageNote(pages.road, L["Unchecking a type stops new records of it. Saved history stays."])
 	for i = 1, #ROAD do
 		local entry = ROAD[i]
 		local box = AddCheck(pages.road, "ZipperConfig" .. entry.key, entry.label)
@@ -544,7 +545,7 @@ function ns.Config:CreateFrame()
 	end
 	roadNote:SetShown(true)
 
-	PageNote(pages.moments, "Unchecking a type stops new records of it. Saved history stays.")
+	PageNote(pages.moments, L["Unchecking a type stops new records of it. Saved history stays."])
 	for i = 1, #MOMENTS do
 		local entry = MOMENTS[i]
 		local column = (i - 1) % 2
@@ -563,12 +564,12 @@ function ns.Config:CreateFrame()
 	sizeText:SetPoint("RIGHT", pages.saved, "RIGHT", -16, 0)
 	sizeText:SetJustifyH("LEFT")
 	sizeText:SetJustifyV("TOP")
-	sizeText:SetText("Saved journeys")
+	sizeText:SetText(L["Saved journeys"])
 
 	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", pages.saved, "UIPanelButtonTemplate")
 	purgeDrop:SetSize(280, 22)
 	purgeDrop:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -16)
-	purgeDrop:SetText("Saved characters")
+	purgeDrop:SetText(L["Saved characters"])
 	purgeDrop:SetScript("OnClick", function()
 		ns.Config:TogglePurgeList()
 	end)
@@ -591,7 +592,7 @@ function ns.Config:CreateFrame()
 	local purge = CreateFrame("Button", "ZipperConfigPurge", pages.saved, "UIPanelButtonTemplate")
 	purge:SetSize(80, 22)
 	purge:SetPoint("LEFT", purgeDrop, "RIGHT", 8, 0)
-	purge:SetText("Delete")
+	purge:SetText(L["Delete"])
 	purge:SetScript("OnClick", function()
 		ns.Config:ConfirmPurge()
 	end)
@@ -661,7 +662,7 @@ end
 
 local function FormatBytes(bytes)
 	if type(bytes) ~= "number" then
-		return "unknown"
+		return "—"
 	end
 	if bytes < 0 then
 		bytes = 0
@@ -680,14 +681,14 @@ function ns.Config:GrowthText()
 	if not perHour or perHour < 1 or (span or 0) < 300 then
 		return ""
 	end
-	return string.format("About %s per hour.", FormatBytes(perHour))
+	return string.format(L["About %s per hour."], FormatBytes(perHour))
 end
 
 function ns.Config:PaintSize()
 	if not self.sizeText then
 		return
 	end
-	local text = "Saved journeys  " .. FormatBytes(self.accountBytes)
+	local text = string.format(L["Saved journeys  %s"], FormatBytes(self.accountBytes))
 	local rate = self:GrowthText()
 	if rate ~= "" then
 		text = text .. "\n" .. rate
@@ -753,7 +754,7 @@ end
 
 function ns.Config:PurgeLabel(row)
 	if not row then
-		return "Saved characters"
+		return L["Saved characters"]
 	end
 	return string.format("%s   %s", row.label, FormatBytes(row.bytes))
 end
@@ -848,9 +849,9 @@ function ns.Config:ConfirmPurge()
 	local label = ns.DB:JourneyLabel(journey)
 	if not StaticPopupDialogs.ZIPPER_PURGE then
 		StaticPopupDialogs.ZIPPER_PURGE = {
-			text = "Delete %s?\n\nType gone forever to confirm.",
-			button1 = "Delete",
-			button2 = "Cancel",
+			text = L["Delete %s?\n\nType gone forever to confirm."],
+			button1 = L["Delete"],
+			button2 = L["Cancel"],
 			hasEditBox = true,
 			maxLetters = 32,
 			timeout = 0,
@@ -890,7 +891,7 @@ function ns.Config:ConfirmPurge()
 				if ns.DB:Purge(which) then
 					ns.Config.purgeKey = nil
 					ns.Config:RefreshSize()
-					ns:Print(name .. " is gone.")
+					ns:Print(string.format(L["%s is gone."], name))
 				end
 			end,
 		}

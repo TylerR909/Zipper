@@ -1,4 +1,5 @@
 local ADDON_NAME, ns = ...
+local L = ns.L
 
 Zipper = ns
 
@@ -19,7 +20,7 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		local _, continued = ns.DB:Open(ns.DB:Now(), false)
 		ns.GPS:Start(continued)
 		ns.Social:Start()
-		ns:Print("recording. /zipper opens the map replay.")
+		ns:Print(L["recording. /zipper opens the map replay."])
 		ns.Config:StartReminder()
 		ns.Config:StartSizePoll()
 	elseif event == "PLAYER_LOGOUT" then
@@ -47,9 +48,9 @@ SlashCmdList.ZIPPER = function(msg)
 		return
 	end
 	if msg == "help" then
-		ns:Print("/zipper — open the map, the route, and the replay")
-		ns:Print("/zipper config — reminder and what gets recorded")
-		ns:Print("/zipper status — sessions and the current recap")
+		ns:Print(L["/zipper — open the map, the route, and the replay"])
+		ns:Print(L["/zipper config — reminder and what gets recorded"])
+		ns:Print(L["/zipper status — sessions and the current recap"])
 		return
 	end
 	if msg == "config" or msg == "options" or msg == "settings" then
@@ -58,12 +59,12 @@ SlashCmdList.ZIPPER = function(msg)
 	end
 	if msg == "status" then
 		local sessions, points, events = ns.DB:Stats()
-		ns:Print(string.format("%d sessions, %d points, %d events.", sessions, points, events))
+		ns:Print(string.format(L["%d sessions, %d points, %d events."], sessions, points, events))
 		local current = ns.DB:Current()
 		if current then
 			ns:Print(ns.DB:RecapText({ current }))
 		end
 		return
 	end
-	ns:Print("unknown command. Try /zipper help")
+	ns:Print(L["unknown command. Try /zipper help"])
 end

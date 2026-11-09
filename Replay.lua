@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 ns.Replay = {
 	mode = "current",
@@ -337,35 +338,35 @@ function ns.Replay:AcquireMarker()
 			GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
 			if pin.kind == Kind.KILL then
 				local mobID, elite, rare = ns.DB:ReadKill(pin.extra)
-				local title = "Kill"
+				local title = L["Kill"]
 				if elite and rare then
-					title = "Rare elite kill"
+					title = L["Rare elite kill"]
 				elseif elite then
-					title = "Elite kill"
+					title = L["Elite kill"]
 				elseif rare then
-					title = "Rare kill"
+					title = L["Rare kill"]
 				end
 				GameTooltip:SetText(title, 1, 0.25, 0.2)
 				if mobID > 0 then
-					GameTooltip:AddLine("Mob " .. mobID, 1, 1, 1)
+					GameTooltip:AddLine(string.format(L["Mob %d"], mobID), 1, 1, 1)
 				end
 			elseif pin.kind == Kind.GROUP then
 				ns.Replay:GroupTooltip(pin)
 			elseif pin.kind == Kind.PORTAL or pin.kind == Kind.TRAINER or pin.kind == Kind.SUMMON or pin.kind == Kind.CAMP or pin.kind == Kind.SLEEP then
 				ns.Replay:TravelTooltip(pin)
 			else
-				GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
+				GameTooltip:SetText(ns.KindName[pin.kind] or L["Event"], 1, 0.9, 0.4)
 			end
 			if pin.kind == Kind.LEVEL and pin.extra and pin.extra > 0 then
-				GameTooltip:AddLine("Reached level " .. pin.extra, 1, 1, 1)
+				GameTooltip:AddLine(string.format(L["Reached level %d"], pin.extra), 1, 1, 1)
 			elseif pin.extra and (pin.kind == Kind.QUEST_ACCEPT or pin.kind == Kind.QUEST_TURNIN) and pin.extra > 0 then
 				local title = C_QuestLog.GetTitleForQuestID(pin.extra)
-				GameTooltip:AddLine(title or ("Quest " .. pin.extra), 1, 1, 1)
+				GameTooltip:AddLine(title or string.format(L["Quest %d"], pin.extra), 1, 1, 1)
 			elseif pin.kind == Kind.ZONE and pin.mapID then
 				local info = C_Map.GetMapInfo(pin.mapID)
-				GameTooltip:AddLine((info and info.name) or ("Map " .. pin.mapID), 1, 1, 1)
+				GameTooltip:AddLine((info and info.name) or string.format(L["Map %d"], pin.mapID), 1, 1, 1)
 			elseif (pin.kind == Kind.INSTANCE_ENTER or pin.kind == Kind.INSTANCE_LEAVE) and pin.extra and pin.extra > 0 then
-				GameTooltip:AddLine(ns.InstanceName[pin.extra] or "Instance", 1, 1, 1)
+				GameTooltip:AddLine(ns.InstanceName[pin.extra] or L["Instance"], 1, 1, 1)
 			end
 			if pin.when then
 				GameTooltip:AddLine(date("%m/%d %H:%M", pin.when), 0.7, 0.7, 0.7)
@@ -581,9 +582,9 @@ end
 
 function ns.Replay:TrailLabel(minutes)
 	if not minutes or minutes <= 0 then
-		return "Full"
+		return L["Full"]
 	end
-	return minutes .. " min"
+	return string.format(L["%d min"], minutes)
 end
 
 function ns.Replay:SetReplayTrail(minutes)
@@ -1210,7 +1211,7 @@ function ns.Replay:CollectStats(sessions)
 		if not yardsKnown then
 			return "—"
 		end
-		return Comma(math.floor((value or 0) + 0.5)) .. " yd"
+		return string.format(L["%s yd"], Comma(math.floor((value or 0) + 0.5)))
 	end
 	local function percent(value)
 		if not value or value <= 0 then
@@ -1225,49 +1226,49 @@ function ns.Replay:CollectStats(sessions)
 	local party, raid = ns.Instance.PARTY, ns.Instance.RAID
 	local pvp, arena, scenario, other = ns.Instance.PVP, ns.Instance.ARENA, ns.Instance.SCENARIO, ns.Instance.OTHER
 	local rows = {
-		{ header = "Time" },
-		{ "Recorded", FormatClock(recorded) },
-		{ "On foot", FormatClock(footTime) },
-		{ "Mounted", FormatClock(mountTime) },
-		{ "Flight path", FormatClock(flightTime) },
-		{ "AFK", FormatClock(afk) },
-		{ "Camped", FormatClock(camp) },
-		{ "Slept", FormatClock(slept) },
-		{ "Dungeons", FormatClock(inside[party]) },
-		{ "Raids", FormatClock(inside[raid]) },
-		{ "Battlegrounds", FormatClock(inside[pvp]) },
-		{ "Arenas", FormatClock(inside[arena]) },
-		{ "Scenarios", FormatClock(inside[scenario]) },
-		{ "Other instances", FormatClock(inside[other]) },
-		{ header = "Distance" },
-		{ "On foot", yards(footYards) },
-		{ "Mounted", yards(mountYards) },
-		{ "Flight path", yards(flightYards) },
-		{ "Fastest", percent(maxSpeed) },
-		{ "Average speed", percent(average) },
-		{ header = "Progress" },
-		{ "Levels", string.format("+%.2f", levels) },
-		{ "Kills", Comma(kills) },
-		{ "Quests picked up", Comma(accepts) },
-		{ "Quests turned in", Comma(turnins) },
-		{ "Deaths", Comma(deaths) },
-		{ header = "Moments" },
-		{ "Summons", Comma(summons) },
-		{ "Hearths", Comma(hearths) },
-		{ "Portals", Comma(portals) },
-		{ "Trainers", Comma(trainers) },
-		{ "Flights", Comma(flights) },
-		{ "Mounts", Comma(mounts) },
-		{ "Dungeons entered", Comma(entered[party]) },
-		{ "Raids entered", Comma(entered[raid]) },
-		{ "Battlegrounds entered", Comma(entered[pvp]) },
-		{ "Arenas entered", Comma(entered[arena]) },
-		{ "Scenarios entered", Comma(entered[scenario]) },
-		{ "Other instances entered", Comma(entered[other]) },
-		{ "Zone changes", Comma(zoneChanges) },
-		{ "Zones visited", Comma(zoneCount) },
-		{ "Path samples", Comma(samples) },
-		{ "Sessions", Comma(#sessions) },
+		{ header = L["Time"] },
+		{ L["Recorded"], FormatClock(recorded) },
+		{ L["On foot"], FormatClock(footTime) },
+		{ L["Mounted"], FormatClock(mountTime) },
+		{ L["Flight path"], FormatClock(flightTime) },
+		{ L["AFK"], FormatClock(afk) },
+		{ L["Camped"], FormatClock(camp) },
+		{ L["Slept"], FormatClock(slept) },
+		{ L["Dungeons"], FormatClock(inside[party]) },
+		{ L["Raids"], FormatClock(inside[raid]) },
+		{ L["Battlegrounds"], FormatClock(inside[pvp]) },
+		{ L["Arenas"], FormatClock(inside[arena]) },
+		{ L["Scenarios"], FormatClock(inside[scenario]) },
+		{ L["Other instances"], FormatClock(inside[other]) },
+		{ header = L["Distance"] },
+		{ L["On foot"], yards(footYards) },
+		{ L["Mounted"], yards(mountYards) },
+		{ L["Flight path"], yards(flightYards) },
+		{ L["Fastest"], percent(maxSpeed) },
+		{ L["Average speed"], percent(average) },
+		{ header = L["Progress"] },
+		{ L["Levels"], string.format("+%.2f", levels) },
+		{ L["Kills"], Comma(kills) },
+		{ L["Quests picked up"], Comma(accepts) },
+		{ L["Quests turned in"], Comma(turnins) },
+		{ L["Deaths"], Comma(deaths) },
+		{ header = L["Moments"] },
+		{ L["Summons"], Comma(summons) },
+		{ L["Hearths"], Comma(hearths) },
+		{ L["Portals"], Comma(portals) },
+		{ L["Trainers"], Comma(trainers) },
+		{ L["Flights"], Comma(flights) },
+		{ L["Mounts"], Comma(mounts) },
+		{ L["Dungeons entered"], Comma(entered[party]) },
+		{ L["Raids entered"], Comma(entered[raid]) },
+		{ L["Battlegrounds entered"], Comma(entered[pvp]) },
+		{ L["Arenas entered"], Comma(entered[arena]) },
+		{ L["Scenarios entered"], Comma(entered[scenario]) },
+		{ L["Other instances entered"], Comma(entered[other]) },
+		{ L["Zone changes"], Comma(zoneChanges) },
+		{ L["Zones visited"], Comma(zoneCount) },
+		{ L["Path samples"], Comma(samples) },
+		{ L["Sessions"], Comma(#sessions) },
 	}
 	local levelRows = self:LevelStatRows()
 	for i = 1, #levelRows do
@@ -1319,46 +1320,46 @@ function ns.Replay:TrainerTitle(extra)
 	if trainerType == 2 then
 		local name = ns.ProfessionName[profession]
 		if name then
-			return name .. " trainer"
+			return string.format(L["%s trainer"], name)
 		end
-		return "Profession trainer"
+		return L["Profession trainer"]
 	end
 	if trainerType == 3 then
-		return "Pet trainer"
+		return L["Pet trainer"]
 	end
-	return "Class trainer"
+	return L["Class trainer"]
 end
 
 function ns.Replay:TravelTooltip(pin)
 	local color = ns.KindColor[pin.kind] or { 1, 0.9, 0.4 }
 	if pin.kind == Kind.PORTAL then
-		GameTooltip:SetText(self:SpellTitle(pin.extra) or "Portal", color[1], color[2], color[3])
+		GameTooltip:SetText(self:SpellTitle(pin.extra) or L["Portal"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.CAMP then
-		GameTooltip:SetText("Campfire", color[1], color[2], color[3])
+		GameTooltip:SetText(L["Campfire"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.SLEEP then
-		GameTooltip:SetText("Sleeping bag", color[1], color[2], color[3])
+		GameTooltip:SetText(L["Sleeping bag"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.TRAINER then
 		GameTooltip:SetText(self:TrainerTitle(pin.extra), color[1], color[2], color[3])
 	elseif pin.extra and pin.extra > 0 then
-		GameTooltip:SetText(self:SpellTitle(pin.extra) or "Ritual of Summoning", 0.75, 0.40, 1)
+		GameTooltip:SetText(self:SpellTitle(pin.extra) or L["Ritual of Summoning"], 0.75, 0.40, 1)
 	else
-		GameTooltip:SetText("Summon", 0.75, 0.40, 1)
+		GameTooltip:SetText(L["Summon"], 0.75, 0.40, 1)
 		local who = ns.DB:SummonerName(pin.session, pin.when)
 		if who then
-			GameTooltip:AddLine("Summoned by " .. who, 1, 1, 1)
+			GameTooltip:AddLine(string.format(L["Summoned by %s"], who), 1, 1, 1)
 		end
 	end
 end
 
 function ns.Replay:GroupTooltip(pin)
-	GameTooltip:SetText("Joined", 0.45, 0.75, 1)
+	GameTooltip:SetText(L["Joined"], 0.45, 0.75, 1)
 	local people = ns.DB:JoinsAt(ns.DB.char, pin.when or 0)
 	if #people == 0 then
 		local count = tonumber(pin.extra) or 0
 		if count > 1 then
-			GameTooltip:AddLine(count .. " people", 1, 1, 1)
+			GameTooltip:AddLine(string.format(L["%d people"], count), 1, 1, 1)
 		else
-			GameTooltip:AddLine("Party", 1, 1, 1)
+			GameTooltip:AddLine(L["Party"], 1, 1, 1)
 		end
 	end
 	for i = 1, #people do
@@ -1370,9 +1371,9 @@ function ns.Replay:GroupTooltip(pin)
 		end
 		if person.first then
 			if person.level and person.level > 0 then
-				line = line .. "   · first time, level " .. person.level
+				line = line .. string.format(L["   · first time, level %d"], person.level)
 			else
-				line = line .. "   · first time"
+				line = line .. L["   · first time"]
 			end
 		end
 		GameTooltip:AddLine(line, r, g, b)
@@ -1386,34 +1387,34 @@ end
 function ns.Replay:CompanyValue(person)
 	local parts = { FormatClock(person.seconds) }
 	if person.quests > 0 then
-		parts[#parts + 1] = person.quests == 1 and "1 quest" or (person.quests .. " quests")
+		parts[#parts + 1] = person.quests == 1 and L["1 quest"] or string.format(L["%d quests"], person.quests)
 	elseif person.accepts > 0 then
-		parts[#parts + 1] = person.accepts == 1 and "1 pickup" or (person.accepts .. " pickups")
+		parts[#parts + 1] = person.accepts == 1 and L["1 pickup"] or string.format(L["%d pickups"], person.accepts)
 	end
 	if person.elites > 0 then
-		parts[#parts + 1] = person.elites == 1 and "1 elite" or (person.elites .. " elites")
+		parts[#parts + 1] = person.elites == 1 and L["1 elite"] or string.format(L["%d elites"], person.elites)
 	end
 	if person.rares > 0 then
-		parts[#parts + 1] = person.rares == 1 and "1 rare" or (person.rares .. " rares")
+		parts[#parts + 1] = person.rares == 1 and L["1 rare"] or string.format(L["%d rares"], person.rares)
 	end
 	if person.elites == 0 and person.rares == 0 and person.kills > 0 then
-		parts[#parts + 1] = person.kills == 1 and "1 kill" or (person.kills .. " kills")
+		parts[#parts + 1] = person.kills == 1 and L["1 kill"] or string.format(L["%d kills"], person.kills)
 	end
 	if person.dungeons > 0 then
-		parts[#parts + 1] = person.dungeons == 1 and "1 dungeon" or (person.dungeons .. " dungeons")
+		parts[#parts + 1] = person.dungeons == 1 and L["1 dungeon"] or string.format(L["%d dungeons"], person.dungeons)
 	end
 	if person.raids > 0 then
-		parts[#parts + 1] = person.raids == 1 and "1 raid" or (person.raids .. " raids")
+		parts[#parts + 1] = person.raids == 1 and L["1 raid"] or string.format(L["%d raids"], person.raids)
 	end
 	if person.deaths > 0 then
-		parts[#parts + 1] = person.deaths == 1 and "1 death" or (person.deaths .. " deaths")
+		parts[#parts + 1] = person.deaths == 1 and L["1 death"] or string.format(L["%d deaths"], person.deaths)
 	end
 	if person.metByName then
 		local where = self:PlaceName(person.metMap)
 		if where then
-			parts[#parts + 1] = "met in " .. where .. " on " .. person.metByName
+			parts[#parts + 1] = string.format(L["met in %s on %s"], where, person.metByName)
 		else
-			parts[#parts + 1] = "met on " .. person.metByName
+			parts[#parts + 1] = string.format(L["met on %s"], person.metByName)
 		end
 	end
 	return table.concat(parts, " · ")
@@ -1428,7 +1429,7 @@ function ns.Replay:CompanyRows(sessions)
 	if #report == 0 then
 		return {}
 	end
-	local rows = { { header = "Company" } }
+	local rows = { { header = L["Company"] } }
 	local shown = math.min(8, #report)
 	for i = 1, shown do
 		local person = report[i]
@@ -1436,7 +1437,7 @@ function ns.Replay:CompanyRows(sessions)
 		rows[#rows + 1] = { person.name, self:CompanyValue(person), r = r, g = g, b = b }
 	end
 	if #report > shown then
-		rows[#rows + 1] = { string.format("%d more", #report - shown), "" }
+		rows[#rows + 1] = { string.format(L["%d more"], #report - shown), "" }
 	end
 	return rows
 end
@@ -1446,13 +1447,13 @@ function ns.Replay:LevelStatRows()
 	if #spans == 0 then
 		return {}
 	end
-	local rows = { { header = "Levels" } }
+	local rows = { { header = L["Levels"] } }
 	for i = 1, #spans do
 		local span = spans[i]
 		local top = span.lvTo or span.lv
 		if not self.levelLo or (top >= self.levelLo and span.lv <= (self.levelHi or self.levelLo)) then
 			local stop = ns.DB:SpanStop(span, ns.DB.char)
-			local label = (span.lvTo and span.lvTo ~= span.lv) and string.format("Lv %d–%d", span.lv, span.lvTo) or string.format("Lv %d", span.lv)
+			local label = (span.lvTo and span.lvTo ~= span.lv) and string.format(L["Lv %d–%d"], span.lv, span.lvTo) or string.format(L["Lv %d"], span.lv)
 			rows[#rows + 1] = { label, FormatClock((stop or span.t0) - span.t0) }
 		end
 	end
@@ -1636,32 +1637,32 @@ function ns.Replay:ScopeCaption()
 	local other = ns.DB.viewKey and ns.DB.playerKey and ns.DB.viewKey ~= ns.DB.playerKey
 	local count = #ns.DB:Sessions()
 	if other then
-		return string.format("%s's saved journey. %d sessions. Recording continues on this character.", who, count)
+		return string.format(L["%s's saved journey. %d sessions. Recording continues on this character."], who, count)
 	end
 	if self.mode == "level" then
 		if not self.levelLo then
-			return "Pick a level to replay it. Shift-click a second level for a range."
+			return L["Pick a level to replay it. Shift-click a second level for a range."]
 		end
 		if self.levelHi and self.levelHi ~= self.levelLo then
-			return string.format("Levels %d–%d.", self.levelLo, self.levelHi)
+			return string.format(L["Levels %d–%d."], self.levelLo, self.levelHi)
 		end
-		return string.format("Level %d.", self.levelLo)
+		return string.format(L["Level %d."], self.levelLo)
 	end
 	if self.mode == "all" then
 		if count <= 1 then
-			return "Every session on this character, added together. There is only one so far, so this matches the recording in progress."
+			return L["Every session on this character, added together. There is only one so far, so this matches the recording in progress."]
 		end
-		return string.format("Every session on this character, added together. %d sessions.", count)
+		return string.format(L["Every session on this character, added together. %d sessions."], count)
 	end
 	if self.mode == "one" then
-		return "Only the session you picked in the list."
+		return L["Only the session you picked in the list."]
 	end
 	local session = ns.DB:Current()
 	local elapsed = 0
 	if session then
 		elapsed = (session.seen or session.s) - session.s
 	end
-	return "The recording in progress, including reloads a few minutes apart. " .. FormatClock(elapsed) .. " so far."
+	return string.format(L["The recording in progress, including reloads a few minutes apart. %s so far."], FormatClock(elapsed))
 end
 
 function ns.Replay:UpdateReadout()
@@ -1673,9 +1674,9 @@ function ns.Replay:UpdateReadout()
 	end
 	local sessions = self.sessions or {}
 	if not self.t0 or not self.t1 then
-		self.timeText:SetText("No path yet. Walk somewhere and Zipper will keep the points.")
+		self.timeText:SetText(L["No path yet. Walk somewhere and Zipper will keep the points."])
 		self:UpdateRecap(sessions)
-		self.playButton:SetText("Play")
+		self.playButton:SetText(L["Play"])
 		self:SyncTrailSlider()
 		self:SyncJumps()
 		self:SyncChapters()
@@ -1689,7 +1690,7 @@ function ns.Replay:UpdateReadout()
 	self.timeText:SetText(string.format("%s  /  %s", FormatClock(at - self.t0), FormatClock(span)))
 	self:UpdateRecap(sessions)
 	if not self.playing then
-		self.playButton:SetText("Play")
+		self.playButton:SetText(L["Play"])
 	end
 	self:UpdateScrub()
 	self:SyncTrailSlider()
@@ -1733,11 +1734,11 @@ function ns.Replay:JumpLabel(minutes, negative)
 	if minutes >= 60 and minutes % 60 == 0 then
 		local hours = minutes / 60
 		if hours == 1 then
-			return prefix .. "1 hr"
+			return string.format(L["%s1 hr"], prefix)
 		end
-		return prefix .. hours .. " hr"
+		return string.format(L["%s%d hr"], prefix, hours)
 	end
-	return prefix .. minutes .. " m"
+	return string.format(L["%s%d m"], prefix, minutes)
 end
 
 function ns.Replay:SyncJumps()
@@ -1760,7 +1761,7 @@ end
 
 function ns.Replay:MapTitle(mapID)
 	if not mapID or mapID == 0 then
-		return "Zone"
+		return L["Zone"]
 	end
 	if C_Map and C_Map.GetMapInfo then
 		local info = C_Map.GetMapInfo(mapID)
@@ -1768,12 +1769,12 @@ function ns.Replay:MapTitle(mapID)
 			return info.name
 		end
 	end
-	return "Zone"
+	return L["Zone"]
 end
 
 function ns.Replay:ChapterName(kind, mapID, chapter)
 	if kind == "instance" then
-		local label = ns.InstanceName[chapter and chapter.inst] or "Dungeon"
+		local label = ns.InstanceName[chapter and chapter.inst] or L["Dungeon"]
 		if chapter and chapter.tEnd and chapter.tEnd > chapter.t then
 			return label .. " · " .. FormatClock(chapter.tEnd - chapter.t)
 		end
@@ -1781,9 +1782,9 @@ function ns.Replay:ChapterName(kind, mapID, chapter)
 	end
 	local zone = self:MapTitle(mapID)
 	if kind == "hearth" then
-		return "Hearth · " .. zone
+		return string.format(L["Hearth · %s"], zone)
 	elseif kind == "land" then
-		return "Landed · " .. zone
+		return string.format(L["Landed · %s"], zone)
 	end
 	return zone
 end
@@ -1987,7 +1988,7 @@ function ns.Replay:SeekToTime(when)
 	end
 	self.playing = false
 	if self.playButton then
-		self.playButton:SetText("Play")
+		self.playButton:SetText(L["Play"])
 	end
 	local fraction = (when - self.t0) / (self.t1 - self.t0)
 	if fraction < 0 then
@@ -2042,7 +2043,7 @@ function ns.Replay:AcquirePip(index)
 	end)
 	pip:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:AddLine(self.title or "Stop", 1, 0.86, 0.45)
+		GameTooltip:AddLine(self.title or L["Stop"], 1, 0.86, 0.45)
 		if self.when then
 			GameTooltip:AddLine(date("%b %d, %H:%M", self.when), 1, 1, 1)
 		end
@@ -2107,11 +2108,11 @@ function ns.Replay:PaintChapter()
 	end
 	if self.chapterText then
 		if #chapters == 0 then
-			self.chapterText:SetText("No stops yet")
+			self.chapterText:SetText(L["No stops yet"])
 		else
 			local shown = current > 0 and current or 1
 			local prefix = current > 0 and "" or "Next  "
-			self.chapterText:SetText(string.format("%s%d/%d  %s", prefix, shown, #chapters, chapters[shown].name))
+			self.chapterText:SetText(string.format(L["%s%d/%d  %s"], prefix, shown, #chapters, chapters[shown].name))
 		end
 	end
 	if not self.pips then
@@ -2156,7 +2157,7 @@ function ns.Replay:Jump(seconds)
 	end
 	self.playing = false
 	if self.playButton then
-		self.playButton:SetText("Play")
+		self.playButton:SetText(L["Play"])
 	end
 	local at = (self.playhead or self.t0) + seconds
 	if at < self.t0 then
@@ -2292,13 +2293,13 @@ function ns.Replay:HoverPath()
 		GameTooltip:AddLine(info.name, 1, 1, 1)
 	end
 	if best.mode == ns.Travel.GHOST then
-		GameTooltip:AddLine("Ghost", 0.7, 0.7, 0.74)
+		GameTooltip:AddLine(L["Ghost"], 0.7, 0.7, 0.74)
 	elseif best.mode == ns.Travel.FLIGHT then
-		GameTooltip:AddLine("Flight path", 0.72, 0.55, 1)
+		GameTooltip:AddLine(L["Flight path"], 0.72, 0.55, 1)
 	elseif best.mode == ns.Travel.MOUNT then
-		GameTooltip:AddLine(string.format("Mounted, %d%% speed", best.speed or 100), 0.95, 0.75, 0.3)
+		GameTooltip:AddLine(string.format(L["Mounted, %d%% speed"], best.speed or 100), 0.95, 0.75, 0.3)
 	elseif (best.speed or 100) > 105 then
-		GameTooltip:AddLine(string.format("%d%% speed", best.speed), 0.6, 0.85, 1)
+		GameTooltip:AddLine(string.format(L["%d%% speed"], best.speed), 0.6, 0.85, 1)
 	end
 	GameTooltip:Show()
 end
@@ -2507,7 +2508,7 @@ function ns.Replay:RefreshLevelList()
 end
 
 function ns.Replay:LevelRowLabel(span)
-	local name = (span.lvTo and span.lvTo ~= span.lv) and string.format("Lv %d–%d", span.lv, span.lvTo) or string.format("Lv %d", span.lv)
+	local name = (span.lvTo and span.lvTo ~= span.lv) and string.format(L["Lv %d–%d"], span.lv, span.lvTo) or string.format(L["Lv %d"], span.lv)
 	local stop = ns.DB:SpanStop(span, ns.DB.char)
 	return string.format("%s    %s", name, FormatClock((stop or span.t0) - span.t0))
 end
@@ -2561,7 +2562,7 @@ function ns.Replay:RefreshList()
 		local duration = (session.seen or session.s) - session.s
 		local selected = (self.mode == "one" and self.index == index) or (self.mode == "current" and session == ns.DB:Current())
 		local gained = ns.DB:LevelsGained(session)
-		row.label:SetText(string.format("%s    %s    +%.2f lv    %d kills", date("%m/%d %H:%M", session.s), FormatClock(duration), gained, session.kills or 0))
+		row.label:SetText(string.format(L["%s    %s    +%.2f lv    %d kills"], date("%m/%d %H:%M", session.s), FormatClock(duration), gained, session.kills or 0))
 		row.bar:SetShown(selected)
 		if selected then
 			row.label:SetTextColor(1, 0.86, 0.45)
@@ -2585,7 +2586,7 @@ function ns.Replay:TogglePlay()
 	end
 	if self.playing then
 		self.playing = false
-		self.playButton:SetText("Play")
+		self.playButton:SetText(L["Play"])
 		return
 	end
 	if self.playhead >= self.t1 - 0.05 then
@@ -2593,7 +2594,7 @@ function ns.Replay:TogglePlay()
 	end
 	self.playing = true
 	self.route = true
-	self.playButton:SetText("Pause")
+	self.playButton:SetText(L["Pause"])
 	local map = self:EnsureMap()
 	if map and not map:IsShown() and ToggleWorldMap then
 		ToggleWorldMap()
@@ -2650,7 +2651,7 @@ function ns.Replay:OnUpdate(_, elapsed)
 		if self.playhead >= self.t1 then
 			self.playhead = self.t1
 			self.playing = false
-			self.playButton:SetText("Play")
+			self.playButton:SetText(L["Play"])
 		end
 		self:FollowPlayhead()
 		self:UpdateDot()
@@ -2693,7 +2694,7 @@ function ns.Replay:HookMap()
 	WorldMapFrame:HookScript("OnHide", function()
 		ns.Replay.playing = false
 		if ns.Replay.playButton then
-			ns.Replay.playButton:SetText("Play")
+			ns.Replay.playButton:SetText(L["Play"])
 		end
 		ns.Replay:ClearOverlay()
 	end)
@@ -2906,9 +2907,9 @@ function ns.Replay:CreateFrame()
 
 	local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("TOPLEFT", 16, -8)
-	title:SetText("Zipper")
+	title:SetText(L["Zipper"])
 
-	local charButton = MakeButton(frame, "Character", 200)
+	local charButton = MakeButton(frame, L["Character"], 200)
 	charButton:SetPoint("TOPLEFT", 14, -26)
 	charButton:SetHeight(18)
 	charButton:SetScript("OnClick", function()
@@ -2948,7 +2949,7 @@ function ns.Replay:CreateFrame()
 	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 	grip:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText("Drag to resize")
+		GameTooltip:SetText(L["Drag to resize"])
 		GameTooltip:Show()
 	end)
 	grip:SetScript("OnLeave", function(self)
@@ -2965,13 +2966,13 @@ function ns.Replay:CreateFrame()
 		ns.Replay:SaveWindow()
 	end)
 
-	local options = MakeButton(frame, "Options", 64)
+	local options = MakeButton(frame, L["Options"], 64)
 	options:SetPoint("RIGHT", close, "LEFT", 4, -2)
 	options:SetScript("OnClick", function()
 		ns.Config:Toggle()
 	end)
 
-	local sessionButton = MakeButton(frame, "Session", 100)
+	local sessionButton = MakeButton(frame, L["Session"], 100)
 	sessionButton:SetPoint("TOPLEFT", 14, -56)
 	sessionButton:SetScript("OnClick", function()
 		ns.Replay.levelLo = nil
@@ -2979,7 +2980,7 @@ function ns.Replay:CreateFrame()
 		ns.Replay:SetMode("current")
 	end)
 
-	local journeyButton = MakeButton(frame, "All", 72)
+	local journeyButton = MakeButton(frame, L["All"], 72)
 	journeyButton:SetPoint("LEFT", sessionButton, "RIGHT", 6, 0)
 	journeyButton:SetScript("OnClick", function()
 		ns.Replay.levelLo = nil
@@ -2987,7 +2988,7 @@ function ns.Replay:CreateFrame()
 		ns.Replay:SetMode("all")
 	end)
 
-	local levelsButton = MakeButton(frame, "Levels", 108)
+	local levelsButton = MakeButton(frame, L["Levels"], 108)
 	levelsButton:SetPoint("LEFT", journeyButton, "RIGHT", 6, 0)
 	levelsButton:SetScript("OnClick", function()
 		ns.Replay.levelLo = nil
@@ -3000,7 +3001,7 @@ function ns.Replay:CreateFrame()
 	scope:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	scope:SetJustifyH("LEFT")
 	scope:SetWordWrap(true)
-	scope:SetText("The recording in progress.")
+	scope:SetText(L["The recording in progress."])
 
 	local inset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
 	inset:SetPoint("TOPLEFT", 14, -118)
@@ -3021,7 +3022,7 @@ function ns.Replay:CreateFrame()
 	content:SetSize(260, 22)
 	scroll:SetScrollChild(content)
 
-	local play = MakeButton(frame, "Play", 56)
+	local play = MakeButton(frame, L["Play"], 56)
 	play:SetPoint("TOPLEFT", 14, -418)
 	play:SetScript("OnClick", function()
 		ns.Replay:TogglePlay()
@@ -3051,13 +3052,13 @@ function ns.Replay:CreateFrame()
 
 	local trailLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	trailLabel:SetPoint("TOPLEFT", 16, -448)
-	trailLabel:SetText("Trail")
+	trailLabel:SetText(L["Trail"])
 	trailLabel:SetTextColor(0.85, 0.82, 0.70)
 
 	local trailValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -448)
 	trailValue:SetTextColor(1, 0.86, 0.45)
-	trailValue:SetText("Full")
+	trailValue:SetText(L["Full"])
 
 	local trail = CreateFrame("Slider", "ZipperReplayTrail", frame, "UISliderTemplate")
 	trail:SetPoint("TOPLEFT", 16, -466)
@@ -3120,7 +3121,7 @@ function ns.Replay:CreateFrame()
 			font:SetTextColor(1, 0.9, 0.6)
 		end
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText("Previous stop")
+		GameTooltip:SetText(L["Previous stop"])
 		GameTooltip:Show()
 	end)
 	chapterPrev:SetScript("OnLeave", function(self)
@@ -3144,7 +3145,7 @@ function ns.Replay:CreateFrame()
 			font:SetTextColor(1, 0.9, 0.6)
 		end
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText("Next stop")
+		GameTooltip:SetText(L["Next stop"])
 		GameTooltip:Show()
 	end)
 	chapterNext:SetScript("OnLeave", function(self)
@@ -3163,7 +3164,7 @@ function ns.Replay:CreateFrame()
 	chapterText:SetJustifyH("CENTER")
 	chapterText:SetWordWrap(false)
 	chapterText:SetTextColor(0.93, 0.90, 0.78)
-	chapterText:SetText("No stops yet")
+	chapterText:SetText(L["No stops yet"])
 
 	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
 	scrub:SetPoint("TOPLEFT", 16, -342)
@@ -3186,7 +3187,7 @@ function ns.Replay:CreateFrame()
 		end
 		ns.Replay.playing = false
 		if ns.Replay.playButton then
-			ns.Replay.playButton:SetText("Play")
+			ns.Replay.playButton:SetText(L["Play"])
 		end
 		ns.Replay:SeekFraction(value)
 	end)
@@ -3321,7 +3322,7 @@ function ns.Replay:ToggleRoute()
 		self.route = false
 		self.playing = false
 		if self.playButton then
-			self.playButton:SetText("Play")
+			self.playButton:SetText(L["Play"])
 		end
 		self:ClearOverlay()
 		return
@@ -3377,10 +3378,10 @@ function ns.Replay:StyleMapButton(button)
 	end)
 	button:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:AddLine("Zipper", 1, 0.82, 0)
-		GameTooltip:AddLine("Left click: show or hide the route.", 1, 1, 1, true)
-		GameTooltip:AddLine("Right click: open the replay and show the route.", 1, 1, 1, true)
-		GameTooltip:AddLine("Shift+right click: open settings.", 1, 1, 1, true)
+		GameTooltip:AddLine(L["Zipper"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["Left click: show or hide the route."], 1, 1, 1, true)
+		GameTooltip:AddLine(L["Right click: open the replay and show the route."], 1, 1, 1, true)
+		GameTooltip:AddLine(L["Shift+right click: open settings."], 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	button:SetScript("OnLeave", function()
@@ -3474,7 +3475,7 @@ function ns.Replay:ApplySkin()
 	end)
 	self.skinApplied = true
 	if not ok then
-		ns:Print("EllesmereUI skin skipped: " .. tostring(err))
+		ns:Print(string.format(L["EllesmereUI skin skipped: %s"], tostring(err)))
 	end
 	self:StyleSpeedButtons()
 	if self.sessionButton then
