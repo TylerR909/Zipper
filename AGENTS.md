@@ -6,9 +6,11 @@ The README is the player page. `.context/todo.md` is the unfinished list. Do not
 
 ## Look up the API before you guess
 
-WoW API lookup is a project MCP server, declared in `.grok/config.toml` as `wow-api` (`@nighthawk42/wow-api-mcp`, started through mise so `npx` sees mise's Node). It is baked into the repo on purpose. Do not move it to the user-level MCP config for this addon. A project server replaces a same-named global one entirely, so keep the command, args, and `startup_timeout_sec` in that file.
+WoW API lookup is the `wow-api` server in the repo-root `.mcp.json`. That file is the shared project config: Claude Code reads it, and Grok reads it too. Codex does not. Codex only loads `.codex/config.toml`, and Grok does not scan that. Do not add a `.grok/`, `.codex/`, or `.cursor/` copy of this server.
 
-Grok reads `.grok/config.toml` from the repo. A root `.mcp.json` is a lower-priority compat file and is skipped once the Claude import marker is set. Do not add a second copy of the server there.
+`mise` has to be on `PATH`. `mise exec` is what puts Node in front of `npx`. On this machine that is linuxbrew's mise. A user-level Grok `config.toml` entry named `wow-api` outranks `.mcp.json`, so leave the committed file as the portable definition and do not delete someone's global entry to "make the project file win."
+
+Grok skips `.mcp.json` after the Claude import marker is set. If `wow-api` is missing in a Grok session and it is not in the user `config.toml` either, that marker is why.
 
 The server's default flavor is live. This client is Forever: product `wowf`, interface 16001, flavor `forever`. Pass `flavor: "forever"` on every lookup. Call `detect_wow_install` or `resolve_flavor` when the install is unclear. Fetch the tool schema with `search_tool` before `use_tool`.
 
