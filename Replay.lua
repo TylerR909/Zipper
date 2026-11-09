@@ -1595,24 +1595,35 @@ function ns.Replay:CompanyRows(sessions)
 end
 
 -- One row per level. A level that crosses logins is several spans; the list adds those together.
+-- Levels 1 through 6 are one row. Later levels stay separate.
+local STARTER_LEVEL = 6
+
 function ns.Replay:LevelGroups()
 	local spans = ns.DB:LevelSpans(ns.DB.char)
 	local groups, order = {}, {}
 	for i = 1, #spans do
 		local span = spans[i]
+		local top = span.lvTo or span.lv
 		local ranged = span.lvTo and span.lvTo ~= span.lv
-		local key = ranged and (span.lv .. "-" .. span.lvTo) or tostring(span.lv)
+		local starter = span.lv >= 1 and top <= STARTER_LEVEL
+		local key = starter and "starter" or (ranged and (span.lv .. "-" .. span.lvTo) or tostring(span.lv))
 		local group = groups[key]
 		if not group then
 			group = {
 				lv = span.lv,
-				lvTo = ranged and span.lvTo or nil,
+				lvTo = (not starter and ranged) and span.lvTo or nil,
 				seconds = 0,
 				open = false,
 				last = span.t0,
 			}
 			groups[key] = group
 			order[#order + 1] = group
+		end
+		if starter then
+			local low = math.min(group.lv, span.lv)
+			local high = math.max(group.lvTo or group.lv, top)
+			group.lv = low
+			group.lvTo = high ~= low and high or nil
 		end
 		local stop = ns.DB:SpanStop(span, ns.DB.char)
 		local dur = (stop or span.t0) - span.t0
@@ -1637,6 +1648,9 @@ end
 
 function ns.Replay:LevelName(group)
 	if group.lvTo and group.lvTo ~= group.lv then
+		if group.open then
+			return string.format(L["Lv %d–%d (so far)"], group.lv, group.lvTo)
+		end
 		return string.format(L["Lv %d–%d"], group.lv, group.lvTo)
 	end
 	if group.open then
@@ -1645,14 +1659,16 @@ function ns.Replay:LevelName(group)
 	return string.format(L["Lv %d"], group.lv)
 end
 
-function ns.Replay:LevelIsOpen(level)
-	if not level then
+function ns.Replay:LevelIsOpen(lo, hi)
+	if not lo then
 		return false
 	end
+	hi = hi or lo
 	local groups = self:LevelGroups()
 	for i = 1, #groups do
 		local group = groups[i]
-		if group.open and group.lv == level and not group.lvTo then
+		local top = group.lvTo or group.lv
+		if group.open and group.lv == lo and top == hi then
 			return true
 		end
 	end
@@ -1879,6 +1895,9 @@ function ns.Replay:ScopeCaption()
 			return L["Pick a level to replay it. Shift-click a second level for a range."]
 		end
 		if self.levelHi and self.levelHi ~= self.levelLo then
+			if self:LevelIsOpen(self.levelLo, self.levelHi) then
+				return string.format(L["Levels %d–%d, so far."], self.levelLo, self.levelHi)
+			end
 			return string.format(L["Levels %d–%d."], self.levelLo, self.levelHi)
 		end
 		if self:LevelIsOpen(self.levelLo) then
