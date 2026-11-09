@@ -46,6 +46,10 @@ The account file is the live journey store. A per-character file may still hold 
 - Do not push, tag, or cut a release unless asked. A release is an annotated tag `vX.Y.Z` matching `## Version:` in `Zipper.toc`. The BigWigs packager builds the changelog from commits since the previous tag. Do not add `CHANGELOG.md`. The workflow is not in the repo yet.
 - Addon files are mode `644`. If the environment marks them executable, `git add --chmod=-x` before committing. Do not record `100755`.
 
+## Reports
+
+Bugs and feature requests use the GitHub issue forms in `.github/ISSUE_TEMPLATE/`. Triage from what the reporter wrote. Do not ask them for SavedVariables, WTF paths, or a code trace. An empty error box means no error window appeared.
+
 ## Check
 
 `luajit -e 'assert(loadfile("File.lua"))'` syntax-checks a file. `Enums.lua` and `DB.lua` load under luajit as `loadfile(path)("Zipper", ns)` if `GetServerTime` is stubbed. Do not add a framework for a one-off check.

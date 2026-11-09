@@ -1,0 +1,41 @@
+name: Feature request
+description: Something you wish Zipper would do.
+title: ""
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Say what you want in plain words. A title like "Show who left the group" is enough.
+
+        You do not need a design or a file list. The story of the moment is the useful part.
+  - type: textarea
+    id: want
+    attributes:
+      label: What should Zipper do?
+      description: One or two sentences.
+      placeholder: When someone leaves the group, mark that spot on the map.
+    validations:
+      required: true
+  - type: textarea
+    id: when
+    attributes:
+      label: When would you use it?
+      description: The moment in play. What were you doing when you wanted this?
+      placeholder: I keep wondering where my friend turned back, after the dungeon.
+    validations:
+      required: true
+  - type: textarea
+    id: instead
+    attributes:
+      label: What do you do today instead?
+      description: Optional. "I just try to remember" is enough.
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: A screenshot or a rough sketch is welcome. Paste it here.
+    validations:
+      required: false

@@ -1,0 +1,70 @@
+name: Bug
+description: Zipper did something wrong, or did not do something.
+title: ""
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell the story in plain words. A title like "Replay line stayed blue" is enough.
+
+        You do not need file paths, logs, or anything from the WTF folder. If an error window popped up, paste that text. Otherwise leave those boxes empty.
+  - type: textarea
+    id: doing
+    attributes:
+      label: What were you doing?
+      description: A sentence or two. Where were you, and what did you click or type?
+      placeholder: I opened the world map and pressed Play on yesterday's session.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What went wrong?
+      description: What did you see? "Nothing happened" is a fine answer.
+      placeholder: The line on the map stayed blue. I am a druid.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Skip this if it is obvious from the box above.
+      placeholder: The line should have been orange.
+    validations:
+      required: false
+  - type: dropdown
+    id: often
+    attributes:
+      label: How often?
+      options:
+        - Every time I try
+        - Sometimes
+        - Only once
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Did an error window pop up?
+      description: If BugSack or a red error showed text, paste it here. If not, leave this blank.
+      placeholder: Paste the error here, or leave blank.
+    validations:
+      required: false
+  - type: textarea
+    id: status
+    attributes:
+      label: Replay status (optional)
+      description: In game, type /zipper status and paste what Zipper prints. Skip this if you cannot get into the game.
+      placeholder: "Zipper: 2 sessions, 400 points, 12 events."
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: A screenshot is welcome. Paste it into this box. Class, group, or dungeon only if they matter to what broke.
+      placeholder: Screenshot, or "I was in a dungeon with two friends."
+    validations:
+      required: false
