@@ -1158,6 +1158,40 @@ function ns.DB:CloseCompany(now)
 	return changed
 end
 
+-- End one person's open stretch without moving the session clock backward.
+function ns.DB:CloseMember(guid, when)
+	local journey = self.record
+	local with = journey and journey.with
+	local spans = type(with) == "table" and with[guid]
+	if type(guid) ~= "string" or type(spans) ~= "table" or #spans % 2 == 0 or type(when) ~= "number" then
+		return false
+	end
+	local startAt = spans[#spans]
+	if type(startAt) == "number" and when < startAt then
+		when = startAt
+	end
+	spans[#spans + 1] = when
+	return true
+end
+
+-- Forget an open stretch that was only a party slot, never someone beside you.
+function ns.DB:DropOpen(guid)
+	local journey = self.record
+	local with = journey and journey.with
+	local spans = type(with) == "table" and with[guid]
+	if type(spans) ~= "table" or #spans % 2 == 0 then
+		return false
+	end
+	spans[#spans] = nil
+	if #spans == 0 then
+		with[guid] = nil
+		if not next(with) then
+			journey.with = nil
+		end
+	end
+	return true
+end
+
 -- members[guid] = { n = name, c = classFile, lv = their level }.
 -- Returns the guids who actually joined, and whether any span opened or closed.
 -- A leave within the reload window is the same stretch, not a new join.
@@ -1408,7 +1442,8 @@ function ns.DB:CreditCompany(when)
 	local any = false
 	for guid, spans in pairs(with) do
 		local startAt = self:CoveringStart(spans, when, when)
-		if startAt then
+		local apart = ns.Social and ns.Social.NearEnough and not ns.Social:NearEnough(guid)
+		if startAt and not apart then
 			local info, mapID = nil, nil
 			if ns.Social and ns.Social.Recall then
 				local recall, recalledMap = ns.Social:Recall(guid)

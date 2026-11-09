@@ -1,8 +1,11 @@
 local _, ns = ...
 
 -- Roster only. A person is saved after a quest, a finished objective, a kill,
--- a death, or an instance while their span covers that moment. Being invited
--- is not enough, and the logout save drops anyone who never crossed that line.
+-- a death, or an instance while they were actually with you. Being invited
+-- is not enough, and neither is a party member on another continent.
+-- "With you" is about 250 yards, the same bubble the party frames use.
+-- Stepping past it for a minute and a half still counts. A different zone does not,
+-- unless they are visibly here and the zone text is just stale.
 -- Objective ticks are not stored. Finishing one only marks the span as worth keeping.
 --
 -- A reload does not guess who joined while the UI was down. People already
@@ -15,6 +18,11 @@ ns.Social = {
 
 local DEBOUNCE = 0.4
 local MAX_TRIES = 5
+-- Party frames treat "nearby" as 250 yards (DISTANCE_THRESHOLD_SQUARED).
+local NEAR_YARDS = 250
+local NEAR_YARDS_SQUARED = NEAR_YARDS * NEAR_YARDS
+-- Long enough to run ahead of the group. Not long enough to be across the zone.
+local NEAR_GRACE = 90
 
 local function PlainString(value)
 	if type(value) ~= "string" or value == "" then
@@ -61,6 +69,8 @@ function ns.Social:EnsureEvents()
 		self.frame:SetScript("OnEvent", function(_, event, ...)
 			if event == "QUEST_LOG_CRITERIA_UPDATE" then
 				self:OnCriteria(...)
+			elseif event == "UNIT_DISTANCE_CHECK_UPDATE" then
+				self:OnDistance(...)
 			else
 				self:OnEvent()
 			end
@@ -71,6 +81,7 @@ function ns.Social:EnsureEvents()
 	frame:RegisterEvent("GROUP_JOINED")
 	frame:RegisterEvent("GROUP_LEFT")
 	frame:RegisterEvent("QUEST_LOG_CRITERIA_UPDATE")
+	frame:RegisterEvent("UNIT_DISTANCE_CHECK_UPDATE")
 	self.eventsReady = true
 	return true
 end
@@ -131,6 +142,9 @@ function ns.Social:Remember(members, joined, now)
 		if type(info.lv) == "number" and info.lv > 0 and type(row.lv) ~= "number" then
 			row.lv = info.lv
 		end
+		if type(info.z) == "string" and info.z ~= "" then
+			row.zone = info.z
+		end
 		if fresh[guid] or type(row.t) ~= "number" then
 			row.t = now
 			row.map = mapID or 0
@@ -180,6 +194,289 @@ function ns.Social:OnCriteria(questID, treeID, _, fulfilled, required)
 	end
 end
 
+function ns.Social:PlayerZone()
+	local zone = GetRealZoneText and PlainString(GetRealZoneText())
+	if not zone and GetZoneText then
+		zone = PlainString(GetZoneText())
+	end
+	return zone
+end
+
+function ns.Social:InsideInstance()
+	if not IsInInstance then
+		return false
+	end
+	return PlainBool(IsInInstance()) == true
+end
+
+function ns.Social:RosterZones()
+	local zones = {}
+	if not GetRaidRosterInfo or not GetNumGroupMembers then
+		return zones
+	end
+	local count = PlainNumber(GetNumGroupMembers())
+	if not count or count <= 0 then
+		return zones
+	end
+	for i = 1, count do
+		local name, _, _, _, _, _, zone = GetRaidRosterInfo(i)
+		name = PlainString(name)
+		zone = PlainString(zone)
+		if name and zone then
+			zones[name] = zone
+		end
+	end
+	return zones
+end
+
+function ns.Social:ZoneFor(zones, name)
+	if type(name) ~= "string" or name == "" or type(zones) ~= "table" then
+		return nil
+	end
+	if zones[name] then
+		return zones[name]
+	end
+	local bare = name:match("^[^-]+")
+	if bare and zones[bare] then
+		return zones[bare]
+	end
+	for listed, zone in pairs(zones) do
+		if listed == name or listed:sub(1, #name + 1) == name .. "-" then
+			return zone
+		end
+		if bare and (listed == bare or listed:sub(1, #bare + 1) == bare .. "-") then
+			return zone
+		end
+	end
+	return nil
+end
+
+function ns.Social:UnitFor(guid)
+	if type(guid) ~= "string" or not UnitGUID then
+		return nil
+	end
+	local function check(token)
+		if PlainString(UnitGUID(token)) == guid then
+			return token
+		end
+		return nil
+	end
+	if IsInRaid and PlainBool(IsInRaid()) then
+		local count = GetNumGroupMembers and PlainNumber(GetNumGroupMembers()) or 0
+		for i = 1, count or 0 do
+			local token = check("raid" .. i)
+			if token then
+				return token
+			end
+		end
+		return nil
+	end
+	local count = GetNumSubgroupMembers and PlainNumber(GetNumSubgroupMembers()) or 0
+	for i = 1, count or 0 do
+		local token = check("party" .. i)
+		if token then
+			return token
+		end
+	end
+	return nil
+end
+
+-- Visible, or inside the 40-yard interact check. A false interact check is
+-- just "not in melee", which is not far.
+function ns.Social:LiveHere(unit)
+	if not unit then
+		return false
+	end
+	if UnitIsVisible and PlainBool(UnitIsVisible(unit)) == true then
+		return true
+	end
+	if not UnitInRange then
+		return false
+	end
+	local inRange, checked = UnitInRange(unit)
+	if PlainBool(checked) ~= true then
+		return false
+	end
+	return PlainBool(inRange) == true
+end
+
+function ns.Social:ReadDistance(unit, reported)
+	local near = PlainBool(reported)
+	if near ~= nil then
+		return near
+	end
+	if self:InsideInstance() or not UnitDistanceSquared or not unit then
+		return nil
+	end
+	local distance, checked = UnitDistanceSquared(unit)
+	if PlainBool(checked) ~= true or not PlainNumber(distance) then
+		return nil
+	end
+	return distance < NEAR_YARDS_SQUARED
+end
+
+-- True when this person should share the moment and the clock.
+-- Unknown zone and no distance reading still counts, so a late roster
+-- does not drop someone who is standing next to you.
+function ns.Social:NearEnough(guid)
+	local row = self.seen and self.seen[guid]
+	if self:LiveHere(self:UnitFor(guid)) then
+		return true
+	end
+	local near = row and row.near
+	-- Indoor distance checks are not usable. The instance zone is the guard.
+	if near == false and self:InsideInstance() then
+		near = nil
+	end
+	if near == true then
+		return true
+	end
+	local playerZone = self:PlayerZone()
+	local memberZone = row and PlainString(row.zone)
+	local zoneDiffers = playerZone and memberZone and playerZone ~= memberZone
+	if near == false and type(row.nearAt) == "number" then
+		local age = ns.DB:Now() - row.nearAt
+		if age <= NEAR_GRACE and not zoneDiffers then
+			return true
+		end
+		if age > NEAR_GRACE then
+			return false
+		end
+	end
+	if zoneDiffers then
+		return false
+	end
+	return true
+end
+
+function ns.Social:Confirmed(guid)
+	local row = self.seen and self.seen[guid]
+	if type(row) == "table" and row.confirmed then
+		return true
+	end
+	if row and row.near == true then
+		return true
+	end
+	if self:LiveHere(self:UnitFor(guid)) then
+		return true
+	end
+	local playerZone = self:PlayerZone()
+	local memberZone = row and PlainString(row.zone)
+	return playerZone and memberZone and playerZone == memberZone or false
+end
+
+function ns.Social:OnDistance(unit, isInDistance)
+	if not self.active or not ns.Config:Enabled("party") then
+		return
+	end
+	unit = PlainString(unit)
+	if not unit or not UnitGUID then
+		return
+	end
+	local guid = PlainString(UnitGUID(unit))
+	if not guid then
+		return
+	end
+	local near = self:ReadDistance(unit, isInDistance)
+	if near == nil then
+		return
+	end
+	self.seen = self.seen or {}
+	local row = self.seen[guid]
+	if type(row) ~= "table" then
+		row = {}
+		self.seen[guid] = row
+	end
+	local was = row.near
+	row.near = near
+	if near == false then
+		if was ~= false then
+			row.nearAt = ns.DB:Now()
+		end
+	else
+		row.nearAt = ns.DB:Now()
+	end
+	if was == near then
+		return
+	end
+	self:RefreshPresence()
+	if near == false then
+		self:ScheduleGrace()
+	end
+end
+
+function ns.Social:ScheduleGrace()
+	if self.graceWaiting or not C_Timer or not C_Timer.After then
+		return
+	end
+	self.graceWaiting = true
+	C_Timer.After(NEAR_GRACE + 0.2, function()
+		self.graceWaiting = false
+		if self.active then
+			self:RefreshPresence()
+		end
+	end)
+end
+
+function ns.Social:SampleDistance(guid)
+	if self:InsideInstance() then
+		return
+	end
+	local unit = self:UnitFor(guid)
+	local near = self:ReadDistance(unit, nil)
+	if near == nil then
+		return
+	end
+	self.seen = self.seen or {}
+	local row = self.seen[guid]
+	if type(row) ~= "table" then
+		row = {}
+		self.seen[guid] = row
+	end
+	if row.near == near then
+		return
+	end
+	row.near = near
+	row.nearAt = ns.DB:Now()
+	if near == false then
+		self:ScheduleGrace()
+	end
+end
+
+function ns.Social:RefreshPresence()
+	local members = self.lastMembers
+	if type(members) ~= "table" or not self.active then
+		return
+	end
+	local now = ns.DB:Now()
+	local present = {}
+	local closed = false
+	for guid, info in pairs(members) do
+		self:SampleDistance(guid)
+		if self:NearEnough(guid) then
+			present[guid] = info
+			local row = self.seen and self.seen[guid]
+			if type(row) == "table" and self:Confirmed(guid) then
+				row.confirmed = true
+			end
+		elseif self:Confirmed(guid) then
+			if ns.DB:CloseMember(guid, now) then
+				closed = true
+			end
+		elseif ns.DB:DropOpen(guid) then
+			closed = true
+		end
+	end
+	local joined, changed = ns.DB:ApplyRoster(present, now)
+	self:Remember(members, joined, now)
+	if closed then
+		ns.DB:PruneIdleCompany(true)
+	end
+	if changed or closed then
+		Notify()
+	end
+end
+
 -- party1..partyN excludes the player. raid1..raidN includes them.
 function ns.Social:Snapshot()
 	local grouped = IsInGroup and PlainBool(IsInGroup())
@@ -218,6 +515,7 @@ function ns.Social:Snapshot()
 		end
 	end
 	local members = {}
+	local zones = self:RosterZones()
 	local mine = UnitGUID and PlainString(UnitGUID("player"))
 	local home = GetRealmName and PlainString(GetRealmName())
 	for i = 1, #units do
@@ -248,6 +546,7 @@ function ns.Social:Snapshot()
 				n = name,
 				c = classFile,
 				lv = level,
+				z = self:ZoneFor(zones, name),
 			}
 		end
 	end
@@ -293,11 +592,22 @@ function ns.Social:Sync()
 	self.settled = true
 	self.synced = true
 	self.tries = 0
-	local now = ns.DB:Now()
-	local joined, changed = ns.DB:ApplyRoster(members, now)
-	self:Remember(members, joined, now)
-	if changed then
-		Notify()
+	self:NoteZones(members)
+	self.lastMembers = members
+	self:RefreshPresence()
+end
+
+function ns.Social:NoteZones(members)
+	self.seen = self.seen or {}
+	for guid, info in pairs(members) do
+		if type(info.z) == "string" and info.z ~= "" then
+			local row = self.seen[guid]
+			if type(row) ~= "table" then
+				row = {}
+				self.seen[guid] = row
+			end
+			row.zone = info.z
+		end
 	end
 end
 

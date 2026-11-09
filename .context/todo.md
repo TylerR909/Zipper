@@ -16,7 +16,7 @@ Not started. At max level there are no more dings, so time at the cap stays an o
 
 ## Party and social
 
-In progress. A party is a time span per person on that character's journey. The name and the first meeting are saved only after a quest, a finished objective, a kill, a death, or an instance while they were there. A reload keeps that stretch if they are still in the group a few minutes later. Someone who joined during the reload starts when the roster is first readable. The stats list shows up to eight companions for the session or level on screen. Not built: leave pips, instance names, and a filter for the path while grouped with one person.
+In progress. A party is a time span per person on that character's journey. The name and the first meeting are saved only after a quest, a finished objective, a kill, a death, or an instance while they were within about 250 yards, or in the same instance. A different zone does not count. Stepping past 250 yards for under a minute and a half still does. A reload keeps that stretch if they are still here a few minutes later. Someone who joined during the reload starts when the roster is first readable. Not built: leave pips, instance names, and a filter for the path while grouped with one person.
 
 ## Localization
 
