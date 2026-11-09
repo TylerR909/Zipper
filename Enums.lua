@@ -19,6 +19,8 @@ ns.Kind = {
 	ZONE = 15,
 	LEVEL = 16,
 	GROUP = 17,
+	PORTAL = 18,
+	TRAINER = 19,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -47,6 +49,8 @@ ns.KindName = {
 	[15] = "Zone",
 	[16] = "Level up",
 	[17] = "Joined",
+	[18] = "Portal",
+	[19] = "Trainer",
 }
 
 ns.KindColor = {
@@ -67,6 +71,8 @@ ns.KindColor = {
 	[15] = { 0.92, 0.92, 0.92 },
 	[16] = { 1.00, 0.95, 0.55 },
 	[17] = { 0.45, 0.75, 1.00 },
+	[18] = { 0.20, 0.78, 0.95 },
+	[19] = { 0.78, 0.58, 0.28 },
 }
 
 -- Class file from UnitClass. Stored once per person, not on every path event.
@@ -85,6 +91,68 @@ ns.ClassName = {
 	DEMONHUNTER = "Demon Hunter",
 	EVOKER = "Evoker",
 }
+
+-- Mage travel spells, matched on the cast name so a new city does not need a new id.
+function ns.TravelCast(name)
+	if type(name) ~= "string" then
+		return nil
+	end
+	if name == "Ritual of Summoning" then
+		return "ritual"
+	end
+	if string.sub(name, 1, 9) == "Teleport:" or string.sub(name, 1, 7) == "Portal:" then
+		return "portal"
+	end
+	return nil
+end
+
+-- Profession trainers. The number is stored. The name is only for the tooltip.
+ns.ProfessionName = {
+	[1] = "Alchemy",
+	[2] = "Blacksmithing",
+	[3] = "Enchanting",
+	[4] = "Engineering",
+	[5] = "Herbalism",
+	[6] = "Inscription",
+	[7] = "Jewelcrafting",
+	[8] = "Leatherworking",
+	[9] = "Mining",
+	[10] = "Skinning",
+	[11] = "Tailoring",
+	[12] = "Cooking",
+	[13] = "First Aid",
+	[14] = "Fishing",
+}
+
+local PROFESSION_WORD = {
+	alchemy = 1,
+	blacksmith = 2,
+	enchant = 3,
+	engineer = 4,
+	herbal = 5,
+	inscript = 6,
+	jewel = 7,
+	leather = 8,
+	mining = 9,
+	skinning = 10,
+	tailor = 11,
+	cooking = 12,
+	["first aid"] = 13,
+	fishing = 14,
+}
+
+function ns.ProfessionId(line)
+	if type(line) ~= "string" or line == "" then
+		return 0
+	end
+	local lower = string.lower(line)
+	for word, id in pairs(PROFESSION_WORD) do
+		if string.find(lower, word, 1, true) then
+			return id
+		end
+	end
+	return 0
+end
 
 ns.Instance = {
 	PARTY = 1,

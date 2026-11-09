@@ -914,6 +914,65 @@ function ns.DB:PackKill(mobID, elite, rare)
 	return mobID
 end
 
+function ns.DB:PackTrainer(trainerType, profession)
+	trainerType = tonumber(trainerType) or 0
+	profession = tonumber(profession) or 0
+	if trainerType < 0 then
+		trainerType = 0
+	end
+	if profession < 0 then
+		profession = 0
+	end
+	return trainerType + profession * 16
+end
+
+function ns.DB:ReadTrainer(extra)
+	extra = tonumber(extra) or 0
+	if extra < 0 then
+		extra = 0
+	end
+	return extra % 16, math.floor(extra / 16)
+end
+
+function ns.DB:NoteSummoner(name, now)
+	local session = self.session
+	if not session or type(name) ~= "string" or name == "" or type(now) ~= "number" then
+		return
+	end
+	if issecretvalue and issecretvalue(name) then
+		return
+	end
+	local list = session.summonBy
+	if type(list) ~= "table" then
+		list = {}
+		session.summonBy = list
+	end
+	local last = list[#list]
+	if type(last) == "table" and last.n == name and type(last.t) == "number" and math.abs(last.t - now) <= 2 then
+		return
+	end
+	list[#list + 1] = { t = now, n = name }
+end
+
+function ns.DB:SummonerName(session, when)
+	local list = session and session.summonBy
+	if type(list) ~= "table" or type(when) ~= "number" then
+		return nil
+	end
+	local best, bestGap
+	for i = 1, #list do
+		local row = list[i]
+		if type(row) == "table" and type(row.t) == "number" and type(row.n) == "string" then
+			local gap = when - row.t
+			if gap >= 0 and gap <= 120 and (not bestGap or gap < bestGap) then
+				best = row.n
+				bestGap = gap
+			end
+		end
+	end
+	return best
+end
+
 function ns.DB:ReadKill(extra)
 	extra = tonumber(extra) or 0
 	if extra < 0 then

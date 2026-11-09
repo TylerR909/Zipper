@@ -351,6 +351,8 @@ function ns.Replay:AcquireMarker()
 				end
 			elseif pin.kind == Kind.GROUP then
 				ns.Replay:GroupTooltip(pin)
+			elseif pin.kind == Kind.PORTAL or pin.kind == Kind.TRAINER or pin.kind == Kind.SUMMON then
+				ns.Replay:TravelTooltip(pin)
 			else
 				GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
 			end
@@ -811,6 +813,11 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(0.235, 0.702, 0.443, 1)
+						elseif kind == Kind.PORTAL or kind == Kind.TRAINER then
+							local color = ns.KindColor[kind]
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
 						else
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -822,6 +829,7 @@ function ns.Replay:DrawMarkers(sessions)
 						marker.extra = track.ea[i]
 						marker.mapID = track.em[i]
 						marker.when = when
+						marker.session = session
 						ns.Map:Use():Place(marker, px, py)
 						marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + (isKill and 28 or 30))
 						marker:Show()
@@ -1031,7 +1039,7 @@ function ns.Replay:CollectStats(sessions)
 	local yardsKnown = false
 	local speedTime, speedSum, maxSpeed = 0, 0, 0
 	local kills, turnins, levels = 0, 0, 0
-	local accepts, deaths, summons, hearths, flights, mounts = 0, 0, 0, 0, 0, 0
+	local accepts, deaths, summons, hearths, flights, mounts, portals, trainers = 0, 0, 0, 0, 0, 0, 0, 0
 	local zoneChanges, zoneCount, samples = 0, 0, 0
 	local zones = {}
 	local entered, inside = {}, {}
@@ -1140,8 +1148,12 @@ function ns.Replay:CollectStats(sessions)
 				accepts = accepts + 1
 			elseif kind == Kind.DEATH then
 				deaths = deaths + 1
-			elseif kind == Kind.SUMMON then
+			elseif kind == Kind.SUMMON and (not extra or extra == 0) then
 				summons = summons + 1
+			elseif kind == Kind.PORTAL then
+				portals = portals + 1
+			elseif kind == Kind.TRAINER then
+				trainers = trainers + 1
 			elseif kind == Kind.HEARTH then
 				hearths = hearths + 1
 			elseif kind == Kind.FLIGHT_START then
@@ -1208,6 +1220,8 @@ function ns.Replay:CollectStats(sessions)
 		{ header = "Moments" },
 		{ "Summons", Comma(summons) },
 		{ "Hearths", Comma(hearths) },
+		{ "Portals", Comma(portals) },
+		{ "Trainers", Comma(trainers) },
 		{ "Flights", Comma(flights) },
 		{ "Mounts", Comma(mounts) },
 		{ "Dungeons entered", Comma(entered[party]) },
@@ -1251,6 +1265,51 @@ function ns.Replay:PlaceName(mapID)
 		return info.name
 	end
 	return nil
+end
+
+function ns.Replay:SpellTitle(spellID)
+	spellID = tonumber(spellID)
+	if not spellID or spellID <= 0 or not C_Spell or not C_Spell.GetSpellInfo then
+		return nil
+	end
+	local info = C_Spell.GetSpellInfo(spellID)
+	local name = info and info.name
+	if type(name) == "string" and name ~= "" and not (issecretvalue and issecretvalue(name)) then
+		return name
+	end
+	return nil
+end
+
+function ns.Replay:TrainerTitle(extra)
+	local trainerType, profession = ns.DB:ReadTrainer(extra)
+	if trainerType == 2 then
+		local name = ns.ProfessionName[profession]
+		if name then
+			return name .. " trainer"
+		end
+		return "Profession trainer"
+	end
+	if trainerType == 3 then
+		return "Pet trainer"
+	end
+	return "Class trainer"
+end
+
+function ns.Replay:TravelTooltip(pin)
+	local color = ns.KindColor[pin.kind] or { 1, 0.9, 0.4 }
+	if pin.kind == Kind.PORTAL then
+		GameTooltip:SetText(self:SpellTitle(pin.extra) or "Portal", color[1], color[2], color[3])
+	elseif pin.kind == Kind.TRAINER then
+		GameTooltip:SetText(self:TrainerTitle(pin.extra), color[1], color[2], color[3])
+	elseif pin.extra and pin.extra > 0 then
+		GameTooltip:SetText(self:SpellTitle(pin.extra) or "Ritual of Summoning", 0.75, 0.40, 1)
+	else
+		GameTooltip:SetText("Summon", 0.75, 0.40, 1)
+		local who = ns.DB:SummonerName(pin.session, pin.when)
+		if who then
+			GameTooltip:AddLine("Summoned by " .. who, 1, 1, 1)
+		end
+	end
 end
 
 function ns.Replay:GroupTooltip(pin)

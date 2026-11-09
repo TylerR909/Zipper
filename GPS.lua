@@ -60,6 +60,21 @@ local function IsPlainNumber(value)
 	return true
 end
 
+local function SpellName(spellID)
+	if not IsPlainNumber(spellID) or not C_Spell or not C_Spell.GetSpellInfo then
+		return nil
+	end
+	local info = C_Spell.GetSpellInfo(spellID)
+	local name = info and info.name
+	if type(name) ~= "string" or name == "" then
+		return nil
+	end
+	if issecretvalue and issecretvalue(name) then
+		return nil
+	end
+	return name
+end
+
 function ns.GPS:ReadPosition()
 	local mapID = C_Map.GetBestMapForUnit("player")
 	if not mapID then
@@ -367,6 +382,13 @@ function ns.GPS:OnConfirmSummon()
 		self.summonX = nil
 	end
 	self.summonMap = C_Map.GetBestMapForUnit("player")
+	self.summonerName = nil
+	if C_SummonInfo and C_SummonInfo.GetSummonConfirmSummoner then
+		local name = C_SummonInfo.GetSummonConfirmSummoner()
+		if type(name) == "string" and name ~= "" and not (issecretvalue and issecretvalue(name)) then
+			self.summonerName = name
+		end
+	end
 end
 
 function ns.GPS:CheckSummon()
@@ -376,6 +398,7 @@ function ns.GPS:CheckSummon()
 	local now = ns.DB:Now()
 	if now > self.summonUntil then
 		self.summonUntil = nil
+		self.summonerName = nil
 		return
 	end
 	if self.hearthUntil and now < self.hearthUntil then
@@ -401,7 +424,34 @@ function ns.GPS:CheckSummon()
 	if jumped then
 		self.summonUntil = nil
 		self:Mark(Kind.SUMMON, 0)
+		if self.summonerName then
+			ns.DB:NoteSummoner(self.summonerName, ns.DB:Now())
+			self.summonerName = nil
+		end
 	end
+end
+
+function ns.GPS:OnTrainer()
+	if self.trainerSeen then
+		return
+	end
+	self.trainerSeen = true
+	local trainerType = 0
+	if C_Trainer and C_Trainer.GetTrainerType then
+		local value = C_Trainer.GetTrainerType()
+		if IsPlainNumber(value) then
+			trainerType = value
+		end
+	end
+	local profession = 0
+	local trades = Enum and Enum.TrainerType and Enum.TrainerType.Tradeskills
+	if trainerType == trades and GetTrainerServiceSkillLine then
+		local line = GetTrainerServiceSkillLine(1)
+		if type(line) == "string" and not (issecretvalue and issecretvalue(line)) then
+			profession = ns.ProfessionId(line)
+		end
+	end
+	self:Mark(Kind.TRAINER, ns.DB:PackTrainer(trainerType, profession))
 end
 
 function ns.GPS:TargetClassification()
@@ -486,6 +536,9 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("QUEST_TURNED_IN")
 	frame:RegisterEvent("CONFIRM_SUMMON")
 	frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+	frame:RegisterEvent("TRAINER_SHOW")
+	frame:RegisterEvent("TRAINER_UPDATE")
+	frame:RegisterEvent("TRAINER_CLOSED")
 	frame:RegisterEvent("PARTY_KILL")
 	frame:RegisterEvent("PLAYER_CONTROL_LOST")
 	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
@@ -566,10 +619,32 @@ function ns.GPS:OnEvent(event, ...)
 		self:OnConfirmSummon()
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
 		local unit, _, spellID = ...
-		if unit == "player" and IsHearthSpell(spellID) then
-			self.hearthUntil = ns.DB:Now() + 20
-			self:Mark(Kind.HEARTH, spellID or 0)
+		if not (issecretvalue and issecretvalue(unit)) and unit == "player" and IsPlainNumber(spellID) then
+			if IsHearthSpell(spellID) then
+				self.hearthUntil = ns.DB:Now() + 20
+				self:Mark(Kind.HEARTH, spellID)
+			else
+				local cast = ns.TravelCast(SpellName(spellID))
+				if cast == "portal" then
+					self:Mark(Kind.PORTAL, spellID)
+				elseif cast == "ritual" then
+					self:Mark(Kind.SUMMON, spellID)
+				end
+			end
 		end
+	elseif event == "TRAINER_SHOW" then
+		self.trainerSeen = false
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.2, function()
+				if self.active then
+					self:OnTrainer()
+				end
+			end)
+		end
+	elseif event == "TRAINER_UPDATE" then
+		self:OnTrainer()
+	elseif event == "TRAINER_CLOSED" then
+		self.trainerSeen = false
 	elseif event == "PARTY_KILL" then
 		local attackerGUID, targetGUID = ...
 		self:OnKill(attackerGUID, targetGUID)
