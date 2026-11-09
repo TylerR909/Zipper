@@ -47,7 +47,7 @@ SlashCmdList.ZIPPER = function(msg)
 		return
 	end
 	if msg == "help" then
-		ns:Print("/zipper — open the replay")
+		ns:Print("/zipper — open the map, the route, and the replay")
 		ns:Print("/zipper config — reminder and what gets recorded")
 		ns:Print("/zipper status — sessions and the current recap")
 		return

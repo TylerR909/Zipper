@@ -2697,6 +2697,88 @@ function ns.Replay:RescalePins()
 	end
 end
 
+function ns.Replay:SaveWindow()
+	local frame = self.frame
+	if not frame then
+		return
+	end
+	local point, _, _, x, y = frame:GetPoint(1)
+	ZipperDB = ZipperDB or {}
+	ZipperDB.window = {
+		point = point,
+		x = x,
+		y = y,
+		w = frame:GetWidth(),
+		h = frame:GetHeight(),
+	}
+end
+
+function ns.Replay:Layout(width, height)
+	local inset = self.listInset
+	if not inset or not width or not height or width < 1 or height < 1 then
+		return
+	end
+	local listTop = 118
+	local gap = 12
+	local controls = 186
+	local after = 14
+	local bottom = 12
+	local leftover = height - (listTop + gap + controls + after + bottom)
+	local listH = math.floor(leftover * 0.42)
+	if listH < 64 then
+		listH = 64
+	end
+	if leftover - listH < 48 then
+		listH = leftover - 48
+	end
+	if listH < 48 then
+		listH = 48
+	end
+	inset:SetHeight(listH)
+	local y = -(listTop + listH + gap)
+	local frame = self.frame
+	self.chapterPrev:ClearAllPoints()
+	self.chapterPrev:SetPoint("TOPLEFT", 14, y)
+	self.chapterNext:ClearAllPoints()
+	self.chapterNext:SetPoint("TOPRIGHT", -14, y)
+	self.scrub:ClearAllPoints()
+	self.scrub:SetPoint("TOPLEFT", 16, y - 44)
+	self.scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	self.timeText:ClearAllPoints()
+	self.timeText:SetPoint("TOPLEFT", 16, y - 68)
+	self.timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	for i = 1, #self.jumpButtons do
+		self.jumpButtons[i]:ClearAllPoints()
+		self.jumpButtons[i]:SetPoint("TOPLEFT", 14 + ((i - 1) * 78), y - 90)
+	end
+	self.playButton:ClearAllPoints()
+	self.playButton:SetPoint("TOPLEFT", 14, y - 120)
+	for i = 1, #self.speedButtons do
+		self.speedButtons[i]:ClearAllPoints()
+		self.speedButtons[i]:SetPoint("TOPLEFT", 76 + ((i - 1) * 50), y - 120)
+	end
+	self.trailLabel:ClearAllPoints()
+	self.trailLabel:SetPoint("TOPLEFT", 16, y - 150)
+	self.trailValue:ClearAllPoints()
+	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, y - 150)
+	self.trailSlider:ClearAllPoints()
+	self.trailSlider:SetPoint("TOPLEFT", 16, y - 168)
+	self.trailSlider:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	self.statInset:ClearAllPoints()
+	self.statInset:SetPoint("TOPLEFT", 14, y - controls - after)
+	self.statInset:SetPoint("BOTTOMRIGHT", -14, bottom)
+	local contentWidth = width - 58
+	if contentWidth < 200 then
+		contentWidth = 200
+	end
+	if self.listContent then
+		self.listContent:SetWidth(contentWidth)
+	end
+	if self.statContent then
+		self.statContent:SetWidth(contentWidth)
+	end
+end
+
 function ns.Replay:CreateFrame()
 	if self.frame then
 		return
@@ -2707,6 +2789,13 @@ function ns.Replay:CreateFrame()
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
+	frame:SetResizable(true)
+	if frame.SetResizeBounds then
+		frame:SetResizeBounds(336, 470, 440, 760)
+	else
+		frame:SetMinResize(336, 470)
+		frame:SetMaxResize(440, 760)
+	end
 	frame:EnableMouse(true)
 	frame:RegisterForDrag("LeftButton")
 	frame:SetBackdrop({
@@ -2720,9 +2809,10 @@ function ns.Replay:CreateFrame()
 	frame:SetScript("OnDragStart", frame.StartMoving)
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
-		local point, _, _, x, y = self:GetPoint(1)
-		ZipperDB = ZipperDB or {}
-		ZipperDB.window = { point = point, x = x, y = y }
+		ns.Replay:SaveWindow()
+	end)
+	frame:SetScript("OnSizeChanged", function(self, width, height)
+		ns.Replay:Layout(width, height)
 	end)
 	frame:SetScript("OnShow", function()
 		ns.Replay:HookMap()
@@ -2810,6 +2900,32 @@ function ns.Replay:CreateFrame()
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", 2, 2)
+
+	local grip = CreateFrame("Button", nil, frame)
+	grip:SetSize(16, 16)
+	grip:SetFrameLevel(frame:GetFrameLevel() + 20)
+	grip:SetPoint("BOTTOMRIGHT", -2, 2)
+	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+	grip:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Drag to resize")
+		GameTooltip:Show()
+	end)
+	grip:SetScript("OnLeave", function(self)
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+	grip:RegisterForDrag("LeftButton")
+	grip:SetScript("OnDragStart", function()
+		frame:StartSizing("BOTTOMRIGHT")
+	end)
+	grip:SetScript("OnDragStop", function()
+		frame:StopMovingOrSizing()
+		ns.Replay:SaveWindow()
+	end)
 
 	local options = MakeButton(frame, "Options", 64)
 	options:SetPoint("RIGHT", close, "LEFT", 4, -2)
@@ -3061,6 +3177,7 @@ function ns.Replay:CreateFrame()
 	statContent:SetSize(260, 16)
 	statScroll:SetScrollChild(statContent)
 
+	self.listInset = inset
 	self.frame = frame
 	self.scopeText = scope
 	self.titleText = title
@@ -3101,6 +3218,20 @@ function ns.Replay:CreateFrame()
 	else
 		frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 40)
 	end
+	local width = window and tonumber(window.w) or 336
+	local height = window and tonumber(window.h) or 736
+	if not width or width < 336 then
+		width = 336
+	elseif width > 440 then
+		width = 440
+	end
+	if not height or height < 470 then
+		height = 470
+	elseif height > 760 then
+		height = 760
+	end
+	frame:SetSize(width, height)
+	self:Layout(width, height)
 	self:ApplySkin()
 end
 
@@ -3121,33 +3252,8 @@ function ns.Replay:EnsureDot()
 	self.dot = dot
 end
 
-function ns.Replay:Toggle()
-	self:CreateFrame()
-	if self.frame:IsShown() then
-		self.playing = false
-		self.frame:Hide()
-		return
-	end
-	local map = self:EnsureMap()
-	if map and not map:IsShown() and ToggleWorldMap then
-		ToggleWorldMap()
-	end
-	self:HookMap()
-	self:EnsureDot()
-	self.frame:Show()
-	self:SetMode(self.mode or "current", self.index)
-end
-
-function ns.Replay:ToggleRoute()
-	self.route = not self.route
-	if not self.route then
-		self.playing = false
-		if self.playButton then
-			self.playButton:SetText("Play")
-		end
-		self:ClearOverlay()
-		return
-	end
+function ns.Replay:ShowRoute()
+	self.route = true
 	if not self.sessions then
 		self:ReloadView()
 	end
@@ -3158,6 +3264,31 @@ function ns.Replay:ToggleRoute()
 	self:HookMap()
 	self:EnsureDot()
 	self:Redraw()
+end
+
+function ns.Replay:Toggle()
+	self:CreateFrame()
+	if self.frame:IsShown() then
+		self.playing = false
+		self.frame:Hide()
+		return
+	end
+	self:ShowRoute()
+	self.frame:Show()
+	self:SetMode(self.mode or "current", self.index)
+end
+
+function ns.Replay:ToggleRoute()
+	if self.route then
+		self.route = false
+		self.playing = false
+		if self.playButton then
+			self.playButton:SetText("Play")
+		end
+		self:ClearOverlay()
+		return
+	end
+	self:ShowRoute()
 end
 
 function ns.Replay:RaiseMapButton(button)
@@ -3210,7 +3341,7 @@ function ns.Replay:StyleMapButton(button)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:AddLine("Zipper", 1, 0.82, 0)
 		GameTooltip:AddLine("Left click: show or hide the route.", 1, 1, 1, true)
-		GameTooltip:AddLine("Right click: open the replay.", 1, 1, 1, true)
+		GameTooltip:AddLine("Right click: open the replay and show the route.", 1, 1, 1, true)
 		GameTooltip:AddLine("Shift+right click: open settings.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
