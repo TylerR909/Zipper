@@ -354,8 +354,24 @@ end
 local CAMPFIRE_AURA = 1283391
 local REST_SECONDS = 60
 
+function ns.GPS:AuraIndexSecret(index)
+	-- GetBuffDataByIndex throws while auras are secret and the caller is tainted.
+	-- The predicate is safe. inCombat is the fallback when that API is missing.
+	if C_Secrets and C_Secrets.ShouldUnitAuraIndexBeSecret then
+		local secret = C_Secrets.ShouldUnitAuraIndexBeSecret("player", index)
+		if secret == nil or (issecretvalue and issecretvalue(secret)) then
+			return true
+		end
+		return secret and true or false
+	end
+	return self.inCombat and true or false
+end
+
 function ns.GPS:ReadRest()
 	local camp, sleep, earned = false, false, false
+	if self:AuraIndexSecret(1) then
+		return nil
+	end
 	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID and self:PlayerAura(CAMPFIRE_AURA) then
 		camp = true
 	end
@@ -363,9 +379,15 @@ function ns.GPS:ReadRest()
 		return camp, sleep, earned
 	end
 	for i = 1, 40 do
+		if self:AuraIndexSecret(i) then
+			return nil
+		end
 		local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
 		if not aura then
 			break
+		end
+		if issecretvalue and issecretvalue(aura) then
+			return nil
 		end
 		local name = aura.name
 		local spellID = aura.spellId
@@ -450,6 +472,9 @@ function ns.GPS:WatchRest()
 		return
 	end
 	local camp, sleep, earned = self:ReadRest()
+	if camp == nil then
+		return
+	end
 	if self.restKind == Kind.CAMP and not camp then
 		self:EndRest()
 	elseif self.restKind == Kind.SLEEP and not sleep then
