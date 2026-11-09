@@ -32,7 +32,7 @@ The account file is the live journey store. A per-character file may still hold 
 
 ## Repo conventions
 
-- Player-facing text goes through `ns.L`. Register the English key in `Locales/enUS.lua`. The other locale files stay empty so the packager can fill them from CurseForge. Do not invent translations. Do not translate the confirm phrase `gone forever`.
+- Player-facing text goes through `ns.L`. Register the English key in `Locales/enUS.lua`. `NewLocale` returns a write-only proxy, and reading a key on it asserts, so `ns.L` is the table from `GetLocale`. The other locale files stay empty so the packager can fill them from CurseForge. Do not invent translations. Do not translate the confirm phrase `gone forever`.
 - Lua is 5.1. No `//`, no `goto`, and `unpack` rather than `table.unpack`. A `local function` is invisible to earlier functions in the same file.
 - A new `.lua` file does nothing until it is listed in `Zipper.toc`. Keep the existing load order.
 - Do not edit other addons installed beside this one.
