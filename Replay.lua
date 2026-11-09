@@ -226,7 +226,9 @@ function ns.Replay:LineLook(mode, speed)
 	if mode == ns.Travel.MOUNT then
 		return 0.95, 0.72 - (0.38 * heat), 0.22, 0.92, thin
 	end
-	return 0.25 + (0.70 * heat), 0.85 - (0.28 * heat), 1 - (0.72 * heat), 0.9, thin
+	local cr, cg, cb = self:ClassColor()
+	local lift = 0.28 * heat
+	return cr + ((1 - cr) * lift), cg + ((1 - cg) * lift), cb + ((1 - cb) * lift), 0.92, thin
 end
 
 function ns.Replay:InferModes(track)
@@ -801,6 +803,14 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
 							size = 7
+						elseif kind == Kind.QUEST_ACCEPT then
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(0.58, 0.44, 0.06, 1)
+						elseif kind == Kind.QUEST_TURNIN then
+							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(0.235, 0.702, 0.443, 1)
 						else
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -826,12 +836,15 @@ function ns.Replay:DrawMarkers(sessions)
 end
 
 function ns.Replay:ClassColor()
-	if self.classR then
-		return self.classR, self.classG, self.classB
-	end
 	local _, classFile = UnitClass("player")
 	if issecretvalue and issecretvalue(classFile) then
 		classFile = nil
+	end
+	if not classFile then
+		classFile = self.classFile
+	end
+	if classFile and classFile == self.classFile and self.classR then
+		return self.classR, self.classG, self.classB
 	end
 	local r, g, b
 	if classFile and C_ClassColor and C_ClassColor.GetClassColor then
@@ -847,6 +860,7 @@ function ns.Replay:ClassColor()
 	if not r or (issecretvalue and issecretvalue(r)) then
 		r, g, b = 0.9, 0.9, 0.9
 	end
+	self.classFile = classFile
 	self.classR, self.classG, self.classB = r, g, b
 	return r, g, b
 end
