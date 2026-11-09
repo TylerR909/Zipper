@@ -683,6 +683,41 @@ function ns.DB:NoteLevelUp(level, now)
 	host.levels[#host.levels + 1] = { lv = level, t = now }
 end
 
+function ns.DB:MapAt(journey, when)
+	local sessions = journey and journey.sessions
+	if type(sessions) ~= "table" or type(when) ~= "number" then
+		return nil
+	end
+	local found, foundAt
+	for i = 1, #sessions do
+		local session = sessions[i]
+		if type(session) == "table" and type(session.s) == "number" and when >= session.s - 1 then
+			local stop = session.seen or session.s
+			if session == self.session then
+				stop = self:Now()
+			end
+			if when <= stop + 2 then
+				local track = self:Track(session)
+				for n = 1, #(track.t or {}) do
+					local at = session.s + (track.t[n] or 0)
+					if at <= when + 1 and (not foundAt or at >= foundAt) and track.m[n] and track.m[n] ~= 0 then
+						foundAt = at
+						found = track.m[n]
+					end
+				end
+				for n = 1, #(track.et or {}) do
+					local at = session.s + (track.et[n] or 0)
+					if at <= when + 1 and (not foundAt or at >= foundAt) and track.em[n] and track.em[n] ~= 0 then
+						foundAt = at
+						found = track.em[n]
+					end
+				end
+			end
+		end
+	end
+	return found
+end
+
 function ns.DB:SpanStop(span, journey)
 	if span.t1 then
 		return span.t1

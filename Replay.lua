@@ -1614,10 +1614,14 @@ function ns.Replay:LevelGroups()
 				lvTo = (not starter and ranged) and span.lvTo or nil,
 				seconds = 0,
 				open = false,
+				t0 = span.t0,
 				last = span.t0,
 			}
 			groups[key] = group
 			order[#order + 1] = group
+		end
+		if not group.t0 or span.t0 < group.t0 then
+			group.t0 = span.t0
 		end
 		if starter then
 			local low = math.min(group.lv, span.lv)
@@ -1635,6 +1639,26 @@ function ns.Replay:LevelGroups()
 		end
 		if stop and stop > group.last then
 			group.last = stop
+		end
+	end
+	local live = ns.DB.session
+	local sessions = ns.DB.char and ns.DB.char.sessions
+	local liveHere = false
+	if live and type(sessions) == "table" then
+		for i = 1, #sessions do
+			if sessions[i] == live then
+				liveHere = true
+				break
+			end
+		end
+	end
+	if liveHere and type(live.el) == "number" then
+		for i = 1, #order do
+			local group = order[i]
+			local top = group.lvTo or group.lv
+			if live.el >= group.lv and live.el <= top then
+				group.open = true
+			end
 		end
 	end
 	table.sort(order, function(a, b)
@@ -1944,6 +1968,111 @@ function ns.Replay:ScopeCaption()
 	return string.format(L["The recording in progress, including reloads a few minutes apart. %s so far."], FormatClock(elapsed))
 end
 
+local function MergePieces(pieces)
+	if #pieces < 2 then
+		return pieces
+	end
+	table.sort(pieces, function(a, b)
+		return a.t0 < b.t0
+	end)
+	local merged = { { t0 = pieces[1].t0, t1 = pieces[1].t1 } }
+	for i = 2, #pieces do
+		local last = merged[#merged]
+		local piece = pieces[i]
+		if piece.t0 <= last.t1 + 2 then
+			if piece.t1 > last.t1 then
+				last.t1 = piece.t1
+			end
+		else
+			merged[#merged + 1] = { t0 = piece.t0, t1 = piece.t1 }
+		end
+	end
+	return merged
+end
+
+function ns.Replay:PlayPieces()
+	local pieces = {}
+	if self.mode == "level" and self.levelLo then
+		local spans = ns.DB:LevelSpans(ns.DB.char)
+		local hi = self.levelHi or self.levelLo
+		for i = 1, #spans do
+			local span = spans[i]
+			local top = span.lvTo or span.lv
+			if top >= self.levelLo and span.lv <= hi then
+				local stop = ns.DB:SpanStop(span, ns.DB.char)
+				if stop and stop > span.t0 then
+					pieces[#pieces + 1] = { t0 = span.t0, t1 = stop }
+				end
+			end
+		end
+	else
+		local sessions = self.sessions or {}
+		for i = 1, #sessions do
+			local session = sessions[i]
+			if type(session) == "table" and type(session.s) == "number" then
+				local stop = session.seen or session.s
+				if session == ns.DB.session then
+					stop = ns.DB:Now()
+				end
+				if stop > session.s then
+					pieces[#pieces + 1] = { t0 = session.s, t1 = stop }
+				end
+			end
+		end
+	end
+	pieces = MergePieces(pieces)
+	if #pieces == 0 and self.t0 and self.t1 and self.t1 > self.t0 then
+		pieces[1] = { t0 = self.t0, t1 = self.t1 }
+	end
+	return pieces
+end
+
+function ns.Replay:PlayedAt(when)
+	local pieces = self:PlayPieces()
+	local total, elapsed = 0, 0
+	when = when or 0
+	for i = 1, #pieces do
+		local piece = pieces[i]
+		local dur = piece.t1 - piece.t0
+		if dur < 0 then
+			dur = 0
+		end
+		total = total + dur
+		if when >= piece.t1 then
+			elapsed = elapsed + dur
+		elseif when > piece.t0 then
+			elapsed = elapsed + (when - piece.t0)
+		end
+	end
+	return elapsed, total
+end
+
+function ns.Replay:TimeAtPlayed(seconds)
+	local pieces = self:PlayPieces()
+	if #pieces == 0 then
+		return self.t0 or 0
+	end
+	if not seconds or seconds <= 0 then
+		return pieces[1].t0
+	end
+	local left = seconds
+	for i = 1, #pieces do
+		local dur = pieces[i].t1 - pieces[i].t0
+		if dur < 0 then
+			dur = 0
+		end
+		if left <= dur or i == #pieces then
+			local at = pieces[i].t0 + left
+			if at > pieces[i].t1 then
+				at = pieces[i].t1
+			end
+			return at
+		end
+		left = left - dur
+	end
+	return pieces[#pieces].t1
+end
+
 function ns.Replay:UpdateReadout()
 	if not self.timeText then
 		return
@@ -1962,11 +2091,16 @@ function ns.Replay:UpdateReadout()
 		return
 	end
 	local at = self.playhead or self.t0
-	local span = self.t1 - self.t0
-	if span < 0 then
-		span = 0
+	local elapsed, total = self:PlayedAt(at)
+	if total < 0 then
+		total = 0
 	end
-	self.timeText:SetText(string.format("%s  /  %s", FormatClock(at - self.t0), FormatClock(span)))
+	if elapsed < 0 then
+		elapsed = 0
+	elseif elapsed > total then
+		elapsed = total
+	end
+	self.timeText:SetText(string.format("%s  /  %s", FormatClock(elapsed), FormatClock(total)))
 	self:UpdateRecap(sessions)
 	if not self.playing then
 		self.playButton:SetText(L["Play"])
@@ -1982,7 +2116,11 @@ function ns.Replay:UpdateScrub()
 	if not scrub or not self.t0 or not self.t1 or self.t1 <= self.t0 then
 		return
 	end
-	local fraction = (self.playhead - self.t0) / (self.t1 - self.t0)
+	local elapsed, total = self:PlayedAt(self.playhead)
+	local fraction = 0
+	if total > 0 then
+		fraction = elapsed / total
+	end
 	if fraction < 0 then
 		fraction = 0
 	elseif fraction > 1 then
@@ -1995,8 +2133,9 @@ end
 
 function ns.Replay:JumpSteps()
 	local minutes = 0
-	if self.t0 and self.t1 and self.t1 > self.t0 then
-		minutes = (self.t1 - self.t0) / 60
+	local _, total = self:PlayedAt(self.t1 or self.playhead or 0)
+	if total and total > 0 then
+		minutes = total / 60
 	end
 	if minutes >= 360 then
 		return 60, 15
@@ -2279,7 +2418,11 @@ function ns.Replay:SeekToTime(when)
 	if self.playButton then
 		self.playButton:SetText(L["Play"])
 	end
-	local fraction = (when - self.t0) / (self.t1 - self.t0)
+	local elapsed, total = self:PlayedAt(when)
+	local fraction = 0
+	if total > 0 then
+		fraction = elapsed / total
+	end
 	if fraction < 0 then
 		fraction = 0
 	elseif fraction > 1 then
@@ -2354,13 +2497,14 @@ function ns.Replay:LayoutPips()
 		return
 	end
 	local width = scrub:GetWidth() or 0
-	local span = (self.t1 or 0) - (self.t0 or 0)
+	local _, total = self:PlayedAt(self.t1 or 0)
 	local shown = 0
-	if width > 20 and span > 0 then
+	if width > 20 and total > 0 then
 		local level = (scrub:GetFrameLevel() or 1) + 6
 		for i = 1, #chapters do
 			local chapter = chapters[i]
-			local fraction = (chapter.t - self.t0) / span
+			local elapsed = self:PlayedAt(chapter.t)
+			local fraction = elapsed / total
 			if fraction < 0 then
 				fraction = 0
 			elseif fraction > 1 then
@@ -2448,20 +2592,30 @@ function ns.Replay:Jump(seconds)
 	if self.playButton then
 		self.playButton:SetText(L["Play"])
 	end
-	local at = (self.playhead or self.t0) + seconds
-	if at < self.t0 then
-		at = self.t0
-	elseif at > self.t1 then
-		at = self.t1
+	local elapsed, total = self:PlayedAt(self.playhead or self.t0)
+	local target = elapsed + seconds
+	if target < 0 then
+		target = 0
+	elseif total and target > total then
+		target = total
 	end
-	self:SeekFraction((at - self.t0) / (self.t1 - self.t0), true)
+	local fraction = 0
+	if total and total > 0 then
+		fraction = target / total
+	end
+	self:SeekFraction(fraction, true)
 end
 
 function ns.Replay:SeekFraction(fraction, immediate)
 	if not self.t0 or not self.t1 then
 		return
 	end
-	self.playhead = self.t0 + ((self.t1 - self.t0) * fraction)
+	local _, total = self:PlayedAt(self.t1)
+	if not total or total <= 0 then
+		self.playhead = self.t0
+	else
+		self.playhead = self:TimeAtPlayed(total * fraction)
+	end
 	local indoors = self:InstanceSkipTo(self.playhead)
 	if indoors and indoors > self.playhead then
 		self.playhead = indoors
@@ -2969,8 +3123,30 @@ function ns.Replay:RefreshLevelList()
 	content:SetHeight(math.max(22, #groups * 22))
 end
 
+function ns.Replay:LevelPlace(group)
+	if not group or not group.t0 then
+		return nil
+	end
+	local journey = ns.DB.char
+	local fromName = self:PlaceName(ns.DB:MapAt(journey, group.t0))
+	local endAt = group.last
+	if group.open then
+		endAt = ns.DB:Now()
+	end
+	local toName = self:PlaceName(ns.DB:MapAt(journey, endAt or group.t0))
+	if fromName and toName and fromName ~= toName then
+		return string.format(L["%s to %s"], fromName, toName)
+	end
+	return fromName or toName
+end
+
 function ns.Replay:LevelRowLabel(group)
-	return string.format("%s    %s", self:LevelName(group), FormatClock(group.seconds or 0))
+	local text = string.format("%s    %s", self:LevelName(group), FormatClock(group.seconds or 0))
+	local place = self:LevelPlace(group)
+	if place then
+		text = text .. "    " .. place
+	end
+	return text
 end
 
 function ns.Replay:RefreshList()
