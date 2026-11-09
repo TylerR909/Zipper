@@ -1,6 +1,10 @@
 # Zipper
 
-This folder is the addon and the git repo. It lives in the Warcraft Forever install. The game loads this path, not a random worktree, unless that worktree is what `Interface/AddOns/Zipper` points at.
+This folder is the addon and the git repo. The game loads only this path:
+
+`/var/mnt/games/Blizzard/World of Warcraft/_forever_/Interface/AddOns/Zipper`
+
+A new session in this directory has what it needs: this file, the README, `.context/todo.md`, and `.mcp.json`. A new git worktree does not. The client will not see code that lives anywhere else, and pointing the game at a worktree is not a test plan. SavedVariables sit outside the repo, so every copy of Zipper the client loads writes the same account save. Do one task at a time here. New sessions are fine. Parallel worktrees are not a way to try several changes in game.
 
 The README is the player page. `.context/todo.md` is the unfinished list. Do not start the next item on that list unless Tyler asks.
 
@@ -24,8 +28,7 @@ The generated API index is incomplete. `GetNumGroupMembers`, `GetNumSubgroupMemb
 - OneForAll's dungeon window. It is not a pin API.
 - Git config. For each commit set `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` in the command environment. Author is Tyler R, `20718430+TylerR909@users.noreply.github.com`. `git commit --author` alone fails because the committer is still unset.
 - Do not push, tag, or cut a release unless Tyler asks.
-- Do not delete `WTF/Account/EVANICKI/91/Bellemae-Claire/SavedVariables/Zipper.lua`. That file is the pre-migration backup. Live journeys are the account file `WTF/Account/EVANICKI/SavedVariables/Zipper.lua`.
-- Do not run the delete-journey dialog on real data. The confirm phrase is `gone forever`.
+- Do not run the delete-journey dialog on real data. The confirm phrase is `gone forever`. The account save and its `.bak` are the recovery path, and both are one flush from being gone.
 
 ## Traps that already shipped bugs
 
@@ -38,6 +41,8 @@ The generated API index is incomplete. `GetNumGroupMembers`, `GetNumSubgroupMemb
 - EllesmereUI is `RegisterSkin` only. There is no `ScrollBarsIn`. Call the skin inside `pcall`. A failed skin must still leave the panel usable.
 - BugGrabber keeps old Zipper stack traces across reloads. Clear that sack before treating a listed error as a current bug.
 - SavedVariables flush on logout and `/reload`, not continuously. A change is not on disk until one of those happens.
+- That flush is one file deep. The client renames the current `Zipper.lua` to `Zipper.lua.bak`, then writes a new `Zipper.lua`. The `.bak` is the only backup, and the next logout or `/reload` overwrites it. A malformed flush destroys the live file. Another flush destroys the backup too. If a reload writes a bad save, copy the `.bak` back over `Zipper.lua` before anything else logs out or reloads. Do not reload again to see if it got better.
+- The files that matter are `WTF/Account/EVANICKI/SavedVariables/Zipper.lua` and the same name with `.bak`. The per-character copies are `WTF/Account/EVANICKI/91/Bellemae-Claire/SavedVariables/Zipper.lua` and `WTF/Account/EVANICKI/91/Kelly-Nogomoa/SavedVariables/Zipper.lua`, each with its own `.bak`. The account file is the live journey store. The Bellemae character file is the pre-migration backup. Do not delete any of them.
 
 ## Decisions that look like omissions
 
