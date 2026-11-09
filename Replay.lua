@@ -351,7 +351,7 @@ function ns.Replay:AcquireMarker()
 				end
 			elseif pin.kind == Kind.GROUP then
 				ns.Replay:GroupTooltip(pin)
-			elseif pin.kind == Kind.PORTAL or pin.kind == Kind.TRAINER or pin.kind == Kind.SUMMON then
+			elseif pin.kind == Kind.PORTAL or pin.kind == Kind.TRAINER or pin.kind == Kind.SUMMON or pin.kind == Kind.CAMP or pin.kind == Kind.SLEEP then
 				ns.Replay:TravelTooltip(pin)
 			else
 				GameTooltip:SetText(ns.KindName[pin.kind] or "Event", 1, 0.9, 0.4)
@@ -777,7 +777,8 @@ function ns.Replay:DrawMarkers(sessions)
 				local kind = track.ek[i]
 				local isKill = kind == Kind.KILL
 				local when = session.s + (track.et[i] or 0)
-				if isKill == wantKill and kind ~= Kind.ZONE and self:SegmentFade(when) > 0 then
+				local restEnd = (kind == Kind.CAMP or kind == Kind.SLEEP) and track.ea[i] == 1
+				if isKill == wantKill and kind ~= Kind.ZONE and not restEnd and self:SegmentFade(when) > 0 then
 					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 					if px then
 						shown = shown + 1
@@ -813,7 +814,7 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(0.235, 0.702, 0.443, 1)
-						elseif kind == Kind.PORTAL or kind == Kind.TRAINER then
+						elseif kind == Kind.PORTAL or kind == Kind.TRAINER or kind == Kind.CAMP or kind == Kind.SLEEP then
 							local color = ns.KindColor[kind]
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -880,6 +881,7 @@ function ns.Replay:PlayheadParked()
 		return false
 	end
 	local afk = false
+	local resting = false
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
@@ -889,12 +891,21 @@ function ns.Replay:PlayheadParked()
 				break
 			end
 			local kind = track.ek[i]
+			local extra = track.ea[i]
 			if kind == Kind.AFK_START then
 				afk = true
 			elseif kind == Kind.AFK_END then
 				afk = false
+			elseif (kind == Kind.CAMP or kind == Kind.SLEEP) and (not extra or extra == 0) then
+				afk = false
+				resting = true
+			elseif (kind == Kind.CAMP or kind == Kind.SLEEP) and extra == 1 then
+				resting = false
 			end
 		end
+	end
+	if resting then
+		return false
 	end
 	if afk then
 		return true
@@ -1040,6 +1051,7 @@ function ns.Replay:CollectStats(sessions)
 	local speedTime, speedSum, maxSpeed = 0, 0, 0
 	local kills, turnins, levels = 0, 0, 0
 	local accepts, deaths, summons, hearths, flights, mounts, portals, trainers = 0, 0, 0, 0, 0, 0, 0, 0
+	local camp, slept = 0, 0
 	local zoneChanges, zoneCount, samples = 0, 0, 0
 	local zones = {}
 	local entered, inside = {}, {}
@@ -1114,7 +1126,7 @@ function ns.Replay:CollectStats(sessions)
 			end
 			end
 		end
-		local afkStart, instStart, instType
+		local afkStart, instStart, instType, campStart, sleepStart
 		for i = 1, #(track.ek or {}) do
 			local kind = track.ek[i]
 			local t = session.s + (track.et[i] or 0)
@@ -1131,6 +1143,20 @@ function ns.Replay:CollectStats(sessions)
 					afk = afk + (t - afkStart)
 				end
 				afkStart = nil
+			elseif kind == Kind.CAMP and (not extra or extra == 0) then
+				campStart = t
+			elseif kind == Kind.CAMP and extra == 1 and campStart then
+				if t > campStart then
+					camp = camp + (t - campStart)
+				end
+				campStart = nil
+			elseif kind == Kind.SLEEP and (not extra or extra == 0) then
+				sleepStart = t
+			elseif kind == Kind.SLEEP and extra == 1 and sleepStart then
+				if t > sleepStart then
+					slept = slept + (t - sleepStart)
+				end
+				sleepStart = nil
 			elseif kind == Kind.INSTANCE_ENTER then
 				instStart = t
 				instType = extra
@@ -1167,6 +1193,12 @@ function ns.Replay:CollectStats(sessions)
 		if afkStart and endT > afkStart then
 			afk = afk + (endT - afkStart)
 		end
+		if campStart and endT > campStart then
+			camp = camp + (endT - campStart)
+		end
+		if sleepStart and endT > sleepStart then
+			slept = slept + (endT - sleepStart)
+		end
 		if instStart and endT > instStart and inside[instType] then
 			inside[instType] = inside[instType] + (endT - instStart)
 		end
@@ -1199,6 +1231,8 @@ function ns.Replay:CollectStats(sessions)
 		{ "Mounted", FormatClock(mountTime) },
 		{ "Flight path", FormatClock(flightTime) },
 		{ "AFK", FormatClock(afk) },
+		{ "Camped", FormatClock(camp) },
+		{ "Slept", FormatClock(slept) },
 		{ "Dungeons", FormatClock(inside[party]) },
 		{ "Raids", FormatClock(inside[raid]) },
 		{ "Battlegrounds", FormatClock(inside[pvp]) },
@@ -1299,6 +1333,10 @@ function ns.Replay:TravelTooltip(pin)
 	local color = ns.KindColor[pin.kind] or { 1, 0.9, 0.4 }
 	if pin.kind == Kind.PORTAL then
 		GameTooltip:SetText(self:SpellTitle(pin.extra) or "Portal", color[1], color[2], color[3])
+	elseif pin.kind == Kind.CAMP then
+		GameTooltip:SetText("Campfire", color[1], color[2], color[3])
+	elseif pin.kind == Kind.SLEEP then
+		GameTooltip:SetText("Sleeping bag", color[1], color[2], color[3])
 	elseif pin.kind == Kind.TRAINER then
 		GameTooltip:SetText(self:TrainerTitle(pin.extra), color[1], color[2], color[3])
 	elseif pin.extra and pin.extra > 0 then

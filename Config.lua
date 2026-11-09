@@ -18,6 +18,7 @@ local TRACK_DEFAULTS = {
 	flight = true,
 	mount = true,
 	afk = true,
+	rest = true,
 	instance = true,
 	zone = true,
 	party = true,
@@ -32,6 +33,8 @@ local KIND_KEY = {
 	[ns.Kind.HEARTH] = "hearth",
 	[ns.Kind.PORTAL] = "portal",
 	[ns.Kind.TRAINER] = "trainer",
+	[ns.Kind.CAMP] = "rest",
+	[ns.Kind.SLEEP] = "rest",
 	[ns.Kind.FLIGHT_START] = "flight",
 	[ns.Kind.FLIGHT_END] = "flight",
 	[ns.Kind.MOUNT] = "mount",
@@ -56,6 +59,7 @@ local TRACKS = {
 	{ key = "flight", label = "Flights" },
 	{ key = "mount", label = "Mount and dismount" },
 	{ key = "afk", label = "AFK" },
+	{ key = "rest", label = "Camps and sleeping bags" },
 	{ key = "instance", label = "Dungeons and raids" },
 	{ key = "party", label = "Party members" },
 	{ key = "zone", label = "Zone changes" },
@@ -314,6 +318,7 @@ local ROAD = {
 	{ key = "flight", label = "Flights" },
 	{ key = "zone", label = "Zone changes" },
 	{ key = "afk", label = "AFK" },
+	{ key = "rest", label = "Camps and sleeping bags" },
 }
 
 local MOMENTS = {

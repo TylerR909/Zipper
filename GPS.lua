@@ -325,6 +325,14 @@ end
 
 function ns.GPS:SyncAFK()
 	local afk = UnitIsAFK("player") and true or false
+	if self.restKind then
+		if self.afk then
+			self.afk = false
+			self:Mark(Kind.AFK_END, 0)
+		end
+		self.afkReady = true
+		return
+	end
 	if self.afkReady ~= true then
 		self.afk = afk
 		if self.continued or not afk then
@@ -341,6 +349,136 @@ function ns.GPS:SyncAFK()
 	end
 	self.afk = afk
 	self:Mark(afk and Kind.AFK_START or Kind.AFK_END, 0)
+end
+
+local CAMPFIRE_AURA = 1283391
+local REST_SECONDS = 60
+
+function ns.GPS:ReadRest()
+	local camp, sleep, earned = false, false, false
+	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID and self:PlayerAura(CAMPFIRE_AURA) then
+		camp = true
+	end
+	if not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
+		return camp, sleep, earned
+	end
+	for i = 1, 40 do
+		local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
+		if not aura then
+			break
+		end
+		local name = aura.name
+		local spellID = aura.spellId
+		if issecretvalue and issecretvalue(name) then
+			name = nil
+		end
+		if not IsPlainNumber(spellID) then
+			spellID = nil
+		end
+		local which, ready = ns.RestSignal(name, spellID)
+		if which == "sleep" then
+			sleep = true
+			earned = earned or ready
+		elseif which == "camp" then
+			camp = true
+			earned = earned or ready
+		end
+	end
+	return camp, sleep, earned
+end
+
+function ns.GPS:PlayerAura(spellID)
+	local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
+	if not aura or (issecretvalue and issecretvalue(aura)) then
+		return nil
+	end
+	return aura
+end
+
+function ns.GPS:BeginRest(kind)
+	if self.restKind == kind then
+		return
+	end
+	if self.restKind then
+		self:EndRest()
+	end
+	if self.afk then
+		self.afk = false
+		self:Mark(Kind.AFK_END, 0)
+	end
+	self.restKind = kind
+	self.restSince = nil
+	self:Mark(kind, 0)
+end
+
+function ns.GPS:EndRest()
+	local kind = self.restKind
+	if not kind then
+		return
+	end
+	self.restKind = nil
+	self.restSince = nil
+	self:Mark(kind, 1)
+	self:SyncAFK()
+end
+
+function ns.GPS:StopRestWatch()
+	if self.restTicker then
+		self.restTicker:Cancel()
+		self.restTicker = nil
+	end
+end
+
+function ns.GPS:EnsureRestWatch()
+	if self.restTicker or not C_Timer or not C_Timer.NewTicker then
+		return
+	end
+	self.restTicker = C_Timer.NewTicker(5, function()
+		if self.active then
+			self:WatchRest()
+		end
+	end)
+end
+
+function ns.GPS:WatchRest()
+	if not ns.Config:WantsKind(Kind.CAMP) then
+		self.restSince = nil
+		if self.restKind then
+			self:EndRest()
+		end
+		self:StopRestWatch()
+		return
+	end
+	local camp, sleep, earned = self:ReadRest()
+	if self.restKind == Kind.CAMP and not camp then
+		self:EndRest()
+	elseif self.restKind == Kind.SLEEP and not sleep then
+		self:EndRest()
+	end
+	if not camp and not sleep then
+		self.restSince = nil
+		if not self.restKind then
+			self:StopRestWatch()
+		end
+		return
+	end
+	self:EnsureRestWatch()
+	if self.restKind or self.moving or self.onTaxi then
+		if self.moving or self.onTaxi then
+			self.restSince = nil
+		end
+		return
+	end
+	if earned then
+		self:BeginRest(sleep and Kind.SLEEP or Kind.CAMP)
+		return
+	end
+	local now = ns.DB:Now()
+	if not self.restSince then
+		self.restSince = now
+	elseif now - self.restSince >= REST_SECONDS then
+		self:BeginRest(sleep and Kind.SLEEP or Kind.CAMP)
+	end
 end
 
 function ns.GPS:OnStopTurning()
@@ -539,6 +677,7 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("TRAINER_SHOW")
 	frame:RegisterEvent("TRAINER_UPDATE")
 	frame:RegisterEvent("TRAINER_CLOSED")
+	frame:RegisterEvent("UNIT_AURA")
 	frame:RegisterEvent("PARTY_KILL")
 	frame:RegisterEvent("PLAYER_CONTROL_LOST")
 	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
@@ -581,6 +720,10 @@ function ns.GPS:OnEvent(event, ...)
 	end
 	if event == "PLAYER_STARTED_MOVING" then
 		self.moving = true
+		self.restSince = nil
+		if self.restKind then
+			self:EndRest()
+		end
 		self:ConsiderSample(STOP_YARDS, false)
 	elseif event == "PLAYER_STOPPED_MOVING" then
 		self.moving = false
@@ -624,11 +767,14 @@ function ns.GPS:OnEvent(event, ...)
 				self.hearthUntil = ns.DB:Now() + 20
 				self:Mark(Kind.HEARTH, spellID)
 			else
-				local cast = ns.TravelCast(SpellName(spellID))
+				local name = SpellName(spellID)
+				local cast = ns.TravelCast(name)
 				if cast == "portal" then
 					self:Mark(Kind.PORTAL, spellID)
 				elseif cast == "ritual" then
 					self:Mark(Kind.SUMMON, spellID)
+				elseif spellID == 1307230 or (name and string.find(name, "Sleeping Bag", 1, true)) then
+					self:EnsureRestWatch()
 				end
 			end
 		end
@@ -645,6 +791,11 @@ function ns.GPS:OnEvent(event, ...)
 		self:OnTrainer()
 	elseif event == "TRAINER_CLOSED" then
 		self.trainerSeen = false
+	elseif event == "UNIT_AURA" then
+		local unit = ...
+		if unit == "player" and not (issecretvalue and issecretvalue(unit)) then
+			self:WatchRest()
+		end
 	elseif event == "PARTY_KILL" then
 		local attackerGUID, targetGUID = ...
 		self:OnKill(attackerGUID, targetGUID)
@@ -696,6 +847,8 @@ function ns.GPS:Start(continued)
 end
 
 function ns.GPS:Stop()
+	self:EndRest()
+	self:StopRestWatch()
 	self.active = false
 	self.moving = false
 	ns.DB:NoteProgress()

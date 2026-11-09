@@ -21,6 +21,8 @@ ns.Kind = {
 	GROUP = 17,
 	PORTAL = 18,
 	TRAINER = 19,
+	CAMP = 20,
+	SLEEP = 21,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -51,6 +53,8 @@ ns.KindName = {
 	[17] = "Joined",
 	[18] = "Portal",
 	[19] = "Trainer",
+	[20] = "Campfire",
+	[21] = "Sleeping bag",
 }
 
 ns.KindColor = {
@@ -73,6 +77,8 @@ ns.KindColor = {
 	[17] = { 0.45, 0.75, 1.00 },
 	[18] = { 0.20, 0.78, 0.95 },
 	[19] = { 0.78, 0.58, 0.28 },
+	[20] = { 0.95, 0.45, 0.12 },
+	[21] = { 0.55, 0.62, 0.95 },
 }
 
 -- Class file from UnitClass. Stored once per person, not on every path event.
@@ -140,6 +146,26 @@ local PROFESSION_WORD = {
 	["first aid"] = 13,
 	fishing = 14,
 }
+
+-- Campfire and sleeping-bag auras. A confirmed result has already earned the rest.
+function ns.RestSignal(name, spellID)
+	if spellID == 1283391 then
+		return "camp", false
+	end
+	if type(name) ~= "string" then
+		return nil
+	end
+	if name == "Camp Benefits" or name == "Boosted Rest" then
+		return "camp", true
+	end
+	if name == "Welcoming Campfire" or name == "Campfire Nearby" then
+		return "camp", false
+	end
+	if name == "Well-Rested" then
+		return "sleep", true
+	end
+	return nil
+end
 
 function ns.ProfessionId(line)
 	if type(line) ~= "string" or line == "" then
