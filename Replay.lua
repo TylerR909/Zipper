@@ -779,7 +779,8 @@ function ns.Replay:DrawMarkers(sessions)
 				local isKill = kind == Kind.KILL
 				local when = session.s + (track.et[i] or 0)
 				local restEnd = (kind == Kind.CAMP or kind == Kind.SLEEP) and track.ea[i] == 1
-				if isKill == wantKill and kind ~= Kind.ZONE and not restEnd and self:SegmentFade(when) > 0 then
+				local outside = self.mode == "level" and self.t0 and (when < self.t0 or when > (self.t1 or when))
+				if isKill == wantKill and kind ~= Kind.ZONE and not restEnd and not outside and self:SegmentFade(when) > 0 then
 					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 					if px then
 						shown = shown + 1
@@ -1204,8 +1205,8 @@ function ns.Replay:CollectStats(sessions)
 			inside[instType] = inside[instType] + (endT - instStart)
 		end
 	end
-	if self.mode == "level" and self.levelLo and self.t0 and self.t1 and self.t1 > self.t0 then
-		recorded = self.t1 - self.t0
+	if self.mode == "level" and self.levelLo then
+		recorded = self:LevelSeconds(self.levelLo, self.levelHi)
 	end
 	local function yards(value)
 		if not yardsKnown then
@@ -1442,19 +1443,99 @@ function ns.Replay:CompanyRows(sessions)
 	return rows
 end
 
-function ns.Replay:LevelStatRows()
+-- One row per level. A level that crosses logins is several spans; the list adds those together.
+function ns.Replay:LevelGroups()
 	local spans = ns.DB:LevelSpans(ns.DB.char)
-	if #spans == 0 then
+	local groups, order = {}, {}
+	for i = 1, #spans do
+		local span = spans[i]
+		local ranged = span.lvTo and span.lvTo ~= span.lv
+		local key = ranged and (span.lv .. "-" .. span.lvTo) or tostring(span.lv)
+		local group = groups[key]
+		if not group then
+			group = {
+				lv = span.lv,
+				lvTo = ranged and span.lvTo or nil,
+				seconds = 0,
+				open = false,
+				last = span.t0,
+			}
+			groups[key] = group
+			order[#order + 1] = group
+		end
+		local stop = ns.DB:SpanStop(span, ns.DB.char)
+		local dur = (stop or span.t0) - span.t0
+		if dur > 0 then
+			group.seconds = group.seconds + dur
+		end
+		if not span.t1 then
+			group.open = true
+		end
+		if stop and stop > group.last then
+			group.last = stop
+		end
+	end
+	table.sort(order, function(a, b)
+		if a.last == b.last then
+			return a.lv > b.lv
+		end
+		return a.last > b.last
+	end)
+	return order
+end
+
+function ns.Replay:LevelName(group)
+	if group.lvTo and group.lvTo ~= group.lv then
+		return string.format(L["Lv %d–%d"], group.lv, group.lvTo)
+	end
+	if group.open then
+		return string.format(L["Lv %d (so far)"], group.lv)
+	end
+	return string.format(L["Lv %d"], group.lv)
+end
+
+function ns.Replay:LevelIsOpen(level)
+	if not level then
+		return false
+	end
+	local groups = self:LevelGroups()
+	for i = 1, #groups do
+		local group = groups[i]
+		if group.open and group.lv == level and not group.lvTo then
+			return true
+		end
+	end
+	return false
+end
+
+function ns.Replay:LevelSeconds(lo, hi)
+	if not lo then
+		return 0
+	end
+	hi = hi or lo
+	local seconds = 0
+	local groups = self:LevelGroups()
+	for i = 1, #groups do
+		local group = groups[i]
+		local top = group.lvTo or group.lv
+		if top >= lo and group.lv <= hi then
+			seconds = seconds + (group.seconds or 0)
+		end
+	end
+	return seconds
+end
+
+function ns.Replay:LevelStatRows()
+	local groups = self:LevelGroups()
+	if #groups == 0 then
 		return {}
 	end
 	local rows = { { header = L["Levels"] } }
-	for i = 1, #spans do
-		local span = spans[i]
-		local top = span.lvTo or span.lv
-		if not self.levelLo or (top >= self.levelLo and span.lv <= (self.levelHi or self.levelLo)) then
-			local stop = ns.DB:SpanStop(span, ns.DB.char)
-			local label = (span.lvTo and span.lvTo ~= span.lv) and string.format(L["Lv %d–%d"], span.lv, span.lvTo) or string.format(L["Lv %d"], span.lv)
-			rows[#rows + 1] = { label, FormatClock((stop or span.t0) - span.t0) }
+	for i = 1, #groups do
+		local group = groups[i]
+		local top = group.lvTo or group.lv
+		if not self.levelLo or (top >= self.levelLo and group.lv <= (self.levelHi or self.levelLo)) then
+			rows[#rows + 1] = { self:LevelName(group), FormatClock(group.seconds or 0) }
 		end
 	end
 	if #rows == 1 then
@@ -1488,6 +1569,9 @@ function ns.Replay:StatsKey(sessions)
 		self.t0 or "",
 		self.t1 or ""
 	)
+	if self.mode == "level" then
+		parts[#parts + 1] = "lv" .. math.floor(ns.DB:Now() / 5)
+	end
 	local with = ns.DB.char and ns.DB.char.with
 	local spans, open = 0, 0
 	if type(with) == "table" then
@@ -1645,6 +1729,9 @@ function ns.Replay:ScopeCaption()
 		end
 		if self.levelHi and self.levelHi ~= self.levelLo then
 			return string.format(L["Levels %d–%d."], self.levelLo, self.levelHi)
+		end
+		if self:LevelIsOpen(self.levelLo) then
+			return string.format(L["Level %d, so far."], self.levelLo)
 		end
 		return string.format(L["Level %d."], self.levelLo)
 	end
@@ -1979,6 +2066,16 @@ function ns.Replay:CollectChapters(sessions)
 		local chapter = merged[i]
 		chapter.name = self:ChapterName(chapter.kind, chapter.map, chapter)
 	end
+	if self.mode == "level" and self.t0 and self.t1 then
+		local kept = {}
+		for i = 1, #merged do
+			local chapter = merged[i]
+			if chapter.t >= self.t0 and chapter.t <= self.t1 then
+				kept[#kept + 1] = chapter
+			end
+		end
+		merged = kept
+	end
 	return merged
 end
 
@@ -2177,6 +2274,10 @@ function ns.Replay:SeekFraction(fraction, immediate)
 	if indoors and indoors > self.playhead then
 		self.playhead = indoors
 	end
+	local gap = self:LevelGapSkipTo(self.playhead)
+	if gap and gap > self.playhead then
+		self.playhead = gap
+	end
 	self:UpdateDot()
 	self:UpdateReadout()
 	if immediate then
@@ -2192,6 +2293,59 @@ function ns.Replay:SeekFraction(fraction, immediate)
 	end
 end
 
+function ns.Replay:SessionsForLevel(lo, hi)
+	hi = hi or lo
+	local journey = ns.DB.char
+	local spans = ns.DB:LevelSpans(journey)
+	local sessions = ns.DB:Sessions()
+	local picked = {}
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local startAt = session.s
+		local stopAt = session.seen or session.s
+		if startAt and stopAt then
+			for i = 1, #spans do
+				local span = spans[i]
+				local top = span.lvTo or span.lv
+				if top >= lo and span.lv <= hi then
+					local spanStop = ns.DB:SpanStop(span, journey) or span.t0
+					if stopAt >= span.t0 and startAt <= spanStop then
+						picked[#picked + 1] = session
+						break
+					end
+				end
+			end
+		end
+	end
+	return picked
+end
+
+function ns.Replay:LevelGapSkipTo(at)
+	if self.mode ~= "level" or not at or not self.levelLo or not self.t1 then
+		return nil
+	end
+	local hi = self.levelHi or self.levelLo
+	local spans = ns.DB:LevelSpans(ns.DB.char)
+	local nextStart
+	for i = 1, #spans do
+		local span = spans[i]
+		local top = span.lvTo or span.lv
+		if top >= self.levelLo and span.lv <= hi then
+			local stop = ns.DB:SpanStop(span, ns.DB.char) or span.t0
+			if at >= span.t0 and at <= stop then
+				return nil
+			end
+			if span.t0 > at and (not nextStart or span.t0 < nextStart) then
+				nextStart = span.t0
+			end
+		end
+	end
+	if not nextStart or nextStart > self.t1 then
+		return nil
+	end
+	return nextStart
+end
+
 function ns.Replay:ReloadView()
 	local followTail = (not self.playing) and self.playhead and self.t1 and math.abs(self.playhead - self.t1) < 1
 	local sessions, index = ns.DB:SelectSessions(self.mode, self.index)
@@ -2202,6 +2356,8 @@ function ns.Replay:ReloadView()
 		local levelStart, levelStop = ns.DB:LevelBounds(ns.DB.char, self.levelLo, self.levelHi)
 		if levelStart then
 			t0, t1 = levelStart, levelStop or levelStart
+			sessions = self:SessionsForLevel(self.levelLo, self.levelHi)
+			self.sessions = sessions
 		end
 	end
 	self.t0, self.t1 = t0, t1
@@ -2449,13 +2605,13 @@ end
 
 function ns.Replay:RefreshLevelList()
 	local content = self.listContent
-	local spans = ns.DB:LevelSpans(ns.DB.char)
+	local groups = self:LevelGroups()
 	local width = content:GetWidth()
 	if width < 40 then
 		width = 250
 	end
-	for i = 1, #spans do
-		local span = spans[#spans - i + 1]
+	for i = 1, #groups do
+		local group = groups[i]
 		local row = self.rows[i]
 		if not row then
 			row = CreateFrame("Button", nil, content)
@@ -2483,10 +2639,10 @@ function ns.Replay:RefreshLevelList()
 			self.rows[i] = row
 		end
 		row.sessionIndex = nil
-		row.level = span.lv
-		row.levelTop = span.lvTo or span.lv
+		row.level = group.lv
+		row.levelTop = group.lvTo or group.lv
 		local selected = self.levelLo and row.levelTop >= self.levelLo and row.level <= (self.levelHi or self.levelLo)
-		row.label:SetText(self:LevelRowLabel(span))
+		row.label:SetText(self:LevelRowLabel(group))
 		row.bar:SetShown(selected)
 		if selected then
 			row.label:SetTextColor(1, 0.86, 0.45)
@@ -2498,19 +2654,17 @@ function ns.Replay:RefreshLevelList()
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 		row:Show()
 	end
-	for i = #spans + 1, #self.rows do
+	for i = #groups + 1, #self.rows do
 		self.rows[i]:Hide()
 	end
 	if self.charButton and ns.DB.char then
 		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
 	end
-	content:SetHeight(math.max(22, #spans * 22))
+	content:SetHeight(math.max(22, #groups * 22))
 end
 
-function ns.Replay:LevelRowLabel(span)
-	local name = (span.lvTo and span.lvTo ~= span.lv) and string.format(L["Lv %d–%d"], span.lv, span.lvTo) or string.format(L["Lv %d"], span.lv)
-	local stop = ns.DB:SpanStop(span, ns.DB.char)
-	return string.format("%s    %s", name, FormatClock((stop or span.t0) - span.t0))
+function ns.Replay:LevelRowLabel(group)
+	return string.format("%s    %s", self:LevelName(group), FormatClock(group.seconds or 0))
 end
 
 function ns.Replay:RefreshList()
@@ -2647,6 +2801,10 @@ function ns.Replay:OnUpdate(_, elapsed)
 		local indoors = self:InstanceSkipTo(self.playhead)
 		if indoors and indoors > self.playhead then
 			self.playhead = indoors
+		end
+		local gap = self:LevelGapSkipTo(self.playhead)
+		if gap and gap > self.playhead then
+			self.playhead = gap
 		end
 		if self.playhead >= self.t1 then
 			self.playhead = self.t1
