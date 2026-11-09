@@ -29,8 +29,8 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 	end
 end)
 
--- File load, not the ADDON_LOADED handler. RegisterEvent is protected from
--- inside that handler on this client, which is what spammed the forbidden-action error.
+-- Do not RegisterEvent from inside the ADDON_LOADED handler. This client
+-- treats that as a forbidden action and the call throws. Register at file load.
 ns.GPS:EnsureEvents()
 ns.Social:EnsureEvents()
 
