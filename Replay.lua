@@ -1832,6 +1832,19 @@ function ns.Replay:ToggleCharacters()
 	picker:Show()
 end
 
+function ns.Replay:StyleCharButton()
+	local button = self.charButton
+	if not button or not button.arrow then
+		return
+	end
+	local open = self.charPicker and self.charPicker:IsShown()
+	if open then
+		button.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Up")
+	else
+		button.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+	end
+end
+
 function ns.Replay:RefreshCharacters()
 	if self.charButton and ns.DB.char then
 		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
@@ -3238,22 +3251,54 @@ function ns.Replay:CreateFrame()
 	title:SetPoint("TOPLEFT", 16, -8)
 	title:SetText(L["Zipper"])
 
-	local charButton = MakeButton(frame, L["Character"], 200)
-	charButton:SetPoint("TOPLEFT", 14, -26)
-	charButton:SetHeight(18)
+	local charButton = CreateFrame("Button", nil, frame, "BackdropTemplate")
+	charButton:SetPoint("TOPLEFT", 12, -26)
+	charButton:SetPoint("RIGHT", frame, "RIGHT", -12, 0)
+	charButton:SetHeight(20)
+	charButton:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	charButton:SetBackdropColor(0.05, 0.04, 0.03, 1)
+	charButton:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
+	local arrow = charButton:CreateTexture(nil, "OVERLAY")
+	arrow:SetSize(16, 16)
+	arrow:SetPoint("RIGHT", -4, 0)
+	arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+	charButton.arrow = arrow
+	local charLabel = charButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	charLabel:SetPoint("LEFT", 8, 0)
+	charLabel:SetPoint("RIGHT", arrow, "LEFT", -4, 0)
+	charLabel:SetJustifyH("LEFT")
+	charLabel:SetWordWrap(false)
+	charLabel:SetText(L["Character"])
+	charButton:SetFontString(charLabel)
 	charButton:SetScript("OnClick", function()
 		ns.Replay:ToggleCharacters()
 	end)
+	charButton:SetScript("OnEnter", function(self)
+		self:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["Choose a character"])
+		GameTooltip:Show()
+	end)
 	charButton:SetScript("OnLeave", function(self)
-		local font = self:GetFontString()
-		if font then
-			font:SetTextColor(1, 1, 1)
+		self:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
 		end
+	end)
+	charButton:SetScript("OnMouseDown", function(self)
+		self.arrow:SetPoint("RIGHT", -3, -1)
+	end)
+	charButton:SetScript("OnMouseUp", function(self)
+		self.arrow:SetPoint("RIGHT", -4, 0)
 	end)
 
 	local charPicker = CreateFrame("Frame", nil, frame, "BackdropTemplate")
 	charPicker:SetPoint("TOPLEFT", charButton, "BOTTOMLEFT", 0, -2)
-	charPicker:SetWidth(220)
+	charPicker:SetPoint("RIGHT", charButton, "RIGHT", 0, 0)
 	charPicker:SetFrameStrata("DIALOG")
 	charPicker:SetFrameLevel(400)
 	charPicker:Hide()
@@ -3265,6 +3310,12 @@ function ns.Replay:CreateFrame()
 	})
 	charPicker:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
 	charPicker:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.95)
+	charPicker:SetScript("OnShow", function()
+		ns.Replay:StyleCharButton()
+	end)
+	charPicker:SetScript("OnHide", function()
+		ns.Replay:StyleCharButton()
+	end)
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", 2, 2)
@@ -3772,7 +3823,6 @@ function ns.Replay:ApplySkin()
 		end
 		buttons[#buttons + 1] = self.chapterPrev
 		buttons[#buttons + 1] = self.chapterNext
-		buttons[#buttons + 1] = self.charButton
 		buttons[#buttons + 1] = self.levelsButton
 		for i = 1, #buttons do
 			local button = buttons[i]
