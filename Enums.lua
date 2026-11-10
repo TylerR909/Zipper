@@ -28,6 +28,7 @@ ns.Kind = {
 	TRAINER = 19,
 	CAMP = 20,
 	SLEEP = 21,
+	EAT = 22,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -60,6 +61,7 @@ ns.KindName = {
 	[19] = L["Trainer"],
 	[20] = L["Campfire"],
 	[21] = L["Sleeping bag"],
+	[22] = L["Eating"],
 }
 
 ns.KindColor = {
@@ -84,6 +86,7 @@ ns.KindColor = {
 	[19] = { 0.78, 0.58, 0.28 },
 	[20] = { 0.95, 0.45, 0.12 },
 	[21] = { 0.55, 0.62, 0.95 },
+	[22] = { 0.72, 0.58, 0.32 },
 }
 
 -- Class file from UnitClass. Stored once per person, not on every path event.
@@ -170,6 +173,14 @@ function ns.RestSignal(name, spellID)
 		return "sleep", true
 	end
 	return nil
+end
+
+-- Food and Drink while seated. Well Fed lasts after the meal and must not match.
+function ns.MealSignal(name)
+	if type(name) ~= "string" then
+		return false
+	end
+	return name == "Food" or name == "Drink" or name == "Refreshment"
 end
 
 function ns.ProfessionId(line)

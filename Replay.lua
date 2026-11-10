@@ -791,7 +791,7 @@ function ns.Replay:DrawMarkers(sessions)
 				local when = session.s + (track.et[i] or 0)
 				local restEnd = (kind == Kind.CAMP or kind == Kind.SLEEP) and track.ea[i] == 1
 				local outside = self.mode == "level" and self.t0 and (when < self.t0 or when > (self.t1 or when))
-				if isKill == wantKill and kind ~= Kind.ZONE and not restEnd and not outside and self:SegmentFade(when) > 0 then
+				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and not restEnd and not outside and self:SegmentFade(when) > 0 then
 					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 					if px then
 						shown = shown + 1
@@ -905,7 +905,7 @@ function ns.Replay:PlayheadParked()
 		return false
 	end
 	local afk = false
-	local resting = false
+	local camp, sleep, meal = false, false, false
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
@@ -920,15 +920,25 @@ function ns.Replay:PlayheadParked()
 				afk = true
 			elseif kind == Kind.AFK_END then
 				afk = false
-			elseif (kind == Kind.CAMP or kind == Kind.SLEEP) and (not extra or extra == 0) then
+			elseif kind == Kind.CAMP and (not extra or extra == 0) then
 				afk = false
-				resting = true
-			elseif (kind == Kind.CAMP or kind == Kind.SLEEP) and extra == 1 then
-				resting = false
+				camp = true
+			elseif kind == Kind.CAMP and extra == 1 then
+				camp = false
+			elseif kind == Kind.SLEEP and (not extra or extra == 0) then
+				afk = false
+				sleep = true
+			elseif kind == Kind.SLEEP and extra == 1 then
+				sleep = false
+			elseif kind == Kind.EAT and (not extra or extra == 0) then
+				afk = false
+				meal = true
+			elseif kind == Kind.EAT and extra == 1 then
+				meal = false
 			end
 		end
 	end
-	if resting then
+	if camp or sleep or meal then
 		return false
 	end
 	if afk then

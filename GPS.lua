@@ -359,7 +359,7 @@ end
 
 function ns.GPS:SyncAFK()
 	local afk = UnitIsAFK("player") and true or false
-	if self.restKind then
+	if self.restKind or self.meal then
 		if self.afk then
 			self.afk = false
 			self:Mark(Kind.AFK_END, 0)
@@ -537,6 +537,68 @@ function ns.GPS:WatchRest()
 		self.restSince = now
 	elseif now - self.restSince >= REST_SECONDS then
 		self:BeginRest(sleep and Kind.SLEEP or Kind.CAMP)
+	end
+end
+
+function ns.GPS:ReadMeal()
+	if self:AuraIndexSecret(1) then
+		return nil
+	end
+	if not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
+		return false
+	end
+	for i = 1, 40 do
+		if self:AuraIndexSecret(i) then
+			return nil
+		end
+		local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
+		if not aura then
+			break
+		end
+		if issecretvalue and issecretvalue(aura) then
+			return nil
+		end
+		local name = aura.name
+		if issecretvalue and issecretvalue(name) then
+			name = nil
+		end
+		if ns.MealSignal(name) then
+			return true
+		end
+	end
+	return false
+end
+
+function ns.GPS:BeginMeal()
+	if self.meal then
+		return
+	end
+	if self.afk then
+		self.afk = false
+		self:Mark(Kind.AFK_END, 0)
+	end
+	self.meal = true
+	self:Mark(Kind.EAT, 0)
+end
+
+function ns.GPS:EndMeal()
+	if not self.meal then
+		return
+	end
+	self.meal = false
+	self:Mark(Kind.EAT, 1)
+	self:SyncAFK()
+end
+
+function ns.GPS:WatchMeal()
+	local eating = self:ReadMeal()
+	if eating == nil then
+		return
+	end
+	if eating then
+		self:BeginMeal()
+	else
+		self:EndMeal()
 	end
 end
 
@@ -783,6 +845,9 @@ function ns.GPS:OnEvent(event, ...)
 		if self.restKind then
 			self:EndRest()
 		end
+		if self.meal then
+			self:EndMeal()
+		end
 		self:ConsiderSample(STOP_YARDS, false)
 	elseif event == "PLAYER_STOPPED_MOVING" then
 		self.moving = false
@@ -854,6 +919,7 @@ function ns.GPS:OnEvent(event, ...)
 		local unit = ...
 		if unit == "player" and not (issecretvalue and issecretvalue(unit)) then
 			self:WatchRest()
+			self:WatchMeal()
 		end
 	elseif event == "PARTY_KILL" then
 		local attackerGUID, targetGUID = ...
@@ -896,6 +962,7 @@ function ns.GPS:Start(continued)
 	self:SyncMount()
 	self:SyncAFK()
 	self:SyncTaxi()
+	self:WatchMeal()
 
 	if not self.ticker then
 		self.ticker = C_Timer.NewTicker(1, function()
@@ -906,6 +973,7 @@ function ns.GPS:Start(continued)
 end
 
 function ns.GPS:Stop()
+	self:EndMeal()
 	self:EndRest()
 	self:StopRestWatch()
 	self.active = false
