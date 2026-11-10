@@ -2433,10 +2433,7 @@ function ns.Replay:SeekToTime(when)
 	if not self.t0 or not self.t1 or self.t1 <= self.t0 or not when then
 		return
 	end
-	self.playing = false
-	if self.playButton then
-		self.playButton:SetText(L["Play"])
-	end
+	-- Chapter buttons and scrub markers jump the playhead without pausing.
 	local elapsed, total = self:PlayedAt(when)
 	local fraction = 0
 	if total > 0 then
@@ -2494,7 +2491,7 @@ function ns.Replay:AcquirePip(index)
 	end)
 	pip:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:AddLine(self.title or L["Stop"], 1, 0.86, 0.45)
+		GameTooltip:AddLine(self.title or L["Chapter"], 1, 0.86, 0.45)
 		if self.when then
 			GameTooltip:AddLine(date("%b %d, %H:%M", self.when), 1, 1, 1)
 		end
@@ -2560,7 +2557,7 @@ function ns.Replay:PaintChapter()
 	end
 	if self.chapterText then
 		if #chapters == 0 then
-			self.chapterText:SetText(L["No stops yet"])
+			self.chapterText:SetText(L["No chapters yet"])
 		else
 			local shown = current > 0 and current or 1
 			local prefix = current > 0 and "" or "Next  "
@@ -3827,7 +3824,7 @@ function ns.Replay:CreateFrame()
 			font:SetTextColor(1, 0.9, 0.6)
 		end
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["Previous stop"])
+		GameTooltip:SetText(L["Previous chapter"])
 		GameTooltip:Show()
 	end)
 	chapterPrev:SetScript("OnLeave", function(self)
@@ -3851,7 +3848,7 @@ function ns.Replay:CreateFrame()
 			font:SetTextColor(1, 0.9, 0.6)
 		end
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["Next stop"])
+		GameTooltip:SetText(L["Next chapter"])
 		GameTooltip:Show()
 	end)
 	chapterNext:SetScript("OnLeave", function(self)
@@ -3870,7 +3867,7 @@ function ns.Replay:CreateFrame()
 	chapterText:SetJustifyH("CENTER")
 	chapterText:SetWordWrap(false)
 	chapterText:SetTextColor(0.93, 0.90, 0.78)
-	chapterText:SetText(L["No stops yet"])
+	chapterText:SetText(L["No chapters yet"])
 
 	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
 	scrub:SetPoint("TOPLEFT", 16, -342)
