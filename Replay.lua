@@ -1908,14 +1908,15 @@ function ns.Replay:RefreshCharacters()
 			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
+				ns.Replay:RememberPlayhead()
 				ns.DB:SetView(button.charKey)
 				if ns.Replay.charPicker then
 					ns.Replay.charPicker:Hide()
 				end
 				if button.charKey == ns.DB.playerKey then
-					ns.Replay:SetMode("current")
+					ns.Replay:SetMode("current", nil, true)
 				else
-					ns.Replay:SetMode("all")
+					ns.Replay:SetMode("all", nil, true)
 				end
 			end)
 			self.charRows[i] = row
@@ -2708,6 +2709,62 @@ function ns.Replay:LevelGapSkipTo(at)
 	return nextStart
 end
 
+function ns.Replay:SelectionKey()
+	local view = ns.DB.viewKey or ""
+	if self.mode == "level" then
+		local lo = self.levelLo
+		local hi = self.levelHi or lo
+		if not lo then
+			return view .. "|level|"
+		end
+		return string.format("%s|level|%d|%d", view, lo, hi)
+	end
+	local lo = self.sessionLo
+	local hi = self.sessionHi or lo
+	if self.mode == "span" and lo and hi then
+		return string.format("%s|span|%d|%d", view, lo, hi)
+	end
+	if self.mode == "one" and self.index then
+		return string.format("%s|one|%d", view, self.index)
+	end
+	if self.mode == "current" then
+		return view .. "|current"
+	end
+	if self.mode == "all" then
+		return view .. "|all"
+	end
+	return string.format("%s|%s|%s", view, tostring(self.mode), tostring(self.index or ""))
+end
+
+function ns.Replay:RememberPlayhead()
+	if not self.playhead then
+		return
+	end
+	self.playheads = self.playheads or {}
+	self.playheads[self:SelectionKey()] = self.playhead
+end
+
+function ns.Replay:RestorePlayhead()
+	local t0, t1 = self.t0, self.t1
+	if not t0 then
+		self.playhead = nil
+		return
+	end
+	self.playheads = self.playheads or {}
+	local saved = self.playheads[self:SelectionKey()]
+	if not saved then
+		self.playhead = t0
+		return
+	end
+	if saved < t0 then
+		self.playhead = t0
+	elseif t1 and saved > t1 then
+		self.playhead = t1
+	else
+		self.playhead = saved
+	end
+end
+
 function ns.Replay:ReloadView()
 	local followTail = (not self.playing) and self.playhead and self.t1 and math.abs(self.playhead - self.t1) < 1
 	local sessions, index = ns.DB:SelectSessions(self.mode, self.index, self.sessionHi)
@@ -2724,9 +2781,11 @@ function ns.Replay:ReloadView()
 	end
 	self.t0, self.t1 = t0, t1
 	if not self.playhead or not t0 then
-		self.playhead = t1 or t0
-	elseif followTail or self.playhead < t0 then
+		self.playhead = t0 or t1
+	elseif followTail then
 		self.playhead = t1
+	elseif self.playhead < t0 then
+		self.playhead = t0
 	elseif self.playhead > t1 then
 		self.playhead = t1
 	end
@@ -2898,18 +2957,19 @@ function ns.Replay:OnDataChanged()
 	self:Redraw()
 end
 
-function ns.Replay:SetMode(mode, index)
+function ns.Replay:SetMode(mode, index, alreadyRemembered)
 	if mode == "current" and ns.DB.playerKey then
 		ns.DB:SetView(ns.DB.playerKey)
+	end
+	if not alreadyRemembered then
+		self:RememberPlayhead()
 	end
 	self.mode = mode
 	self.index = index
 	self.playing = false
 	self:ReloadView()
-	if self.t1 then
-		self.playhead = self.t1
-	end
 	self:SyncSessionAnchor()
+	self:RestorePlayhead()
 	self:StyleModeButtons()
 	self:UpdateReadout()
 	self:Redraw()
@@ -2948,13 +3008,14 @@ function ns.Replay:ShowSessions()
 		self:StyleModeButtons()
 		return
 	end
+	self:RememberPlayhead()
 	self.levelLo = nil
 	self.levelHi = nil
 	local other = ns.DB.viewKey and ns.DB.playerKey and ns.DB.viewKey ~= ns.DB.playerKey
 	if other then
-		self:SetMode("all")
+		self:SetMode("all", nil, true)
 	else
-		self:SetMode("current")
+		self:SetMode("current", nil, true)
 	end
 end
 
@@ -2993,6 +3054,7 @@ function ns.Replay:SelectSession(index, extend)
 	elseif index > count then
 		index = count
 	end
+	self:RememberPlayhead()
 	if extend and self.sessionLo then
 		if index < self.sessionLo then
 			self.sessionHi = self.sessionHi or self.sessionLo
@@ -3010,19 +3072,19 @@ function ns.Replay:SelectSession(index, extend)
 	local lo = self.sessionLo
 	local hi = self.sessionHi or lo
 	if lo <= 1 and hi >= count then
-		self:SetMode("all")
+		self:SetMode("all", nil, true)
 		return
 	end
 	if lo == hi then
 		local sessions = ns.DB:Sessions()
 		if sessions[lo] == ns.DB:Current() then
-			self:SetMode("current")
+			self:SetMode("current", nil, true)
 			return
 		end
-		self:SetMode("one", lo)
+		self:SetMode("one", lo, true)
 		return
 	end
-	self:SetMode("span", lo)
+	self:SetMode("span", lo, true)
 end
 
 function ns.Replay:StyleModeButtons()
@@ -3055,6 +3117,7 @@ function ns.Replay:StyleModeButtons()
 end
 
 function ns.Replay:SelectLevel(lo, hi, extend)
+	self:RememberPlayhead()
 	if extend and self.levelLo and lo then
 		hi = hi or lo
 		if lo < self.levelLo then
@@ -3070,13 +3133,7 @@ function ns.Replay:SelectLevel(lo, hi, extend)
 		self.levelLo = lo
 		self.levelHi = hi or lo
 	end
-	self:SetMode("level")
-	if self.t0 then
-		self.playhead = self.t0
-		self:UpdateDot()
-		self:UpdateReadout()
-		self:Redraw()
-	end
+	self:SetMode("level", nil, true)
 end
 
 function ns.Replay:RefreshLevelList()
@@ -3688,9 +3745,10 @@ function ns.Replay:CreateFrame()
 	local levelsButton = MakeButton(frame, L["Levels"], 88)
 	levelsButton:SetPoint("LEFT", sessionButton, "RIGHT", 6, 0)
 	levelsButton:SetScript("OnClick", function()
+		ns.Replay:RememberPlayhead()
 		ns.Replay.levelLo = nil
 		ns.Replay.levelHi = nil
-		ns.Replay:SetMode("level")
+		ns.Replay:SetMode("level", nil, true)
 	end)
 
 	local selectAll = MakeButton(frame, L["Select all"], 104)
