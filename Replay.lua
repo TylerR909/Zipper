@@ -837,7 +837,7 @@ function ns.Replay:DrawMarkers(sessions)
 						marker.when = when
 						marker.session = session
 						ns.Map:Use():Place(marker, px, py)
-						marker:SetFrameLevel((canvas:GetFrameLevel() or 1) + (isKill and 28 or 30))
+						marker:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + (isKill and 3 or 5))
 						marker:Show()
 					end
 				end
@@ -976,7 +976,7 @@ function ns.Replay:PositionDot(x, y)
 	self:StyleDot(parked)
 	ns.Map:Use():FitPin(self.dot, parked and 9 or 12)
 	ns.Map:Use():Place(self.dot, x, y)
-	self.dot:SetFrameLevel((canvas:GetFrameLevel() or 1) + 40)
+	self.dot:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + 15)
 	self.dot:Show()
 end
 
