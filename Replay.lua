@@ -165,8 +165,12 @@ function ns.Replay:PathLayer()
 	if layer:GetParent() ~= canvas then
 		layer:SetParent(canvas)
 	end
-	layer:ClearAllPoints()
-	layer:SetAllPoints(canvas)
+	-- ClearAllPoints on a rect that already resolved leaves that rect up for
+	-- the rest of the frame. Re-applying it for every segment made the layer
+	-- jump, and every line on it with it.
+	if not layer:GetPoint() then
+		layer:SetAllPoints(canvas)
+	end
 	local level = ns.Map:Use():OverlayLevel(canvas)
 	if layer:GetFrameLevel() ~= level then
 		layer:SetFrameLevel(level)
@@ -195,9 +199,12 @@ function ns.Replay:AcquireLine()
 	self:EnsurePools()
 	local line = self.lines[self.lineUsed + 1]
 	if not line then
-		line = layer:CreateTexture(nil, "OVERLAY")
-		line:SetTexture("Interface\\BUTTONS\\WHITE8X8")
-		line:SetVertexColor(PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A)
+		-- A rotated texture keeps its old rect for one frame after SetPoint,
+		-- so a reused segment flashes where it used to be and then snaps down.
+		line = layer:CreateLine(nil, "OVERLAY")
+		line:SetColorTexture(PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A)
+		line:SetSnapToPixelGrid(false)
+		line:SetTexelSnappingBias(0)
 		self.lines[#self.lines + 1] = line
 	end
 	self.lineUsed = self.lineUsed + 1
@@ -269,7 +276,7 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha)
 	local height = parent and parent:GetHeight()
 	if not width or width <= 0 or not height or height <= 0 then
 		line:Hide()
-		return
+		return false
 	end
 	local sx1, sy1 = x1 * width, -y1 * height
 	local sx2, sy2 = x2 * width, -y2 * height
@@ -277,7 +284,7 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha)
 	local length = math.sqrt((dx * dx) + (dy * dy))
 	if length < 1 then
 		line:Hide()
-		return
+		return false
 	end
 	local canvas = self:Canvas()
 	local scale = (canvas and canvas:GetScale()) or 1
@@ -289,22 +296,22 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha)
 		trailAlpha = 1
 	end
 	a = (a or 0.9) * trailAlpha
-	if a < 0.03 then
-		line:Hide()
-		return
-	end
 	local thick = (2 * (mul or 1)) / scale
 	if thick < 1 then
 		thick = 1
 	elseif thick > 14 then
 		thick = 14
 	end
-	line:SetVertexColor(r, g, b, a or 0.9)
-	line:ClearAllPoints()
-	line:SetSize(length, thick)
-	line:SetPoint("CENTER", parent, "TOPLEFT", (sx1 + sx2) / 2, (sy1 + sy2) / 2)
-	line:SetRotation(math.atan2(dy, dx))
+	line:SetThickness(thick)
+	line:SetStartPoint("TOPLEFT", parent, sx1, sy1)
+	line:SetEndPoint("TOPLEFT", parent, sx2, sy2)
+	line:SetColorTexture(r, g, b, a or 0.9)
+	if a < 0.03 then
+		line:Hide()
+		return true
+	end
 	line:Show()
+	return true
 end
 
 function ns.Replay:HideSpareLines()
@@ -692,10 +699,10 @@ function ns.Replay:RefreshTrailFade()
 			local fade = self:SegmentFade(seg.t1)
 			local r, g, b, a = self:LineLook(seg.mode, seg.speed)
 			a = (a or 0.9) * fade
-			if a < 0.03 then
+			if not seg.placed or a < 0.03 then
 				line:Hide()
 			else
-				line:SetVertexColor(r, g, b, a)
+				line:SetColorTexture(r, g, b, a)
 				line:Show()
 			end
 		end
@@ -735,7 +742,7 @@ function ns.Replay:DrawPath(sessions)
 			local line = self:AcquireLine()
 			if line then
 				local fade = self:SegmentFade(times[i - 1])
-				self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i], fade)
+				local placed = self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i], fade)
 				self.segmentCount = self.segmentCount + 1
 				local seg = self.segments[self.segmentCount]
 				if not seg then
@@ -743,6 +750,7 @@ function ns.Replay:DrawPath(sessions)
 					self.segments[self.segmentCount] = seg
 				end
 				seg.line = line
+				seg.placed = placed and true or false
 				seg.x1, seg.y1 = xs[i - 1], ys[i - 1]
 				seg.x2, seg.y2 = xs[i], ys[i]
 				seg.t1, seg.t2 = times[i - 1], times[i]
