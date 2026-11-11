@@ -1,0 +1,10 @@
+package-as: Zipper
+
+ignore:
+  - .context
+  - .github
+  - .mcp.json
+  - .pkgmeta
+  - AGENTS.md
+  - NOTES.md
+  - README.md
