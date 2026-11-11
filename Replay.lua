@@ -3196,7 +3196,11 @@ function ns.Replay:SelectSession(index, extend)
 end
 
 function ns.Replay:StyleModeButtons()
+	-- Left-click ShowRoute can SetMode before the replay panel exists.
 	local function paint(button, active)
+		if not button then
+			return
+		end
 		local font = button:GetFontString()
 		if font then
 			if active then
@@ -3216,12 +3220,8 @@ function ns.Replay:StyleModeButtons()
 		end
 	end
 	paint(self.sessionButton, self.mode ~= "level")
-	if self.levelsButton then
-		paint(self.levelsButton, self.mode == "level")
-	end
-	if self.selectAllButton then
-		paint(self.selectAllButton, false)
-	end
+	paint(self.levelsButton, self.mode == "level")
+	paint(self.selectAllButton, false)
 end
 
 function ns.Replay:ShowLevel(lo, hi)
