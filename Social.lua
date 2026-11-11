@@ -26,10 +26,13 @@ local NEAR_YARDS_SQUARED = NEAR_YARDS * NEAR_YARDS
 local NEAR_GRACE = 90
 
 local function PlainString(value)
-	if type(value) ~= "string" or value == "" then
+	if type(value) ~= "string" then
 		return nil
 	end
 	if issecretvalue and issecretvalue(value) then
+		return nil
+	end
+	if value == "" then
 		return nil
 	end
 	return value

@@ -900,7 +900,7 @@ function ns.Replay:ClassColor()
 		classFile = ns.DB:JourneyClass(ns.DB.char, viewKey)
 	else
 		local _, live = UnitClass("player")
-		if type(live) == "string" and live ~= "" and not (issecretvalue and issecretvalue(live)) then
+		if type(live) == "string" and not (issecretvalue and issecretvalue(live)) and live ~= "" then
 			classFile = live
 			if ns.DB.record then
 				ns.DB.record.class = live
@@ -1403,7 +1403,7 @@ function ns.Replay:PlaceName(mapID)
 		return nil
 	end
 	local info = C_Map.GetMapInfo(mapID)
-	if info and type(info.name) == "string" and info.name ~= "" and not (issecretvalue and issecretvalue(info.name)) then
+	if info and type(info.name) == "string" and not (issecretvalue and issecretvalue(info.name)) and info.name ~= "" then
 		return info.name
 	end
 	return nil
@@ -1597,14 +1597,18 @@ function ns.Replay:UnitGuid(tooltip)
 	end
 	if not guid and tooltip.GetUnit then
 		local _, unit = tooltip:GetUnit()
-		if type(unit) == "string" and unit ~= "" and not (issecretvalue and issecretvalue(unit)) then
+		-- Secret strings still report type "string". Check issecretvalue before any compare.
+		if type(unit) == "string" and not (issecretvalue and issecretvalue(unit)) and unit ~= "" then
 			local raw = UnitGUID(unit)
 			if type(raw) == "string" and not (issecretvalue and issecretvalue(raw)) then
 				guid = raw
 			end
 		end
 	end
-	if not guid or guid:sub(1, 7) ~= "Player-" or guid == ns.DB.playerKey then
+	if not guid or (issecretvalue and issecretvalue(guid)) then
+		return nil
+	end
+	if guid:sub(1, 7) ~= "Player-" or guid == ns.DB.playerKey then
 		return nil
 	end
 	return guid

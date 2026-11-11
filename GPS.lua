@@ -66,10 +66,13 @@ local function SpellName(spellID)
 	end
 	local info = C_Spell.GetSpellInfo(spellID)
 	local name = info and info.name
-	if type(name) ~= "string" or name == "" then
+	if type(name) ~= "string" then
 		return nil
 	end
 	if issecretvalue and issecretvalue(name) then
+		return nil
+	end
+	if name == "" then
 		return nil
 	end
 	return name
@@ -695,7 +698,7 @@ function ns.GPS:OnConfirmSummon()
 	self.summonerName = nil
 	if C_SummonInfo and C_SummonInfo.GetSummonConfirmSummoner then
 		local name = C_SummonInfo.GetSummonConfirmSummoner()
-		if type(name) == "string" and name ~= "" and not (issecretvalue and issecretvalue(name)) then
+		if type(name) == "string" and not (issecretvalue and issecretvalue(name)) and name ~= "" then
 			self.summonerName = name
 		end
 	end
