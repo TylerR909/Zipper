@@ -2251,10 +2251,39 @@ function ns.Replay:ChapterName(kind, mapID, chapter)
 	local zone = self:MapTitle(mapID)
 	if kind == "hearth" then
 		return string.format(L["Hearth · %s"], zone)
+	elseif kind == "teleport" then
+		return string.format(L["Teleport · %s"], zone)
 	elseif kind == "land" then
 		return string.format(L["Landed · %s"], zone)
 	end
 	return zone
+end
+
+-- First different map after a teleport cast. Same-zone hops return nil.
+function ns.Replay:TeleportArrival(sessions, eventT, fromMap)
+	if not eventT or not fromMap or fromMap == 0 then
+		return nil
+	end
+	local bestMap, bestT
+	for s = 1, #(sessions or {}) do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		local origin = session.s
+		for i = 1, #track.t do
+			local t = origin + (track.t[i] or 0)
+			if t > eventT + 60 then
+				break
+			end
+			local mapID = track.m[i]
+			if mapID and mapID ~= 0 and t > eventT and mapID ~= fromMap then
+				if not bestT or t < bestT then
+					bestT = t
+					bestMap = mapID
+				end
+			end
+		end
+	end
+	return bestMap
 end
 
 function ns.Replay:InstanceSkips(inst)
@@ -2386,16 +2415,26 @@ function ns.Replay:CollectChapters(sessions)
 		local track = ns.DB:Track(session)
 		for i = 1, #(track.ek or {}) do
 			local kind = track.ek[i]
+			local extra = track.ea and track.ea[i]
+			local eventT = session.s + (track.et[i] or 0)
+			local mapID = track.em[i]
 			local chapterKind
 			if kind == Kind.FLIGHT_END then
 				chapterKind = "land"
 			elseif kind == Kind.HEARTH then
 				chapterKind = "hearth"
+			elseif kind == Kind.PORTAL and self:BreaksPath(kind, extra) then
+				-- Teleport: into another zone. Same-zone hops only cut the trail.
+				local arrival = self:TeleportArrival(sessions, eventT, mapID)
+				if arrival then
+					chapterKind = "teleport"
+					mapID = arrival
+				end
 			end
 			if chapterKind then
 				chapters[#chapters + 1] = {
-					t = session.s + (track.et[i] or 0),
-					map = track.em[i],
+					t = eventT,
+					map = mapID,
 					kind = chapterKind,
 				}
 			end
@@ -2430,10 +2469,12 @@ function ns.Replay:CollectChapters(sessions)
 			end
 			if chapter.kind == "hearth" or previous.kind == "hearth" then
 				previous.kind = "hearth"
+			elseif chapter.kind == "teleport" or previous.kind == "teleport" then
+				previous.kind = "teleport"
 			elseif chapter.kind == "zone" or previous.kind == "zone" then
 				previous.kind = "zone"
 			end
-			if chapter.map and chapter.map ~= 0 and (previous.kind ~= "hearth" or not previous.map) then
+			if chapter.map and chapter.map ~= 0 and ((previous.kind ~= "hearth" and previous.kind ~= "teleport") or not previous.map) then
 				previous.map = chapter.map
 			end
 			if chapter.kind == "zone" and chapter.map then
