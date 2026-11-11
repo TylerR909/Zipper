@@ -1,6 +1,5 @@
 name: Bug
 description: Zipper did something wrong, or did not do something.
-title: ""
 labels: ["bug"]
 body:
   - type: markdown

@@ -1,0 +1,23 @@
+name: Something else
+description: A question, or anything that is not a bug or a feature request.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask in plain words. A title like "Does Zipper record inside dungeons?" is enough.
+  - type: textarea
+    id: ask
+    attributes:
+      label: What is on your mind?
+      description: A sentence or two.
+      placeholder: Where do I open the replay for an older session?
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: A screenshot is welcome. Paste it into this box.
+    validations:
+      required: false
