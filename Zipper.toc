@@ -3,7 +3,7 @@
 ## IconTexture: Interface\AddOns\Zipper\Media\MapButton
 ## Notes: Records a character's journey and replays it on the world map.
 ## Author: Tyler
-## Version: 0.1.0
+## Version: 0.1.0-beta
 ## SavedVariables: ZipperDB
 ## SavedVariablesPerCharacter: ZipperCharDB
 ## X-Curse-Project-ID: 1799002
