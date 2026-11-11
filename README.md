@@ -1,5 +1,7 @@
 # Zipper
 
+[![Release](https://img.shields.io/github/v/release/TylerR909/Zipper)](https://github.com/TylerR909/Zipper/releases/latest) [![Check](https://img.shields.io/github/actions/workflow/status/TylerR909/Zipper/check.yml?branch=master&label=check)](https://github.com/TylerR909/Zipper/actions/workflows/check.yml) [![CurseForge](https://img.shields.io/curseforge/dt/1799002?label=CurseForge)](https://www.curseforge.com/wow/addons/zipper) [![License: MIT](https://img.shields.io/github/license/TylerR909/Zipper)](LICENSE)
+
 *Zip around the map again.*
 
 [Screencast From 2026-11-08 03-05-25.webm](https://github.com/user-attachments/assets/d6d97043-e956-4aa7-a77c-9362b85fc63c)

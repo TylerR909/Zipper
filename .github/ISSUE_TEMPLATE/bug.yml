@@ -1,6 +1,5 @@
 name: Bug
 description: Zipper did something wrong, or did not do something.
-title: ""
 labels: ["bug"]
 body:
   - type: markdown
@@ -42,6 +41,22 @@ body:
         - Sometimes
         - Only once
         - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Zipper version
+      description: The CurseForge app shows it next to Zipper. Leave blank if you are not sure.
+      placeholder: 0.1.0
+    validations:
+      required: false
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Zipper is made for Warcraft Forever. Change this if you play something else.
+      value: Warcraft Forever
     validations:
       required: true
   - type: textarea
