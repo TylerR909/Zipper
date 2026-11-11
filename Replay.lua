@@ -971,13 +971,12 @@ function ns.Replay:StyleDot(parked)
 	end
 	dot.parked = parked
 	if parked then
-		dot.texture:SetTexture("Interface\\BUTTONS\\WHITE8X8")
-		dot.texture:SetVertexColor(0.55, 0.42, 0.06, 1)
+		dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Ring")
 	else
 		dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
-		local r, g, b = self:ClassColor()
-		dot.texture:SetVertexColor(r, g, b, 1)
 	end
+	local r, g, b = self:ClassColor()
+	dot.texture:SetVertexColor(r, g, b, 1)
 end
 
 function ns.Replay:PositionDot(x, y)
@@ -992,7 +991,7 @@ function ns.Replay:PositionDot(x, y)
 	end
 	local parked = self:PlayheadParked()
 	self:StyleDot(parked)
-	ns.Map:Use():FitPin(self.dot, parked and 9 or 12)
+	ns.Map:Use():FitPin(self.dot, 12)
 	ns.Map:Use():Place(self.dot, x, y)
 	self.dot:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + 15)
 	self.dot:Show()
@@ -3468,7 +3467,7 @@ function ns.Replay:RescalePins()
 		end
 	end
 	if self.dot then
-		host:FitPin(self.dot, self.dot.parked and 9 or 12)
+		host:FitPin(self.dot, 12)
 	end
 end
 
