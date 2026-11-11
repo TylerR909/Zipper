@@ -269,5 +269,3 @@ S("EllesmereUI skin skipped: %s")
 -- NewLocale returns a write-only proxy. Reading a key on it asserts.
 -- Later files need the real table, which is what GetLocale hands back.
 ns.L = LibStub("AceLocale-3.0"):GetLocale("Zipper")
-
---@localization(locale="enUS", format="lua_additive_table", same-key-is-true=true, handle-subnamespaces="concat")@

@@ -43,8 +43,8 @@ The account file is the live journey store. A per-character file may still hold 
 - Combat can return secret numbers and booleans. `type()` still says `"number"`. Check `issecretvalue` before a compare or any arithmetic.
 - Do not register `COMBAT_LOG_EVENT_UNFILTERED`. Kills come from `PARTY_KILL`.
 - Do not edit git config. Do not invent an author. If the identity is unset in this checkout, set `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` on the commit command to Tyler R, `20718430+TylerR909@users.noreply.github.com`. A fork uses the contributor's own identity, not that address.
-- Commit as the work lands. The subject is the release note. Write a sentence a player can read. Do not switch to `feat:` or `fix:` prefixes unless asked.
-- Do not push, tag, or cut a release unless asked. A release is an annotated tag `vX.Y.Z` matching `## Version:` in `Zipper.toc`. The BigWigs packager builds the changelog from commits since the previous tag. Do not add `CHANGELOG.md`. The workflow is not in the repo yet.
+- Commit as the work lands. Write the subject as a sentence a player can read. Subjects are not shipped. Do not switch to `feat:` or `fix:` prefixes unless asked.
+- Do not push, tag, or cut a release unless asked. A release is an annotated tag `vX.Y.Z` matching `## Version:` in `Zipper.toc`. `CHANGELOG.md` is the release note the packager ships. It is hand-written and player-facing: no chores, CI, or refactors. Before tagging, it must have a `## <version>` section for the version in `Zipper.toc`. The release workflow fails without one.
 - Addon files are mode `644`. If the environment marks them executable, `git add --chmod=-x` before committing. Do not record `100755`.
 
 ## Reports

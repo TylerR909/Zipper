@@ -1,0 +1,14 @@
+package-as: Zipper
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - .context
+  - .github
+  - .mcp.json
+  - .pkgmeta
+  - AGENTS.md
+  - NOTES.md
+  - README.md

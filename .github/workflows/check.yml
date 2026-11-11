@@ -1,0 +1,44 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq luajit
+      - name: Syntax
+        run: |
+          status=0
+          while IFS= read -r -d '' f; do
+            F="$f" luajit -e 'assert(loadfile(os.getenv("F")))' || status=1
+          done < <(git ls-files -z '*.lua')
+          exit $status
+      - name: TOC files
+        run: |
+          status=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || { echo "Missing from repo: $f"; status=1; }
+          done < <(sed 's/\r$//' Zipper.toc | grep -v '^#' | grep -v '^[[:space:]]*$')
+          exit $status
+      - name: Tag version and changelog
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^## Version:[[:space:]]*\([^[:space:]]*\).*/\1/p' Zipper.toc)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match ## Version: $version in Zipper.toc"
+            exit 1
+          fi
+          pattern="^## v?${version//./\\.}( - .*)?[[:space:]]*$"
+          if ! sed 's/\r$//' CHANGELOG.md | grep -Eq "$pattern"; then
+            echo "CHANGELOG.md has no '## $version' section. Add release notes before tagging."
+            exit 1
+          fi
