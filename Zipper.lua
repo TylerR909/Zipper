@@ -54,18 +54,32 @@ SlashCmdList.ZIPPER = function(msg)
 		ns:Print(L["/zipper — open the map, the route, and the replay"])
 		ns:Print(L["/zipper config — reminder and what gets recorded"])
 		ns:Print(L["/zipper status — sessions and the current recap"])
+		ns:Print(L["/zipper ding — the level you just finished, or /zipper ding 28"])
 		return
 	end
 	if msg == "config" or msg == "options" or msg == "settings" then
 		ns.Config:Toggle()
 		return
 	end
-	-- Temporary, so the level-up line can be checked without waiting for a ding.
-	if msg == "ding" then
-		local levels = ns.DB.record and ns.DB.record.levels
-		local row = type(levels) == "table" and levels[#levels] or nil
-		local text = type(row) == "table" and ns.DB:LevelRecapText(row.lv, row.t) or nil
-		ns:Print(text or L["No level-up to recap yet."])
+	if msg == "ding" or msg:match("^ding%s") then
+		local rest = msg:match("^ding%s*(.-)%s*$") or ""
+		local level
+		if rest ~= "" then
+			if not rest:match("^%d+$") then
+				ns:Print(L["Use /zip ding or /zip ding 28."])
+				return
+			end
+			level = tonumber(rest)
+		end
+		local playerLevel = UnitLevel and UnitLevel("player")
+		if type(playerLevel) ~= "number" or (issecretvalue and issecretvalue(playerLevel)) or playerLevel < 1 then
+			playerLevel = nil
+		end
+		local maxLevel = GetMaxPlayerLevel and GetMaxPlayerLevel()
+		if type(maxLevel) ~= "number" or (issecretvalue and issecretvalue(maxLevel)) or maxLevel < 1 then
+			maxLevel = nil
+		end
+		ns:Print(ns.DB:DingCommand(level, playerLevel, maxLevel))
 		return
 	end
 	if msg == "status" then

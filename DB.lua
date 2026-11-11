@@ -1012,6 +1012,56 @@ local function InSpan(span, when, onDing)
 	return when >= span.t0
 end
 
+local function RecapLine(lo, hi, seconds, kills, quests, deaths, fromName, toName)
+	local taken = PlayedWords(seconds)
+	local ranged = hi ~= lo
+	local head
+	if fromName and toName and fromName ~= toName then
+		if ranged then
+			head = string.format(L["Levels %d–%d took %s, from %s to %s."], lo, hi, taken, fromName, toName)
+		else
+			head = string.format(L["Level %d took %s, from %s to %s."], lo, taken, fromName, toName)
+		end
+	elseif fromName or toName then
+		local where = fromName or toName
+		if ranged then
+			head = string.format(L["Levels %d–%d took %s in %s."], lo, hi, taken, where)
+		else
+			head = string.format(L["Level %d took %s in %s."], lo, taken, where)
+		end
+	elseif ranged then
+		head = string.format(L["Levels %d–%d took %s."], lo, hi, taken)
+	else
+		head = string.format(L["Level %d took %s."], lo, taken)
+	end
+	local bits = {}
+	if kills > 0 and quests > 0 then
+		local enemy = (kills == 1) and L["enemy"] or L["enemies"]
+		local quest = (quests == 1) and L["quest"] or L["quests"]
+		bits[#bits + 1] = string.format(L["You killed %s %s and finished %s %s."], Comma(kills), enemy, Comma(quests), quest)
+	elseif kills > 0 then
+		local enemy = (kills == 1) and L["enemy"] or L["enemies"]
+		bits[#bits + 1] = string.format(L["You killed %s %s."], Comma(kills), enemy)
+	elseif quests > 0 then
+		local quest = (quests == 1) and L["quest"] or L["quests"]
+		bits[#bits + 1] = string.format(L["You finished %s %s."], Comma(quests), quest)
+	end
+	if deaths == 1 then
+		bits[#bits + 1] = L["You died once."]
+	elseif deaths > 1 then
+		bits[#bits + 1] = string.format(L["You died %d times."], deaths)
+	end
+	local text = head
+	if #bits > 0 then
+		text = text .. " " .. table.concat(bits, " ")
+	end
+	local link = ns.DB:LevelChatLink(lo, hi)
+	if link then
+		text = text .. " " .. link
+	end
+	return text
+end
+
 local function CountFacts(db, journey, spans)
 	local kills, quests, deaths = 0, 0, 0
 	local onDing = {}
@@ -1096,55 +1146,74 @@ function ns.DB:LevelRecapText(newLevel, now)
 	if seconds < 1 and kills == 0 and quests == 0 and deaths == 0 then
 		return nil
 	end
-	local taken = PlayedWords(seconds)
 	local fromName = t0 and MapName(self:MapAt(journey, t0)) or nil
 	local toName = t1 and MapName(self:MapAt(journey, t1)) or nil
-	local ranged = hi ~= lo
-	local head
-	if fromName and toName and fromName ~= toName then
-		if ranged then
-			head = string.format(L["Levels %d–%d took %s, from %s to %s."], lo, hi, taken, fromName, toName)
-		else
-			head = string.format(L["Level %d took %s, from %s to %s."], lo, taken, fromName, toName)
+	return RecapLine(lo, hi, seconds, kills, quests, deaths, fromName, toName)
+end
+
+function ns.DB:ExactLevelRecap(level)
+	local journey = self.record
+	if type(journey) ~= "table" or type(level) ~= "number" or level < 1 then
+		return nil
+	end
+	local spans = self:LevelSpans(journey)
+	local matched = {}
+	local seconds = 0
+	local t0, t1
+	for i = 1, #spans do
+		local span = spans[i]
+		local top = span.lvTo or span.lv
+		-- A jump stored as one stretch is not a recording of each level inside it.
+		if span.lv == level and top == level and type(span.t1) == "number" then
+			matched[#matched + 1] = span
+			local dur = span.t1 - span.t0
+			if dur > 0 then
+				seconds = seconds + dur
+			end
+			if not t0 or span.t0 < t0 then
+				t0 = span.t0
+			end
+			if not t1 or span.t1 > t1 then
+				t1 = span.t1
+			end
 		end
-	elseif fromName or toName then
-		local where = fromName or toName
-		if ranged then
-			head = string.format(L["Levels %d–%d took %s in %s."], lo, hi, taken, where)
-		else
-			head = string.format(L["Level %d took %s in %s."], lo, taken, where)
+	end
+	local kills, quests, deaths = CountFacts(self, journey, matched)
+	if seconds < 1 and kills == 0 and quests == 0 and deaths == 0 then
+		return nil
+	end
+	local fromName = t0 and MapName(self:MapAt(journey, t0)) or nil
+	local toName = t1 and MapName(self:MapAt(journey, t1)) or nil
+	return RecapLine(level, level, seconds, kills, quests, deaths, fromName, toName)
+end
+
+function ns.DB:DingCommand(level, playerLevel, maxLevel)
+	if level == nil then
+		if type(playerLevel) ~= "number" or playerLevel < 2 then
+			return L["No level-up to recap yet."]
 		end
-	elseif ranged then
-		head = string.format(L["Levels %d–%d took %s."], lo, hi, taken)
-	else
-		head = string.format(L["Level %d took %s."], lo, taken)
+		level = playerLevel - 1
 	end
-	local bits = {}
-	if kills > 0 and quests > 0 then
-		local enemy = (kills == 1) and L["enemy"] or L["enemies"]
-		local quest = (quests == 1) and L["quest"] or L["quests"]
-		bits[#bits + 1] = string.format(L["You killed %s %s and finished %s %s."], Comma(kills), enemy, Comma(quests), quest)
-	elseif kills > 0 then
-		local enemy = (kills == 1) and L["enemy"] or L["enemies"]
-		bits[#bits + 1] = string.format(L["You killed %s %s."], Comma(kills), enemy)
-	elseif quests > 0 then
-		local quest = (quests == 1) and L["quest"] or L["quests"]
-		bits[#bits + 1] = string.format(L["You finished %s %s."], Comma(quests), quest)
+	if type(level) ~= "number" or level < 1 or level ~= math.floor(level) then
+		return L["Use /zip ding or /zip ding 28."]
 	end
-	if deaths == 1 then
-		bits[#bits + 1] = L["You died once."]
-	elseif deaths > 1 then
-		bits[#bits + 1] = string.format(L["You died %d times."], deaths)
+	if type(maxLevel) == "number" and maxLevel >= 1 then
+		if level > maxLevel then
+			return string.format(L["Level %d is past the level cap of %d."], level, maxLevel)
+		end
+		if level >= maxLevel then
+			return string.format(L["Level %d is the level cap."], level)
+		end
 	end
-	local text = head
-	if #bits > 0 then
-		text = head .. " " .. table.concat(bits, " ")
+	if type(playerLevel) == "number" then
+		if playerLevel < level then
+			return string.format(L["You have not reached level %d."], level)
+		end
+		if playerLevel < level + 1 then
+			return string.format(L["You have not reached level %d."], level + 1)
+		end
 	end
-	local link = self:LevelChatLink(lo, hi)
-	if link then
-		text = text .. " " .. link
-	end
-	return text
+	return self:ExactLevelRecap(level) or string.format(L["No recording for level %d."], level)
 end
 
 function ns.DB:LevelChatLink(lo, hi)
