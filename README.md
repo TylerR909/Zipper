@@ -11,6 +11,7 @@ You dinged in the wetlands, died to something embarrassing, and grouped with a p
 - **Your color.** The walk is drawn in your class color. A druid leaves an orange line. Flight, a mount, and a ghost walk each look like what they were.
 - **A trail, not a scribble.** The line is solid back to a point you choose, then fades. Set that glance on the map, and set it again while you replay.
 - **Deaths stay put.** Zipper marks where you fell. It does not draw a straight line from the corpse to the graveyard. The walk back as a ghost is its own stretch, grey unless you ask for red.
+- **Hearths and teleports cut the trail.** A hearth, an accepted summon, or a mage teleport leaves a mark where you left. Replay does not draw a line across the jump; the walk continues from where you landed.
 - **The route can stay up.** Show it while you play, hide it when you want the map clean, and turn it on again without losing the day.
 
 ## Play it back

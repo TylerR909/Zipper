@@ -426,26 +426,43 @@ local function FirstIndexAtOrAfter(times, origin, threshold)
 	return found
 end
 
-function ns.Replay:CrossesDeath(prevT, t, times, index)
+function ns.Replay:CrossesBreak(prevT, t, times, index)
 	index = index or 1
 	local count = times and #times or 0
 	while index <= count and times[index] < prevT do
 		index = index + 1
 	end
-	local death = times[index]
-	if death and death >= prevT and death < t then
+	local at = times[index]
+	if at and at >= prevT and at < t then
 		return true, index
 	end
 	return false, index
 end
 
-function ns.Replay:DeathTimes(sessions)
+-- Death, hearth, an accepted summon, and a mage teleport cut the trail so
+-- replay never draws a line across the jump. Portal: and ritual casts stay put.
+function ns.Replay:BreaksPath(kind, extra)
+	if kind == Kind.DEATH or kind == Kind.HEARTH then
+		return true
+	end
+	if kind == Kind.SUMMON then
+		return not extra or extra == 0
+	end
+	if kind == Kind.PORTAL and extra and extra ~= 0 and C_Spell and C_Spell.GetSpellInfo then
+		local info = C_Spell.GetSpellInfo(extra)
+		local name = info and info.name
+		return type(name) == "string" and string.sub(name, 1, 9) == "Teleport:"
+	end
+	return false
+end
+
+function ns.Replay:BreakTimes(sessions)
 	local times = {}
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
 		for i = 1, #(track.ek or {}) do
-			if track.ek[i] == Kind.DEATH then
+			if self:BreaksPath(track.ek[i], track.ea and track.ea[i]) then
 				times[#times + 1] = session.s + (track.et[i] or 0)
 			end
 		end
@@ -456,8 +473,8 @@ end
 
 function ns.Replay:CollectPath(sessions, minDist)
 	local oldest, newest = self:TrailSpan()
-	local deathTimes = self:DeathTimes(sessions)
-	local deathIndex = 1
+	local breakTimes = self:BreakTimes(sessions)
+	local breakIndex = 1
 	local instanceSpans = self:InstanceSpans(sessions)
 	local xs, ys, brk, modes, speeds, times, maps = {}, {}, {}, {}, {}, {}, {}
 	local n = 0
@@ -502,7 +519,7 @@ function ns.Replay:CollectPath(sessions, minDist)
 					local gap = prevT and (t - prevT) > ns.CONTINUE_SECONDS
 					local crosses = false
 					if prevT then
-						crosses, deathIndex = self:CrossesDeath(prevT, t, deathTimes, deathIndex)
+						crosses, breakIndex = self:CrossesBreak(prevT, t, breakTimes, breakIndex)
 					end
 					if not px or gap then
 						open = false
