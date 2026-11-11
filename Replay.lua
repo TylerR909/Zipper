@@ -2259,7 +2259,8 @@ function ns.Replay:ChapterName(kind, mapID, chapter)
 	return zone
 end
 
--- First different map after a teleport cast. Same-zone hops return nil.
+-- Map of the first path sample after a teleport cast. A same-zone hop
+-- lands on fromMap and returns nil so CollectChapters skips the chapter.
 function ns.Replay:TeleportArrival(sessions, eventT, fromMap)
 	if not eventT or not fromMap or fromMap == 0 then
 		return nil
@@ -2271,11 +2272,11 @@ function ns.Replay:TeleportArrival(sessions, eventT, fromMap)
 		local origin = session.s
 		for i = 1, #track.t do
 			local t = origin + (track.t[i] or 0)
-			if t > eventT + 60 then
+			if t > eventT + 45 then
 				break
 			end
 			local mapID = track.m[i]
-			if mapID and mapID ~= 0 and t > eventT and mapID ~= fromMap then
+			if mapID and mapID ~= 0 and t > eventT then
 				if not bestT or t < bestT then
 					bestT = t
 					bestMap = mapID
@@ -2283,7 +2284,10 @@ function ns.Replay:TeleportArrival(sessions, eventT, fromMap)
 			end
 		end
 	end
-	return bestMap
+	if bestMap and bestMap ~= fromMap then
+		return bestMap
+	end
+	return nil
 end
 
 function ns.Replay:InstanceSkips(inst)
@@ -2474,11 +2478,17 @@ function ns.Replay:CollectChapters(sessions)
 			elseif chapter.kind == "zone" or previous.kind == "zone" then
 				previous.kind = "zone"
 			end
-			if chapter.map and chapter.map ~= 0 and ((previous.kind ~= "hearth" and previous.kind ~= "teleport") or not previous.map) then
+			-- Teleport chapters already carry the arrival map; keep it. Hearth
+			-- still picks up arrival from a following zone stop.
+			if chapter.kind == "teleport" and chapter.map and chapter.map ~= 0 then
 				previous.map = chapter.map
-			end
-			if chapter.kind == "zone" and chapter.map then
-				previous.map = chapter.map
+			elseif previous.kind ~= "teleport" then
+				if chapter.map and chapter.map ~= 0 and (previous.kind ~= "hearth" or not previous.map) then
+					previous.map = chapter.map
+				end
+				if chapter.kind == "zone" and chapter.map then
+					previous.map = chapter.map
+				end
 			end
 		else
 			merged[#merged + 1] = { t = chapter.t, map = chapter.map, kind = chapter.kind }
