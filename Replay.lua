@@ -21,6 +21,10 @@ local PARK_DIST = 0.0035
 local TRAVEL_GAP = 20
 local STAY_SECONDS = 240
 local CHAPTER_MERGE = 90
+-- Previous-chapter: restart current unless near its start (timeline × speed) or
+-- a Previous click just restarted it (wall clock). High speeds outrun a fixed 1s.
+local CHAPTER_PREV_WALL = 1
+local CHAPTER_PREV_GRACE = 0.75
 local LINE_CAP = 500
 local MARKER_CAP = 300
 local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.9
@@ -2464,7 +2468,9 @@ function ns.Replay:SkipChapter(step)
 	end
 	local at = self.playhead or self.t0
 	local index
+	local restartedCurrent = false
 	if step > 0 then
+		self.chapterPrevSeekAt = nil
 		for i = 1, #chapters do
 			if chapters[i].t > at + 1 then
 				index = i
@@ -2472,15 +2478,34 @@ function ns.Replay:SkipChapter(step)
 			end
 		end
 	else
+		local current
 		for i = #chapters, 1, -1 do
-			if chapters[i].t < at - 1 then
-				index = i
+			if chapters[i].t <= at then
+				current = i
 				break
 			end
+		end
+		local now = GetTime()
+		local grace = math.max(1, (self.speed or 1) * CHAPTER_PREV_GRACE)
+		local recent = self.chapterPrevSeekAt and (now - self.chapterPrevSeekAt) <= CHAPTER_PREV_WALL
+		local nearStart = current and (at - chapters[current].t) <= grace
+		if current and (recent or nearStart) then
+			if current > 1 then
+				index = current - 1
+			end
+			self.chapterPrevSeekAt = nil
+		elseif current then
+			index = current
+			restartedCurrent = true
 		end
 	end
 	if index then
 		self:SeekToTime(chapters[index].t)
+		if restartedCurrent then
+			self.chapterPrevSeekAt = GetTime()
+		else
+			self.chapterPrevSeekAt = nil
+		end
 	end
 end
 
