@@ -871,8 +871,14 @@ function ns.GPS:OnEvent(event, ...)
 	elseif event == "PLAYER_LEVEL_UP" then
 		local level = ...
 		if type(level) == "number" and not (issecretvalue and issecretvalue(level)) then
-			ns.DB:NoteLevelUp(level)
+			local stored = ns.DB:NoteLevelUp(level)
 			self:Mark(Kind.LEVEL, level)
+			if stored then
+				local text = ns.DB:LevelRecapText(level)
+				if text then
+					ns:Print(text)
+				end
+			end
 		end
 	elseif event == "PLAYER_UNGHOST" then
 		self:SyncGhost()

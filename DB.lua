@@ -700,17 +700,22 @@ end
 function ns.DB:NoteLevelUp(level, now)
 	local host = self.record
 	if not host or type(level) ~= "number" or level <= 0 then
-		return
+		return false
 	end
 	now = now or self:Now()
+	-- The ding is the session's latest moment. A level span ignores a ding past seen.
+	if self.session and (type(self.session.seen) ~= "number" or now > self.session.seen) then
+		self.session.seen = now
+	end
 	if type(host.levels) ~= "table" then
 		host.levels = {}
 	end
 	local last = host.levels[#host.levels]
 	if last and last.lv == level and type(last.t) == "number" and math.abs(last.t - now) < 5 then
-		return
+		return false
 	end
 	host.levels[#host.levels + 1] = { lv = level, t = now }
+	return true
 end
 
 function ns.DB:MapAt(journey, when)
@@ -760,24 +765,33 @@ function ns.DB:SpanStop(span, journey)
 	return (last and (last.seen or last.s)) or span.t0
 end
 
+local function CollectDings(journey)
+	local dings = {}
+	if type(journey) ~= "table" or type(journey.levels) ~= "table" then
+		return dings
+	end
+	for i = 1, #journey.levels do
+		local row = journey.levels[i]
+		if type(row) == "table" and type(row.lv) == "number" and type(row.t) == "number" then
+			dings[#dings + 1] = row
+		end
+	end
+	table.sort(dings, function(a, b)
+		if a.t == b.t then
+			return a.lv < b.lv
+		end
+		return a.t < b.t
+	end)
+	return dings
+end
+
 function ns.DB:LevelSpans(journey)
 	journey = journey or self.char
 	if type(journey) ~= "table" then
 		return {}
 	end
 	local sessions = journey.sessions or {}
-	local dings = {}
-	if type(journey.levels) == "table" then
-		for i = 1, #journey.levels do
-			local row = journey.levels[i]
-			if type(row) == "table" and type(row.lv) == "number" and type(row.t) == "number" then
-				dings[#dings + 1] = row
-			end
-		end
-	end
-	table.sort(dings, function(a, b)
-		return a.t < b.t
-	end)
+	local dings = CollectDings(journey)
 	local spans = {}
 	local function add(lv, lvTo, t0, t1, exact)
 		if not lv or not t0 or t1 and t1 <= t0 then
@@ -898,6 +912,234 @@ function ns.DB:RecapText(sessions)
 		levelText = string.format(L["%.2f levels"], levels)
 	end
 	return string.format(L["You killed %s %s, finished %s %s, and gained %s."], Comma(kills), enemy, Comma(quests), quest, levelText)
+end
+
+local function PlayedWords(seconds)
+	seconds = math.floor(seconds or 0)
+	if seconds < 0 then
+		seconds = 0
+	end
+	if seconds < 60 then
+		return string.format(L["%d sec"], seconds)
+	end
+	local minutes = math.floor(seconds / 60)
+	local hours = math.floor(minutes / 60)
+	minutes = minutes % 60
+	if hours <= 0 then
+		local remain = seconds % 60
+		if remain > 0 then
+			return string.format(L["%d min %d sec"], minutes, remain)
+		end
+		return string.format(L["%d min"], minutes)
+	end
+	if minutes == 0 then
+		if hours == 1 then
+			return L["1 hour"]
+		end
+		return string.format(L["%d hours"], hours)
+	end
+	return string.format(L["%d hr %d min"], hours, minutes)
+end
+
+local function MapName(mapID)
+	if not mapID or mapID == 0 or not C_Map or not C_Map.GetMapInfo then
+		return nil
+	end
+	local info = C_Map.GetMapInfo(mapID)
+	local name = info and info.name
+	if type(name) ~= "string" or name == "" or (issecretvalue and issecretvalue(name)) then
+		return nil
+	end
+	return name
+end
+
+local function FinishedBand(db, newLevel, now)
+	local journey = db.record
+	if type(journey) ~= "table" or type(newLevel) ~= "number" or type(now) ~= "number" then
+		return nil
+	end
+	local dings = CollectDings(journey)
+	local sessions = journey.sessions or {}
+	for s = #sessions, 1, -1 do
+		local session = sessions[s]
+		if type(session) == "table" and type(session.s) == "number" and type(session.lv) == "number" then
+			local windowEnd = session.seen or session.s
+			if session == db.session and now > windowEnd then
+				windowEnd = now
+			end
+			if now >= session.s - 1 and now <= windowEnd + 1 then
+				local segLevel = session.lv
+				local segStart = session.s
+				for i = 1, #dings do
+					local ding = dings[i]
+					if ding.t >= session.s and ding.t <= windowEnd + 1 then
+						if math.abs(ding.t - now) <= 1 and ding.lv == newLevel and segLevel < newLevel then
+							return segLevel, newLevel - 1
+						end
+						if ding.t >= segStart then
+							segStart = ding.t
+							segLevel = ding.lv
+						end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+local function StartedOnDing(journey, span)
+	local levels = journey.levels
+	if type(levels) ~= "table" then
+		return false
+	end
+	for i = 1, #levels do
+		local row = levels[i]
+		if type(row) == "table" and row.lv == span.lv and type(row.t) == "number" and math.abs(row.t - span.t0) <= 1 then
+			return true
+		end
+	end
+	return false
+end
+
+local function InSpan(span, when, onDing)
+	if type(span.t1) ~= "number" or type(when) ~= "number" or when > span.t1 then
+		return false
+	end
+	if onDing then
+		return when > span.t0
+	end
+	return when >= span.t0
+end
+
+local function CountFacts(db, journey, spans)
+	local kills, quests, deaths = 0, 0, 0
+	local onDing = {}
+	for i = 1, #spans do
+		onDing[i] = StartedOnDing(journey, spans[i])
+	end
+	local sessions = journey.sessions or {}
+	for s = 1, #sessions do
+		local session = sessions[s]
+		if type(session) == "table" and type(session.s) == "number" then
+			local track = db:Track(session)
+			for n = 1, #(track.ek or {}) do
+				local kind = track.ek[n]
+				local want = kind == ns.Kind.KILL or kind == ns.Kind.QUEST_TURNIN or kind == ns.Kind.DEATH
+				if want then
+					local when = session.s + (track.et[n] or 0)
+					for i = 1, #spans do
+						if InSpan(spans[i], when, onDing[i]) then
+							if kind == ns.Kind.KILL then
+								kills = kills + 1
+							elseif kind == ns.Kind.QUEST_TURNIN then
+								quests = quests + 1
+							else
+								deaths = deaths + 1
+							end
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+	return kills, quests, deaths
+end
+
+function ns.DB:LevelRecapText(newLevel, now)
+	local journey = self.record
+	if type(journey) ~= "table" or type(newLevel) ~= "number" then
+		return nil
+	end
+	if type(now) ~= "number" then
+		local levels = journey.levels
+		if type(levels) == "table" then
+			for i = #levels, 1, -1 do
+				local row = levels[i]
+				if type(row) == "table" and row.lv == newLevel and type(row.t) == "number" then
+					now = row.t
+					break
+				end
+			end
+		end
+	end
+	if type(now) ~= "number" then
+		return nil
+	end
+	local lo, hi = FinishedBand(self, newLevel, now)
+	if not lo or not hi or hi < lo then
+		return nil
+	end
+	local spans = self:LevelSpans(journey)
+	local matched = {}
+	local seconds = 0
+	local t0, t1
+	for i = 1, #spans do
+		local span = spans[i]
+		local top = span.lvTo or span.lv
+		if span.lv == lo and top == hi and type(span.t1) == "number" then
+			matched[#matched + 1] = span
+			local dur = span.t1 - span.t0
+			if dur > 0 then
+				seconds = seconds + dur
+			end
+			if not t0 or span.t0 < t0 then
+				t0 = span.t0
+			end
+			if not t1 or span.t1 > t1 then
+				t1 = span.t1
+			end
+		end
+	end
+	local kills, quests, deaths = CountFacts(self, journey, matched)
+	if seconds < 1 and kills == 0 and quests == 0 and deaths == 0 then
+		return nil
+	end
+	local taken = PlayedWords(seconds)
+	local fromName = t0 and MapName(self:MapAt(journey, t0)) or nil
+	local toName = t1 and MapName(self:MapAt(journey, t1)) or nil
+	local ranged = hi ~= lo
+	local head
+	if fromName and toName and fromName ~= toName then
+		if ranged then
+			head = string.format(L["Levels %d–%d took %s, from %s to %s."], lo, hi, taken, fromName, toName)
+		else
+			head = string.format(L["Level %d took %s, from %s to %s."], lo, taken, fromName, toName)
+		end
+	elseif fromName or toName then
+		local where = fromName or toName
+		if ranged then
+			head = string.format(L["Levels %d–%d took %s in %s."], lo, hi, taken, where)
+		else
+			head = string.format(L["Level %d took %s in %s."], lo, taken, where)
+		end
+	elseif ranged then
+		head = string.format(L["Levels %d–%d took %s."], lo, hi, taken)
+	else
+		head = string.format(L["Level %d took %s."], lo, taken)
+	end
+	local bits = {}
+	if kills > 0 and quests > 0 then
+		local enemy = (kills == 1) and L["enemy"] or L["enemies"]
+		local quest = (quests == 1) and L["quest"] or L["quests"]
+		bits[#bits + 1] = string.format(L["You killed %s %s and finished %s %s."], Comma(kills), enemy, Comma(quests), quest)
+	elseif kills > 0 then
+		local enemy = (kills == 1) and L["enemy"] or L["enemies"]
+		bits[#bits + 1] = string.format(L["You killed %s %s."], Comma(kills), enemy)
+	elseif quests > 0 then
+		local quest = (quests == 1) and L["quest"] or L["quests"]
+		bits[#bits + 1] = string.format(L["You finished %s %s."], Comma(quests), quest)
+	end
+	if deaths == 1 then
+		bits[#bits + 1] = L["You died once."]
+	elseif deaths > 1 then
+		bits[#bits + 1] = string.format(L["You died %d times."], deaths)
+	end
+	if #bits > 0 then
+		return head .. " " .. table.concat(bits, " ")
+	end
+	return head
 end
 
 local QUIET_KEEP = {
