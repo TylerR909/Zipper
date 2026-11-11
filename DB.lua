@@ -1140,7 +1140,11 @@ function ns.DB:LevelRecapText(newLevel, now)
 	if #bits > 0 then
 		text = head .. " " .. table.concat(bits, " ")
 	end
-	return text, lo, hi
+	local link = self:LevelChatLink(lo, hi)
+	if link then
+		text = text .. " " .. link
+	end
+	return text
 end
 
 function ns.DB:LevelChatLink(lo, hi)

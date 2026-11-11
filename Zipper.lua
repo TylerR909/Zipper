@@ -60,6 +60,14 @@ SlashCmdList.ZIPPER = function(msg)
 		ns.Config:Toggle()
 		return
 	end
+	-- Temporary, so the level-up line can be checked without waiting for a ding.
+	if msg == "ding" then
+		local levels = ns.DB.record and ns.DB.record.levels
+		local row = type(levels) == "table" and levels[#levels] or nil
+		local text = type(row) == "table" and ns.DB:LevelRecapText(row.lv, row.t) or nil
+		ns:Print(text or L["No level-up to recap yet."])
+		return
+	end
 	if msg == "status" then
 		local sessions, points, events = ns.DB:Stats()
 		ns:Print(string.format(L["%d sessions, %d points, %d events."], sessions, points, events))
