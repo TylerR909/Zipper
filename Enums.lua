@@ -29,6 +29,7 @@ ns.Kind = {
 	CAMP = 20,
 	SLEEP = 21,
 	EAT = 22,
+	BOSS = 23,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -62,6 +63,7 @@ ns.KindName = {
 	[20] = L["Campfire"],
 	[21] = L["Sleeping bag"],
 	[22] = L["Eating"],
+	[23] = L["Boss"],
 }
 
 ns.KindColor = {
@@ -87,6 +89,7 @@ ns.KindColor = {
 	[20] = { 0.95, 0.45, 0.12 },
 	[21] = { 0.55, 0.62, 0.95 },
 	[22] = { 0.72, 0.58, 0.32 },
+	[23] = { 1.00, 0.55, 0.20 },
 }
 
 -- Class file from UnitClass. Stored once per person, not on every path event.

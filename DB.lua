@@ -1286,6 +1286,7 @@ local QUIET_KEEP = {
 	[ns.Kind.HEARTH] = true,
 	[ns.Kind.FLIGHT_START] = true,
 	[ns.Kind.INSTANCE_ENTER] = true,
+	[ns.Kind.BOSS] = true,
 	[ns.Kind.LEVEL] = true,
 	[ns.Kind.PORTAL] = true,
 	[ns.Kind.TRAINER] = true,
@@ -1496,6 +1497,31 @@ function ns.DB:ReadTrainer(extra)
 	return extra % 16, math.floor(extra / 16)
 end
 
+-- Instance type is 1..6. Older events stored only the type. Newer ones pack
+-- GetInstanceInfo's instanceID above it so a leave/re-enter of the same run
+-- can be merged when counting dungeons with the party.
+ns.DB.INSTANCE_ID_MUL = 8
+
+function ns.DB:PackInstance(instType, instanceID)
+	instType = tonumber(instType) or 0
+	instanceID = tonumber(instanceID) or 0
+	if instType < 0 then
+		instType = 0
+	end
+	if instanceID < 0 then
+		instanceID = 0
+	end
+	return instType + instanceID * self.INSTANCE_ID_MUL
+end
+
+function ns.DB:ReadInstance(extra)
+	extra = tonumber(extra) or 0
+	if extra < 0 then
+		extra = 0
+	end
+	return extra % self.INSTANCE_ID_MUL, math.floor(extra / self.INSTANCE_ID_MUL)
+end
+
 function ns.DB:NoteSummoner(name, now)
 	local session = self.session
 	if not session or type(name) ~= "string" or name == "" or type(now) ~= "number" then
@@ -1685,6 +1711,7 @@ function ns.DB:CompanyQualifies(kind)
 		or kind == ns.Kind.KILL
 		or kind == ns.Kind.DEATH
 		or kind == ns.Kind.INSTANCE_ENTER
+		or kind == ns.Kind.BOSS
 end
 
 function ns.DB:TouchPerson(guid, info, now, mapID)
@@ -2320,6 +2347,67 @@ local function SpanOverlap(spans, startAt, stopAt, liveEnd)
 	return total
 end
 
+-- A dungeon/raid with the party counts once a boss dies inside it. Walking in
+-- and out does not. Leave and re-enter of the same instanceID within this
+-- window is still the same run, so a second door click does not add another.
+local COMPANY_INSTANCE_REENTER = 30 * 60
+
+local function CompanyInstanceRuns(self, sessions)
+	local runs = {}
+	local open
+	local function flush()
+		if open and type(open.bossWhen) == "number" then
+			runs[#runs + 1] = {
+				bossWhen = open.bossWhen,
+				instType = open.instType,
+			}
+		end
+		open = nil
+	end
+	for i = 1, #(sessions or {}) do
+		local session = sessions[i]
+		local track = self:Track(session)
+		for n = 1, #(track.ek or {}) do
+			local when = session.s + (track.et[n] or 0)
+			local kind = track.ek[n]
+			local extra = track.ea[n] or 0
+			local mapID = track.em and track.em[n] or 0
+			if kind == ns.Kind.INSTANCE_ENTER then
+				local instType, instanceID = self:ReadInstance(extra)
+				if instType == ns.Instance.PARTY or instType == ns.Instance.RAID then
+					local key
+					if instanceID > 0 then
+						key = instType .. ":" .. instanceID
+					else
+						key = instType .. ":m" .. tostring(mapID or 0)
+					end
+					if open and open.key == key and type(open.leftAt) == "number" and (when - open.leftAt) <= COMPANY_INSTANCE_REENTER then
+						open.leftAt = nil
+					else
+						flush()
+						open = {
+							key = key,
+							instType = instType,
+						}
+					end
+				else
+					flush()
+				end
+			elseif kind == ns.Kind.INSTANCE_LEAVE then
+				if open then
+					open.leftAt = when
+				end
+			elseif kind == ns.Kind.BOSS then
+				if open and not open.leftAt and not open.bossWhen then
+					open.bossWhen = when
+				end
+			end
+		end
+	end
+	flush()
+	return runs
+end
+
 local function JourneyKey(journey)
 	if not ZipperDB or type(ZipperDB.journeys) ~= "table" then
 		return nil
@@ -2420,12 +2508,30 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 								end
 							elseif kind == ns.Kind.DEATH then
 								row.deaths = row.deaths + 1
-							elseif kind == ns.Kind.INSTANCE_ENTER and extra == ns.Instance.PARTY then
-								row.dungeons = row.dungeons + 1
-							elseif kind == ns.Kind.INSTANCE_ENTER and extra == ns.Instance.RAID then
-								row.raids = row.raids + 1
 							end
 						end
+					end
+				end
+			end
+		end
+	end
+	local runs = CompanyInstanceRuns(self, sessions)
+	for r = 1, #runs do
+		local run = runs[r]
+		local when = run.bossWhen
+		if type(t0) == "number" and when < t0 then
+			when = nil
+		end
+		if when and type(t1) == "number" and when > t1 then
+			when = nil
+		end
+		if when then
+			for _, row in pairs(rows) do
+				if SpanCovers(row.spans, when, liveEnd) then
+					if run.instType == ns.Instance.PARTY then
+						row.dungeons = row.dungeons + 1
+					elseif run.instType == ns.Instance.RAID then
+						row.raids = row.raids + 1
 					end
 				end
 			end

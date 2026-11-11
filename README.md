@@ -22,6 +22,7 @@ Where you walked — the trail across zones, on foot, mounted, flying, or as a g
 
 - The first time you met someone is remembered once: the zone, their level, and which of your characters was there. A later alt can still say you met them in the Wetlands, on the hunter who was actually there.
 - Time, quests, kills, and dungeons are counted for the character who was in the group. Someone you never did anything with stays off the list.
+- A dungeon or raid with the party counts after a boss dies there. Walking in and out does not, and leaving and coming back into the same run does not add another.
 - About 250 yards counts. So does the same dungeon. Hover a player, or the route itself, and Zipper shows who was with you.
 
 ## Small on disk

@@ -380,7 +380,10 @@ function ns.Replay:AcquireMarker()
 				local info = C_Map.GetMapInfo(pin.mapID)
 				GameTooltip:AddLine((info and info.name) or string.format(L["Map %d"], pin.mapID), 1, 1, 1)
 			elseif (pin.kind == Kind.INSTANCE_ENTER or pin.kind == Kind.INSTANCE_LEAVE) and pin.extra and pin.extra > 0 then
-				GameTooltip:AddLine(ns.InstanceName[pin.extra] or L["Instance"], 1, 1, 1)
+				local instType = ns.DB:ReadInstance(pin.extra)
+				GameTooltip:AddLine(ns.InstanceName[instType] or L["Instance"], 1, 1, 1)
+			elseif pin.kind == Kind.BOSS then
+				GameTooltip:AddLine(L["Boss"], 1, 1, 1)
 			end
 			if pin.kind ~= Kind.GROUP and pin.when then
 				ns.Replay:AddCompanyLine(GameTooltip, ns.DB.char, pin.when)
@@ -1264,10 +1267,9 @@ function ns.Replay:CollectStats(sessions)
 				sleepStart = nil
 			elseif kind == Kind.INSTANCE_ENTER then
 				instStart = t
-				instType = extra
-				if not entered[extra] then
-					extra = ns.Instance.OTHER
-					instType = extra
+				instType = ns.DB:ReadInstance(extra)
+				if not entered[instType] then
+					instType = ns.Instance.OTHER
 				end
 				entered[instType] = entered[instType] + 1
 			elseif kind == Kind.INSTANCE_LEAVE and instStart then
@@ -2378,6 +2380,7 @@ function ns.Replay:TeleportArrival(sessions, eventT, fromMap)
 end
 
 function ns.Replay:InstanceSkips(inst)
+	inst = ns.DB:ReadInstance(inst)
 	return inst ~= ns.Instance.PVP and inst ~= ns.Instance.ARENA
 end
 
@@ -2396,11 +2399,12 @@ function ns.Replay:InstanceSpans(sessions)
 					open.tEnd = t
 					spans[#spans + 1] = open
 				end
+				local instType = ns.DB:ReadInstance(track.ea[i])
 				open = {
 					t = t,
 					map = track.em[i],
-					inst = track.ea[i],
-					skip = self:InstanceSkips(track.ea[i]),
+					inst = instType,
+					skip = self:InstanceSkips(instType),
 				}
 			elseif kind == Kind.INSTANCE_LEAVE and open then
 				open.tEnd = t

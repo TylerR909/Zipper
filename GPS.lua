@@ -288,20 +288,41 @@ function ns.GPS:ReadInstance()
 	return InstanceByType[kind] or ns.Instance.OTHER
 end
 
+function ns.GPS:ReadInstanceID()
+	if not GetInstanceInfo then
+		return 0
+	end
+	local _, _, _, _, _, _, _, instanceID = GetInstanceInfo()
+	if not IsPlainNumber(instanceID) or instanceID < 0 then
+		return 0
+	end
+	return instanceID
+end
+
+function ns.GPS:InstanceExtra(inst)
+	inst = inst or self:ReadInstance()
+	if not inst then
+		return nil
+	end
+	return ns.DB:PackInstance(inst, self:ReadInstanceID())
+end
+
 function ns.GPS:ReconcileInstance()
 	local inst = self:ReadInstance()
+	local extra = inst and self:InstanceExtra(inst) or nil
 	self.instance = inst
+	self.instanceExtra = extra
 	self.instanceReady = true
-	local kind, extra, session = ns.DB:LastInstanceDoor()
+	local kind, doorExtra, session = ns.DB:LastInstanceDoor()
 	if kind == Kind.INSTANCE_ENTER and session and session ~= ns.DB.session then
-		ns.DB:CloseInstance(session, extra)
-		kind, extra, session = ns.DB:LastInstanceDoor()
+		ns.DB:CloseInstance(session, doorExtra)
+		kind, doorExtra, session = ns.DB:LastInstanceDoor()
 	end
 	local openHere = kind == Kind.INSTANCE_ENTER and session == ns.DB.session
 	if inst and not openHere then
-		self:Mark(Kind.INSTANCE_ENTER, inst)
+		self:Mark(Kind.INSTANCE_ENTER, extra)
 	elseif not inst and openHere then
-		self:Mark(Kind.INSTANCE_LEAVE, extra)
+		self:Mark(Kind.INSTANCE_LEAVE, doorExtra)
 	end
 end
 
@@ -315,12 +336,23 @@ function ns.GPS:SyncInstance()
 		return
 	end
 	if self.instance then
-		self:Mark(Kind.INSTANCE_LEAVE, self.instance)
+		self:Mark(Kind.INSTANCE_LEAVE, self.instanceExtra or self.instance)
 	end
 	self.instance = inst
+	self.instanceExtra = inst and self:InstanceExtra(inst) or nil
 	if inst then
-		self:Mark(Kind.INSTANCE_ENTER, inst)
+		self:Mark(Kind.INSTANCE_ENTER, self.instanceExtra)
 	end
+end
+
+function ns.GPS:OnBossKill(encounterID)
+	if not self.instance then
+		return
+	end
+	if not IsPlainNumber(encounterID) then
+		encounterID = 0
+	end
+	self:Mark(Kind.BOSS, encounterID)
 end
 
 function ns.GPS:SyncTaxi()
@@ -819,6 +851,7 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("TRAINER_CLOSED")
 	frame:RegisterEvent("UNIT_AURA")
 	frame:RegisterEvent("PARTY_KILL")
+	frame:RegisterEvent("BOSS_KILL")
 	frame:RegisterEvent("PLAYER_CONTROL_LOST")
 	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
 	self.eventsReady = true
@@ -949,6 +982,9 @@ function ns.GPS:OnEvent(event, ...)
 	elseif event == "PARTY_KILL" then
 		local attackerGUID, targetGUID = ...
 		self:OnKill(attackerGUID, targetGUID)
+	elseif event == "BOSS_KILL" then
+		local encounterID = ...
+		self:OnBossKill(encounterID)
 	elseif event == "PLAYER_CONTROL_LOST" or event == "PLAYER_CONTROL_GAINED" then
 		self:SyncTaxi()
 	end
@@ -965,6 +1001,7 @@ function ns.GPS:Start(continued)
 	self.inCombat = UnitAffectingCombat and UnitAffectingCombat("player") and true or false
 	self.needAnchor = not self.continued
 	self.instanceReady = false
+	self.instanceExtra = nil
 	self.taxiReady = false
 	self.mountReady = false
 	self.afkReady = false

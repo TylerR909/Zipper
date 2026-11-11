@@ -44,6 +44,7 @@ local KIND_KEY = {
 	[ns.Kind.AFK_END] = "afk",
 	[ns.Kind.INSTANCE_ENTER] = "instance",
 	[ns.Kind.INSTANCE_LEAVE] = "instance",
+	[ns.Kind.BOSS] = "instance",
 	[ns.Kind.ZONE] = "zone",
 	[ns.Kind.GROUP] = "party",
 }
