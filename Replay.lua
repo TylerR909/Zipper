@@ -1197,6 +1197,8 @@ function ns.Replay:CollectStats(sessions)
 			end
 			if kind == Kind.KILL and self.mode == "level" and self.levelLo then
 				kills = kills + 1
+			elseif kind == Kind.QUEST_TURNIN and self.mode == "level" and self.levelLo then
+				turnins = turnins + 1
 			elseif kind == Kind.AFK_START then
 				afkStart = t
 			elseif kind == Kind.AFK_END and afkStart then
@@ -1266,6 +1268,7 @@ function ns.Replay:CollectStats(sessions)
 	end
 	if self.mode == "level" and self.levelLo then
 		recorded = self:LevelSeconds(self.levelLo, self.levelHi)
+		levels = self:LevelsGainedInSelection()
 	end
 	local function yards(value)
 		if not yardsKnown then
@@ -1770,6 +1773,41 @@ function ns.Replay:LevelSeconds(lo, hi)
 		end
 	end
 	return seconds
+end
+
+-- Finished levels count as 1.00 each; an open level adds its current XP fraction.
+function ns.Replay:LevelsGainedInSelection()
+	local lo = self.levelLo
+	if not lo then
+		return 0
+	end
+	local hi = self.levelHi or lo
+	local gained = 0
+	local groups = self:LevelGroups()
+	local liveLevel, frac = ns.DB:OpenLevelProgress(ns.DB.char)
+	for i = 1, #groups do
+		local group = groups[i]
+		local top = group.lvTo or group.lv
+		if top >= lo and group.lv <= hi then
+			local a = math.max(group.lv, lo)
+			local b = math.min(top, hi)
+			if a <= b then
+				if group.open then
+					if liveLevel and liveLevel >= a and liveLevel <= b then
+						gained = gained + (liveLevel - a) + frac
+					elseif liveLevel and liveLevel > b then
+						gained = gained + (b - a + 1)
+					end
+				else
+					gained = gained + (b - a + 1)
+				end
+			end
+		end
+	end
+	if gained < 0 then
+		return 0
+	end
+	return gained
 end
 
 function ns.Replay:LevelStatRows()

@@ -890,6 +890,31 @@ function ns.DB:LevelsGained(session)
 	return gained
 end
 
+-- Level and XP fraction for an open (still-in-progress) level on this journey.
+function ns.DB:OpenLevelProgress(journey)
+	journey = journey or self.char
+	local session
+	if journey == self.record and self.session then
+		session = self.session
+	else
+		local sessions = journey and journey.sessions
+		session = sessions and sessions[#sessions]
+	end
+	if type(session) ~= "table" or type(session.el) ~= "number" then
+		return nil, 0
+	end
+	local frac = 0
+	if type(session.em) == "number" and session.em > 0 then
+		frac = (session.ex or 0) / session.em
+	end
+	if frac < 0 then
+		frac = 0
+	elseif frac > 1 then
+		frac = 1
+	end
+	return session.el, frac
+end
+
 function ns.DB:RecapNumbers(sessions)
 	local kills, quests, levels = 0, 0, 0
 	for i = 1, #sessions do
