@@ -3515,9 +3515,14 @@ function ns.Replay:HookMap()
 		end)
 	end
 	WorldMapFrame:HookScript("OnShow", function()
-		if ns.Replay.route then
-			ns.Replay:Redraw()
+		if not ns.Replay.route then
+			return
 		end
+		-- Map opened without the replay panel: always this character's live trail.
+		if ns.Replay:UseCurrentTrailOutsidePanel() then
+			return
+		end
+		ns.Replay:Redraw()
 	end)
 	WorldMapFrame:HookScript("OnHide", function()
 		ns.Replay.playing = false
@@ -3689,7 +3694,12 @@ function ns.Replay:CreateFrame()
 	end)
 	frame:SetScript("OnHide", function()
 		ns.Replay.playing = false
-		ns.Replay:ClearOverlay()
+		if ns.Replay.playButton then
+			ns.Replay.playButton:SetText(L["Play"])
+		end
+		-- Closing replay keeps the route on when it was on, and drops past /
+		-- other-character browse so a later standalone map shows the live trail.
+		ns.Replay:UseCurrentTrailOutsidePanel()
 	end)
 	frame:SetScript("OnUpdate", function(self, elapsed)
 		ns.Replay:OnUpdate(self, elapsed)
@@ -4155,6 +4165,26 @@ function ns.Replay:EnsureDot()
 	self.dot = dot
 end
 
+-- With the replay panel closed, the map route is this character's current trail
+-- only — not a past session or another character left selected in the panel.
+function ns.Replay:UseCurrentTrailOutsidePanel()
+	if self.frame and self.frame:IsShown() then
+		return false
+	end
+	self.levelLo, self.levelHi = nil, nil
+	if self.route then
+		self:SetMode("current", nil, true)
+	else
+		if ns.DB.playerKey then
+			ns.DB:SetView(ns.DB.playerKey)
+		end
+		self.mode = "current"
+		self.index = nil
+		self:ClearOverlay()
+	end
+	return true
+end
+
 function ns.Replay:ShowRoute()
 	self.route = true
 	if not self.sessions then
@@ -4166,6 +4196,11 @@ function ns.Replay:ShowRoute()
 	end
 	self:HookMap()
 	self:EnsureDot()
+	if not (self.frame and self.frame:IsShown()) then
+		if self:UseCurrentTrailOutsidePanel() then
+			return
+		end
+	end
 	self:Redraw()
 end
 
