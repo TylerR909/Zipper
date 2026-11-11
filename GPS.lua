@@ -340,6 +340,12 @@ function ns.GPS:SyncTaxi()
 		return
 	end
 	self.onTaxi = taxi
+	if taxi then
+		self.restSince = nil
+		if self.restKind then
+			self:EndRest()
+		end
+	end
 	self:Mark(taxi and Kind.FLIGHT_START or Kind.FLIGHT_END, 0)
 end
 
@@ -354,6 +360,12 @@ function ns.GPS:SyncMount()
 		return
 	end
 	self.mounted = mounted
+	if mounted then
+		self.restSince = nil
+		if self.restKind then
+			self:EndRest()
+		end
+	end
 	self:Mark(mounted and Kind.MOUNT or Kind.DISMOUNT, 0)
 end
 
@@ -436,8 +448,11 @@ function ns.GPS:ReadRest()
 			sleep = true
 			earned = earned or ready
 		elseif which == "camp" then
-			camp = true
-			earned = earned or ready
+			if ready then
+				earned = true
+			else
+				camp = true
+			end
 		end
 	end
 	return camp, sleep, earned
@@ -522,10 +537,14 @@ function ns.GPS:WatchRest()
 		return
 	end
 	self:EnsureRestWatch()
-	if self.restKind or self.moving or self.onTaxi then
-		if self.moving or self.onTaxi then
-			self.restSince = nil
+	if self.moving or self.onTaxi then
+		self.restSince = nil
+		if self.restKind then
+			self:EndRest()
 		end
+		return
+	end
+	if self.restKind then
 		return
 	end
 	if earned then

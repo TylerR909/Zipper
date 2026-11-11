@@ -155,7 +155,9 @@ local PROFESSION_WORD = {
 	fishing = 14,
 }
 
--- Campfire and sleeping-bag auras. A confirmed result has already earned the rest.
+-- Campfire and sleeping-bag auras.
+-- ready=false is proximity (at the fire). ready=true only confirms earned rest and
+-- can linger after you leave, so ReadRest must not treat it as still camping.
 function ns.RestSignal(name, spellID)
 	if spellID == 1283391 then
 		return "camp", false

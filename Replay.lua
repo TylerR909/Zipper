@@ -20,6 +20,9 @@ local PARK_SECONDS = 20
 local PARK_DIST = 0.0035
 local TRAVEL_GAP = 20
 local STAY_SECONDS = 240
+-- Camp/sleep stats: drop spans that moved, and brief Boosted Rest stop-loot flicker.
+local REST_STILL = PARK_DIST * 2
+local REST_STAT_MIN = 30
 local CHAPTER_MERGE = 90
 -- Previous-chapter: restart current unless near its start (timeline × speed) or
 -- a Previous click just restarted it (wall clock). High speeds outrun a fixed 1s.
@@ -1104,6 +1107,45 @@ function ns.Replay:MapYards(mapID)
 	return self.mapYards[mapID]
 end
 
+-- Camp/sleep time only when the path stayed put on foot. Old Boosted Rest marks
+-- kept firing while questing and sometimes stayed open through flight.
+function ns.Replay:RestStillSeconds(track, modes, sessionStart, fromT, toT)
+	if not fromT or not toT or toT <= fromT then
+		return 0
+	end
+	if (toT - fromT) < REST_STAT_MIN then
+		return 0
+	end
+	local scale = ns.COORD_SCALE
+	local travel = 0
+	local lastI
+	for i = 1, #track.t do
+		local at = sessionStart + (track.t[i] or 0)
+		if at > toT then
+			break
+		end
+		if at >= fromT then
+			local mode = modes and modes[i]
+			if mode and mode ~= ns.Travel.FOOT then
+				return 0
+			end
+			if lastI then
+				if track.m[i] ~= track.m[lastI] then
+					return 0
+				end
+				local dx = ((track.x[i] or 0) - (track.x[lastI] or 0)) / scale
+				local dy = ((track.y[i] or 0) - (track.y[lastI] or 0)) / scale
+				travel = travel + math.sqrt((dx * dx) + (dy * dy))
+				if travel > REST_STILL then
+					return 0
+				end
+			end
+			lastI = i
+		end
+	end
+	return toT - fromT
+end
+
 function ns.Replay:CollectStats(sessions)
 	local recorded, afk = 0, 0
 	local footTime, mountTime, flightTime = 0, 0, 0
@@ -1124,10 +1166,14 @@ function ns.Replay:CollectStats(sessions)
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local endT = session.seen or session.s
+		if self.mode == "level" and self.t1 and self.t1 < endT then
+			endT = self.t1
+		end
 		local clip = self.mode == "level" and self.levelLo and self.t0 and self.t1
 		if not clip then
-			if endT > session.s then
-				recorded = recorded + (endT - session.s)
+			local fullEnd = session.seen or session.s
+			if fullEnd > session.s then
+				recorded = recorded + (fullEnd - session.s)
 			end
 			kills = kills + (session.kills or 0)
 			turnins = turnins + (session.quests or 0)
@@ -1209,16 +1255,12 @@ function ns.Replay:CollectStats(sessions)
 			elseif kind == Kind.CAMP and (not extra or extra == 0) then
 				campStart = t
 			elseif kind == Kind.CAMP and extra == 1 and campStart then
-				if t > campStart then
-					camp = camp + (t - campStart)
-				end
+				camp = camp + self:RestStillSeconds(track, modes, session.s, campStart, t)
 				campStart = nil
 			elseif kind == Kind.SLEEP and (not extra or extra == 0) then
 				sleepStart = t
 			elseif kind == Kind.SLEEP and extra == 1 and sleepStart then
-				if t > sleepStart then
-					slept = slept + (t - sleepStart)
-				end
+				slept = slept + self:RestStillSeconds(track, modes, session.s, sleepStart, t)
 				sleepStart = nil
 			elseif kind == Kind.INSTANCE_ENTER then
 				instStart = t
@@ -1257,10 +1299,10 @@ function ns.Replay:CollectStats(sessions)
 			afk = afk + (endT - afkStart)
 		end
 		if campStart and endT > campStart then
-			camp = camp + (endT - campStart)
+			camp = camp + self:RestStillSeconds(track, modes, session.s, campStart, endT)
 		end
 		if sleepStart and endT > sleepStart then
-			slept = slept + (endT - sleepStart)
+			slept = slept + self:RestStillSeconds(track, modes, session.s, sleepStart, endT)
 		end
 		if instStart and endT > instStart and inside[instType] then
 			inside[instType] = inside[instType] + (endT - instStart)
