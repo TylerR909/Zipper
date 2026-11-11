@@ -1,4 +1,4 @@
-local _, ns = ...
+local ADDON_NAME, ns = ...
 local L = ns.L
 
 ns.DB = {}
@@ -1136,10 +1136,47 @@ function ns.DB:LevelRecapText(newLevel, now)
 	elseif deaths > 1 then
 		bits[#bits + 1] = string.format(L["You died %d times."], deaths)
 	end
+	local text = head
 	if #bits > 0 then
-		return head .. " " .. table.concat(bits, " ")
+		text = head .. " " .. table.concat(bits, " ")
 	end
-	return head
+	return text, lo, hi
+end
+
+function ns.DB:LevelChatLink(lo, hi)
+	if type(lo) ~= "number" or lo <= 0 then
+		return nil
+	end
+	if type(hi) ~= "number" or hi < lo then
+		hi = lo
+	end
+	local label
+	if hi ~= lo then
+		label = string.format(L["Replay levels %d–%d"], lo, hi)
+	else
+		label = string.format(L["Replay level %d"], lo)
+	end
+	return string.format("|cff71d5ff|Haddon:%s:level:%d:%d|h[%s]|h|r", ADDON_NAME, lo, hi, label)
+end
+
+function ns.DB:LevelFromLink(link)
+	if type(link) ~= "string" or link == "" or (issecretvalue and issecretvalue(link)) then
+		return nil
+	end
+	local body = string.match(link, "|H([^|]+)") or link
+	local linkType, addon, action, lo, hi = string.match(body, "^([^:]+):([^:]+):([^:]+):(%d+):(%d+)")
+	if linkType ~= "addon" or addon ~= ADDON_NAME or action ~= "level" then
+		return nil
+	end
+	lo = tonumber(lo)
+	hi = tonumber(hi)
+	if not lo or not hi or lo <= 0 or hi <= 0 then
+		return nil
+	end
+	if hi < lo then
+		lo, hi = hi, lo
+	end
+	return lo, hi
 end
 
 local QUIET_KEEP = {

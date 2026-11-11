@@ -874,9 +874,13 @@ function ns.GPS:OnEvent(event, ...)
 			local stored = ns.DB:NoteLevelUp(level)
 			self:Mark(Kind.LEVEL, level)
 			if stored then
-				local text = ns.DB:LevelRecapText(level)
+				local text, lo, hi = ns.DB:LevelRecapText(level)
 				if text then
 					ns:Print(text)
+					local link = ns.DB:LevelChatLink(lo, hi)
+					if link then
+						ns:Print(link)
+					end
 				end
 			end
 		end

@@ -3218,6 +3218,42 @@ function ns.Replay:StyleModeButtons()
 	end
 end
 
+function ns.Replay:ShowLevel(lo, hi)
+	lo = tonumber(lo)
+	hi = tonumber(hi) or lo
+	if not lo or lo <= 0 then
+		return
+	end
+	if not hi or hi < lo then
+		hi = lo
+	end
+	if ns.DB.playerKey then
+		ns.DB:SetView(ns.DB.playerKey)
+	end
+	self:CreateFrame()
+	self.playheads = self.playheads or {}
+	self.playheads[string.format("%s|level|%d|%d", ns.DB.viewKey or "", lo, hi)] = nil
+	self.levelLo = lo
+	self.levelHi = hi
+	self.playing = false
+	self:SetMode("level", nil, true)
+	self.playhead = self.t0
+	if self.frame and not self.frame:IsShown() then
+		self.frame:Show()
+	end
+	-- OnShow reloads the view. Park at the start again so Play is the next step.
+	self.playing = false
+	self.playhead = self.t0
+	if self.playButton then
+		self.playButton:SetText(L["Play"])
+	end
+	self:UpdateReadout()
+	if self.scroll and self.scroll.SetVerticalScroll then
+		self.scroll:SetVerticalScroll(0)
+	end
+	self:ShowRoute()
+end
+
 function ns.Replay:SelectLevel(lo, hi, extend)
 	self:RememberPlayhead()
 	if extend and self.levelLo and lo then
@@ -4394,6 +4430,24 @@ function ns.Replay:RegisterSkin()
 		ns.Replay.skin = S
 		ns.Replay:ApplySkin()
 	end)
+end
+
+-- Local addon links only. The client delivers the click through SetItemRef.
+if EventRegistry and EventRegistry.RegisterCallback then
+	EventRegistry:RegisterCallback("SetItemRef", function(_, link, _, button)
+		if button and button ~= "LeftButton" then
+			return
+		end
+		local modified = IsModifiedClick and IsModifiedClick()
+		if modified and not (issecretvalue and issecretvalue(modified)) then
+			return
+		end
+		local lo, hi = ns.DB:LevelFromLink(link)
+		if not lo then
+			return
+		end
+		ns.Replay:ShowLevel(lo, hi)
+	end, ns.Replay)
 end
 
 function ns.Replay:Init()
