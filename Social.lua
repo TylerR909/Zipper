@@ -2,10 +2,11 @@ local _, ns = ...
 
 -- Roster only. A person is saved after a quest, a finished objective, a kill,
 -- a death, or an instance while they were actually with you. Being invited
--- is not enough, and neither is a party member on another continent.
+-- is not enough, and neither is a party member across the zone.
 -- "With you" is about 250 yards, the same bubble the party frames use.
 -- Stepping past it for a minute and a half still counts. A different zone does not,
--- unless they are visibly here and the zone text is just stale.
+-- unless they are visibly here and the zone text is just stale. Visibility alone
+-- is not near enough: party members stay "visible" far across the map.
 -- Objective ticks are not stored. Finishing one only marks the span as worth keeping.
 --
 -- A reload does not guess who joined while the UI was down. People already
@@ -281,16 +282,10 @@ function ns.Social:UnitFor(guid)
 	return nil
 end
 
--- Visible, or inside the 40-yard interact check. A false interact check is
--- just "not in melee", which is not far.
+-- Inside the ~40-yard party range check. UnitIsVisible is not used here:
+-- party and raid members stay "visible" across the zone.
 function ns.Social:LiveHere(unit)
-	if not unit then
-		return false
-	end
-	if UnitIsVisible and PlainBool(UnitIsVisible(unit)) == true then
-		return true
-	end
-	if not UnitInRange then
+	if not unit or not UnitInRange then
 		return false
 	end
 	local inRange, checked = UnitInRange(unit)
@@ -315,14 +310,21 @@ function ns.Social:ReadDistance(unit, reported)
 	return distance < NEAR_YARDS_SQUARED
 end
 
+function ns.Social:ZoneStale(guid)
+	local unit = self:UnitFor(guid)
+	return unit and UnitIsVisible and PlainBool(UnitIsVisible(unit)) == true or false
+end
+
 -- True when this person should share the moment and the clock.
--- Unknown zone and no distance reading still counts, so a late roster
--- does not drop someone who is standing next to you.
+-- Outdoors that means a real distance reading (or the short grace after one).
+-- Inside an instance the matching zone is the guard, because distance fails.
 function ns.Social:NearEnough(guid)
-	local row = self.seen and self.seen[guid]
-	if self:LiveHere(self:UnitFor(guid)) then
+	self:SampleDistance(guid)
+	local unit = self:UnitFor(guid)
+	if self:LiveHere(unit) then
 		return true
 	end
+	local row = self.seen and self.seen[guid]
 	local near = row and row.near
 	-- Indoor distance checks are not usable. The instance zone is the guard.
 	if near == false and self:InsideInstance() then
@@ -334,21 +336,30 @@ function ns.Social:NearEnough(guid)
 	local playerZone = self:PlayerZone()
 	local memberZone = row and PlainString(row.zone)
 	local zoneDiffers = playerZone and memberZone and playerZone ~= memberZone
+	-- Zone text can lag. Someone still visible may be here despite a stale name.
+	local zoneBlocks = zoneDiffers and not self:ZoneStale(guid)
 	if near == false and type(row.nearAt) == "number" then
 		local age = ns.DB:Now() - row.nearAt
-		if age <= NEAR_GRACE and not zoneDiffers then
+		if age <= NEAR_GRACE and not zoneBlocks then
 			return true
 		end
 		if age > NEAR_GRACE then
 			return false
 		end
 	end
-	if zoneDiffers then
+	if zoneBlocks then
 		return false
 	end
-	return true
+	if self:InsideInstance() then
+		return true
+	end
+	-- Outdoors with no usable distance reading: do not assume they are beside you.
+	return false
 end
 
+-- Proven beside you, so a later leave keeps the stretch instead of discarding it.
+-- Same zone outdoors is not enough: that is how a far roster slot used to stick.
+-- Inside an instance the matching zone is the proof, because distance fails.
 function ns.Social:Confirmed(guid)
 	local row = self.seen and self.seen[guid]
 	if type(row) == "table" and row.confirmed then
@@ -359,6 +370,9 @@ function ns.Social:Confirmed(guid)
 	end
 	if self:LiveHere(self:UnitFor(guid)) then
 		return true
+	end
+	if not self:InsideInstance() then
+		return false
 	end
 	local playerZone = self:PlayerZone()
 	local memberZone = row and PlainString(row.zone)
