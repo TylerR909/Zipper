@@ -448,12 +448,19 @@ function ns.Replay:BreaksPath(kind, extra)
 	if kind == Kind.SUMMON then
 		return not extra or extra == 0
 	end
-	if kind == Kind.PORTAL and extra and extra ~= 0 and C_Spell and C_Spell.GetSpellInfo then
-		local info = C_Spell.GetSpellInfo(extra)
-		local name = info and info.name
-		return type(name) == "string" and string.sub(name, 1, 9) == "Teleport:"
+	if kind ~= Kind.PORTAL or not extra or (issecretvalue and issecretvalue(extra)) or extra == 0 then
+		return false
 	end
-	return false
+	if not C_Spell or not C_Spell.GetSpellInfo then
+		return false
+	end
+	local info = C_Spell.GetSpellInfo(extra)
+	local name = info and info.name
+	-- A secret name still has type "string", and subscripting it throws.
+	if not name or (issecretvalue and issecretvalue(name)) or type(name) ~= "string" then
+		return false
+	end
+	return string.sub(name, 1, 9) == "Teleport:"
 end
 
 function ns.Replay:BreakTimes(sessions)
@@ -1362,10 +1369,10 @@ function ns.Replay:SpellTitle(spellID)
 	end
 	local info = C_Spell.GetSpellInfo(spellID)
 	local name = info and info.name
-	if type(name) == "string" and name ~= "" and not (issecretvalue and issecretvalue(name)) then
-		return name
+	if not name or (issecretvalue and issecretvalue(name)) or type(name) ~= "string" or name == "" then
+		return nil
 	end
-	return nil
+	return name
 end
 
 function ns.Replay:TrainerTitle(extra)
@@ -2428,7 +2435,6 @@ function ns.Replay:CollectChapters(sessions)
 			elseif kind == Kind.HEARTH then
 				chapterKind = "hearth"
 			elseif kind == Kind.PORTAL and self:BreaksPath(kind, extra) then
-				-- Teleport: into another zone. Same-zone hops only cut the trail.
 				local arrival = self:TeleportArrival(sessions, eventT, mapID)
 				if arrival then
 					chapterKind = "teleport"
@@ -3554,7 +3560,6 @@ function ns.Replay:HookMap()
 		if not ns.Replay.route then
 			return
 		end
-		-- Map opened without the replay panel: always this character's live trail.
 		if ns.Replay:UseCurrentTrailOutsidePanel() then
 			return
 		end
@@ -4201,8 +4206,6 @@ function ns.Replay:EnsureDot()
 	self.dot = dot
 end
 
--- With the replay panel closed, the map route is this character's current trail
--- only — not a past session or another character left selected in the panel.
 function ns.Replay:UseCurrentTrailOutsidePanel()
 	if self.frame and self.frame:IsShown() then
 		return false
