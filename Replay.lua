@@ -3296,9 +3296,7 @@ function ns.Replay:Redraw()
 end
 
 function ns.Replay:OnDataChanged()
-	local panel = self.frame and self.frame.IsShown and self.frame:IsShown()
-	local mapShown = WorldMapFrame and WorldMapFrame.IsShown and WorldMapFrame:IsShown()
-	if not panel and not (self.route and mapShown) then
+	if not self:HistoryDrawing() then
 		self.dirty = true
 		return
 	end
@@ -3865,15 +3863,32 @@ function ns.Replay:SetSpeed(speed)
 	self:StyleSpeedButtons()
 end
 
+function ns.Replay:HistoryDrawing()
+	local panel = self.frame and self.frame.IsShown and self.frame:IsShown()
+	if panel then
+		return true
+	end
+	local mapShown = WorldMapFrame and WorldMapFrame.IsShown and WorldMapFrame:IsShown()
+	return self.route and mapShown and true or false
+end
+
 function ns.Replay:OnUpdate(_, elapsed)
-	if GetTime() - (self.readoutAt or 0) >= 0.5 then
+	local drawing = self:HistoryDrawing()
+	if drawing and GetTime() - (self.readoutAt or 0) >= 0.5 then
 		self.readoutAt = GetTime()
 		self:UpdateRecap()
 		self:RefreshList()
 	end
+	-- Movement sets dirty even when the map and panel are closed. Do not unpack
+	-- every selected session for a redraw nobody can see.
 	if self.dirty and (GetTime() - (self.lastRedraw or 0)) >= 0.5 then
-		self:ReloadView()
-		self:Redraw()
+		if drawing then
+			self:ReloadView()
+			self:Redraw()
+		else
+			self.dirty = false
+			self:ReleaseIfIdle()
+		end
 	end
 	if self.playing and self.t0 then
 		self.playhead = self.playhead + (elapsed * self.speed)
