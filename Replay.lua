@@ -2896,6 +2896,21 @@ function ns.Replay:Jump(seconds)
 	self:SeekFraction(fraction, true)
 end
 
+-- Jump-to-start / jump-to-end. Pauses like scrub and time-jump so a seek to t0
+-- restores PreviewFullRoute and mid-route seeks keep the playhead-clipped trail.
+-- Chapter prev/next keep playing via SeekToTime alone.
+function ns.Replay:SeekToEdge(toEnd)
+	if not self.t0 or not self.t1 or self.t1 <= self.t0 then
+		return
+	end
+	self.playing = false
+	if self.playButton then
+		self.playButton:SetText(L["Play"])
+	end
+	self.chapterPrevSeekAt = nil
+	self:SeekFraction(toEnd and 1 or 0, true)
+end
+
 function ns.Replay:SeekFraction(fraction, immediate)
 	if not self.t0 or not self.t1 then
 		return
@@ -3836,10 +3851,32 @@ function ns.Replay:Layout(width, height)
 	inset:SetHeight(listH)
 	local y = -(listTop + listH + gap)
 	local frame = self.frame
+	if self.chapterStrip then
+		self.chapterStrip:ClearAllPoints()
+		self.chapterStrip:SetPoint("TOPLEFT", 14, y + 2)
+		self.chapterStrip:SetPoint("TOPRIGHT", -14, y + 2)
+		self.chapterStrip:SetHeight(32)
+	end
+	if self.chapterStart then
+		self.chapterStart:ClearAllPoints()
+		self.chapterStart:SetPoint("LEFT", self.chapterStrip, "LEFT", 4, 0)
+	end
 	self.chapterPrev:ClearAllPoints()
-	self.chapterPrev:SetPoint("TOPLEFT", 14, y)
+	if self.chapterStart then
+		self.chapterPrev:SetPoint("LEFT", self.chapterStart, "RIGHT", 2, 0)
+	else
+		self.chapterPrev:SetPoint("TOPLEFT", 14, y)
+	end
+	if self.chapterEnd then
+		self.chapterEnd:ClearAllPoints()
+		self.chapterEnd:SetPoint("RIGHT", self.chapterStrip, "RIGHT", -4, 0)
+	end
 	self.chapterNext:ClearAllPoints()
-	self.chapterNext:SetPoint("TOPRIGHT", -14, y)
+	if self.chapterEnd then
+		self.chapterNext:SetPoint("RIGHT", self.chapterEnd, "LEFT", -2, 0)
+	else
+		self.chapterNext:SetPoint("TOPRIGHT", -14, y)
+	end
 	self.scrub:ClearAllPoints()
 	self.scrub:SetPoint("TOPLEFT", 16, y - 44)
 	self.scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
@@ -3900,11 +3937,11 @@ function ns.Replay:CreateFrame()
 	frame:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 1,
-		insets = { left = 1, right = 1, top = 1, bottom = 1 },
+		edgeSize = 2,
+		insets = { left = 2, right = 2, top = 2, bottom = 2 },
 	})
-	frame:SetBackdropColor(0.07, 0.07, 0.08, 0.97)
-	frame:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.95)
+	frame:SetBackdropColor(0.06, 0.06, 0.07, 0.98)
+	frame:SetBackdropBorderColor(0.78, 0.62, 0.28, 1)
 	frame:SetScript("OnDragStart", frame.StartMoving)
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
@@ -3959,19 +3996,26 @@ function ns.Replay:CreateFrame()
 	end
 
 	local header = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
-	header:SetColorTexture(0.11, 0.10, 0.09, 1)
-	header:SetPoint("TOPLEFT", 1, -1)
-	header:SetPoint("TOPRIGHT", -1, -1)
+	header:SetColorTexture(0.12, 0.10, 0.08, 1)
+	header:SetPoint("TOPLEFT", 2, -2)
+	header:SetPoint("TOPRIGHT", -2, -2)
 	header:SetHeight(46)
 
+	local headerSheen = frame:CreateTexture(nil, "BACKGROUND", nil, 2)
+	headerSheen:SetColorTexture(1, 0.86, 0.45, 0.07)
+	headerSheen:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
+	headerSheen:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
+	headerSheen:SetHeight(16)
+
 	local rule = frame:CreateTexture(nil, "BORDER")
-	rule:SetColorTexture(0.62, 0.50, 0.22, 0.85)
+	rule:SetColorTexture(0.85, 0.68, 0.28, 0.95)
 	rule:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
 	rule:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-	rule:SetHeight(1)
+	rule:SetHeight(2)
 
 	local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("TOPLEFT", 16, -8)
+	title:SetTextColor(1, 0.86, 0.45)
 	title:SetText(L["Zipper"])
 
 	local charButton = CreateFrame("Button", nil, frame, "BackdropTemplate")
@@ -4210,55 +4254,127 @@ function ns.Replay:CreateFrame()
 		jumpButtons[i] = jump
 	end
 
-	local chapterPrev = MakeButton(frame, "<", 36)
-	chapterPrev:SetPoint("TOPLEFT", 14, -298)
+	-- Forever paging arrows (same paths as Blizzard_PagingControls).
+	local PAGE_PREV_UP = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up"
+	local PAGE_PREV_DOWN = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down"
+	local PAGE_PREV_DISABLED = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled"
+	local PAGE_NEXT_UP = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
+	local PAGE_NEXT_DOWN = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down"
+	local PAGE_NEXT_DISABLED = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled"
+	local PAGE_HILIGHT = "Interface\\Buttons\\UI-Common-MouseHilight"
+
+	local function TipFor(button, text)
+		button:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(text)
+			GameTooltip:Show()
+		end)
+		button:SetScript("OnLeave", function(self)
+			if GameTooltip:IsOwned(self) then
+				GameTooltip:Hide()
+			end
+		end)
+	end
+
+	local function MakePageArrow(parent, direction)
+		local button = CreateFrame("Button", nil, parent)
+		button:SetSize(28, 28)
+		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		if direction < 0 then
+			button:SetNormalTexture(PAGE_PREV_UP)
+			button:SetPushedTexture(PAGE_PREV_DOWN)
+			button:SetDisabledTexture(PAGE_PREV_DISABLED)
+		else
+			button:SetNormalTexture(PAGE_NEXT_UP)
+			button:SetPushedTexture(PAGE_NEXT_DOWN)
+			button:SetDisabledTexture(PAGE_NEXT_DISABLED)
+		end
+		button:SetHighlightTexture(PAGE_HILIGHT, "ADD")
+		return button
+	end
+
+	-- No Forever first/last page art; stack two spellbook arrows for << / >>.
+	local function MakeEdgeArrow(parent, direction)
+		local button = CreateFrame("Button", nil, parent)
+		button:SetSize(30, 28)
+		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		local up = direction < 0 and PAGE_PREV_UP or PAGE_NEXT_UP
+		local down = direction < 0 and PAGE_PREV_DOWN or PAGE_NEXT_DOWN
+		local a = button:CreateTexture(nil, "ARTWORK")
+		a:SetTexture(up)
+		a:SetSize(20, 20)
+		local b = button:CreateTexture(nil, "ARTWORK")
+		b:SetTexture(up)
+		b:SetSize(20, 20)
+		if direction < 0 then
+			a:SetPoint("CENTER", -5, 0)
+			b:SetPoint("CENTER", 4, 0)
+		else
+			a:SetPoint("CENTER", -4, 0)
+			b:SetPoint("CENTER", 5, 0)
+		end
+		button.iconA = a
+		button.iconB = b
+		button.upTex = up
+		button.downTex = down
+		local hi = button:CreateTexture(nil, "HIGHLIGHT")
+		hi:SetTexture(PAGE_HILIGHT)
+		hi:SetBlendMode("ADD")
+		hi:SetAllPoints()
+		local function ShowUp(self)
+			self.iconA:SetTexture(self.upTex)
+			self.iconB:SetTexture(self.upTex)
+		end
+		button:SetScript("OnMouseDown", function(self)
+			self.iconA:SetTexture(self.downTex)
+			self.iconB:SetTexture(self.downTex)
+		end)
+		button:SetScript("OnMouseUp", ShowUp)
+		button:SetScript("OnHide", ShowUp)
+		return button
+	end
+
+	local chapterStrip = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+	chapterStrip:SetPoint("TOPLEFT", 14, -296)
+	chapterStrip:SetPoint("RIGHT", frame, "RIGHT", -14, 0)
+	chapterStrip:SetHeight(32)
+	chapterStrip:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	chapterStrip:SetBackdropColor(0.04, 0.03, 0.02, 0.85)
+	chapterStrip:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.9)
+
+	local chapterStart = MakeEdgeArrow(chapterStrip, -1)
+	chapterStart:SetPoint("LEFT", 4, 0)
+	chapterStart:SetScript("OnClick", function()
+		ns.Replay:SeekToEdge(false)
+	end)
+	TipFor(chapterStart, L["Jump to start"])
+
+	local chapterPrev = MakePageArrow(chapterStrip, -1)
+	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 2, 0)
 	chapterPrev:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(-1)
 	end)
-	chapterPrev:SetScript("OnEnter", function(self)
-		local font = self:GetFontString()
-		if font then
-			font:SetTextColor(1, 0.9, 0.6)
-		end
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["Previous chapter"])
-		GameTooltip:Show()
-	end)
-	chapterPrev:SetScript("OnLeave", function(self)
-		local font = self:GetFontString()
-		if font then
-			font:SetTextColor(1, 1, 1)
-		end
-		if GameTooltip:IsOwned(self) then
-			GameTooltip:Hide()
-		end
-	end)
+	TipFor(chapterPrev, L["Previous chapter"])
 
-	local chapterNext = MakeButton(frame, ">", 36)
-	chapterNext:SetPoint("TOPRIGHT", -14, -298)
+	local chapterEnd = MakeEdgeArrow(chapterStrip, 1)
+	chapterEnd:SetPoint("RIGHT", -4, 0)
+	chapterEnd:SetScript("OnClick", function()
+		ns.Replay:SeekToEdge(true)
+	end)
+	TipFor(chapterEnd, L["Jump to end"])
+
+	local chapterNext = MakePageArrow(chapterStrip, 1)
+	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", -2, 0)
 	chapterNext:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(1)
 	end)
-	chapterNext:SetScript("OnEnter", function(self)
-		local font = self:GetFontString()
-		if font then
-			font:SetTextColor(1, 0.9, 0.6)
-		end
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["Next chapter"])
-		GameTooltip:Show()
-	end)
-	chapterNext:SetScript("OnLeave", function(self)
-		local font = self:GetFontString()
-		if font then
-			font:SetTextColor(1, 1, 1)
-		end
-		if GameTooltip:IsOwned(self) then
-			GameTooltip:Hide()
-		end
-	end)
+	TipFor(chapterNext, L["Next chapter"])
 
-	local chapterText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	local chapterText = chapterStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	chapterText:SetPoint("LEFT", chapterPrev, "RIGHT", 6, 0)
 	chapterText:SetPoint("RIGHT", chapterNext, "LEFT", -6, 0)
 	chapterText:SetJustifyH("CENTER")
@@ -4336,8 +4452,11 @@ function ns.Replay:CreateFrame()
 	self:StyleSpeedButtons()
 	self.scrub = scrub
 	self.jumpButtons = jumpButtons
+	self.chapterStrip = chapterStrip
+	self.chapterStart = chapterStart
 	self.chapterPrev = chapterPrev
 	self.chapterNext = chapterNext
+	self.chapterEnd = chapterEnd
 	self.chapterText = chapterText
 	self.timeText = timeText
 	self.trailLabel = trailLabel
@@ -4713,8 +4832,8 @@ function ns.Replay:ApplySkin()
 				buttons[#buttons + 1] = self.jumpButtons[j]
 			end
 		end
-		buttons[#buttons + 1] = self.chapterPrev
-		buttons[#buttons + 1] = self.chapterNext
+		-- Chapter / start / end use Blizzard page-arrow textures; leave them
+		-- unsinned so Ellesmere does not replace the Forever spellbook icons.
 		buttons[#buttons + 1] = self.levelsButton
 		for i = 1, #buttons do
 			local button = buttons[i]
@@ -4722,6 +4841,12 @@ function ns.Replay:ApplySkin()
 				paint(skin.Button, button)
 				paint(skin.WhiteButtonLabel, button)
 			end
+		end
+		if self.chapterStrip then
+			paint(skin.Inset, self.chapterStrip)
+		end
+		if self.chapterText then
+			paint(skin.Font, self.chapterText)
 		end
 		local bars = {
 			self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar),
