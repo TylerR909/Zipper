@@ -584,6 +584,17 @@ function ns.Replay:UsingReplayTrail()
 	return self.frame and self.frame:IsShown()
 end
 
+-- New or scrubbed-to-start selections preview the whole route until Play.
+function ns.Replay:PreviewFullRoute()
+	if self.playing or not self:UsingReplayTrail() then
+		return false
+	end
+	if not self.t0 or not self.t1 or not self.playhead then
+		return false
+	end
+	return self.playhead <= self.t0 + 0.05
+end
+
 function ns.Replay:SnapTrail(minutes)
 	minutes = tonumber(minutes) or 0
 	if minutes <= 0 or minutes > 60 then
@@ -666,6 +677,9 @@ function ns.Replay:SyncTrailSlider()
 end
 
 function ns.Replay:TrailWindow()
+	if self:PreviewFullRoute() then
+		return nil
+	end
 	local minutes
 	if self:UsingReplayTrail() then
 		minutes = self:ReplayTrailMinutes()
@@ -679,6 +693,9 @@ function ns.Replay:TrailWindow()
 end
 
 function ns.Replay:TrailNow()
+	if self:PreviewFullRoute() then
+		return self.t1
+	end
 	if self:UsingReplayTrail() and self.playhead then
 		return self.playhead
 	end
@@ -3113,8 +3130,9 @@ function ns.Replay:ClearOverlay()
 	end
 end
 
-function ns.Replay:FollowPlayhead()
-	if not self.playing or self.settingMap then
+-- Move the open world map to the playhead map. Never opens the map.
+function ns.Replay:SnapMapToPlayhead()
+	if self.settingMap then
 		return
 	end
 	local mapID = self:PlayheadPlace()
@@ -3126,12 +3144,15 @@ function ns.Replay:FollowPlayhead()
 		return
 	end
 	self.settingMap = true
-	if C_Map and C_Map.OpenWorldMap and not map:IsShown() then
-		C_Map.OpenWorldMap(mapID)
-	else
-		map:SetMapID(mapID)
-	end
+	map:SetMapID(mapID)
 	self.settingMap = false
+end
+
+function ns.Replay:FollowPlayhead()
+	if not self.playing then
+		return
+	end
+	self:SnapMapToPlayhead()
 end
 
 function ns.Replay:Redraw()
@@ -3187,6 +3208,8 @@ function ns.Replay:SetMode(mode, index, alreadyRemembered)
 	self:RestorePlayhead()
 	self:StyleModeButtons()
 	self:UpdateReadout()
+	-- If the map is already open, jump to the scrubber's map (do not force it open).
+	self:SnapMapToPlayhead()
 	self:Redraw()
 end
 
@@ -3560,6 +3583,12 @@ function ns.Replay:TogglePlay()
 	if self.playing then
 		self.playing = false
 		self.playButton:SetText(L["Play"])
+		-- Scrubber still at the start: restore the full-route preview.
+		if self:PreviewFullRoute() and self.route then
+			self.trailDirty = false
+			self.lastTrailRedraw = GetTime()
+			self:Redraw()
+		end
 		return
 	end
 	if self.playhead >= self.t1 - 0.05 then
@@ -3572,6 +3601,10 @@ function ns.Replay:TogglePlay()
 	if map and not map:IsShown() and ToggleWorldMap then
 		ToggleWorldMap()
 	end
+	-- Drop the full-route preview and start drawing only up to the playhead.
+	self.trailDirty = false
+	self.lastTrailRedraw = GetTime()
+	self:Redraw()
 end
 
 function ns.Replay:StyleSpeedButtons()

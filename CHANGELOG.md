@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Selecting a session or level with the scrubber at the start shows the whole route on the map until you hit Play, which then clears it and redraws from the playhead.
+- Clicking a session or level moves an already-open world map to the scrubber's place without opening the map if it was closed.
 - Session and level replays always place a chapter marker at the start of the window, so leveling up and staying in the same zone no longer waits until a later zone change for the first chapter.
 
 ### Added
