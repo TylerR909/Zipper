@@ -4327,83 +4327,36 @@ function ns.Replay:CreateFrame()
 		jumpButtons[i] = jump
 	end
 
-	-- Forever paging arrows (same paths as Blizzard_PagingControls).
-	local PAGE_PREV_UP = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up"
-	local PAGE_PREV_DOWN = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down"
-	local PAGE_PREV_DISABLED = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled"
-	local PAGE_NEXT_UP = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
-	local PAGE_NEXT_DOWN = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down"
-	local PAGE_NEXT_DISABLED = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled"
-	local PAGE_HILIGHT = "Interface\\Buttons\\UI-Common-MouseHilight"
-
-	local function TipFor(button, text)
+	-- Typographic arrows sit on the gold strip with no extra button chrome.
+	local function MakeNavGlyph(parent, glyph, width)
+		local button = CreateFrame("Button", nil, parent)
+		button:SetSize(width or 22, 28)
+		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+		label:SetPoint("CENTER", 0, 0)
+		label:SetText(glyph)
+		label:SetTextColor(0.93, 0.90, 0.78)
+		button:SetFontString(label)
 		button:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_TOP")
-			GameTooltip:SetText(text)
-			GameTooltip:Show()
+			local font = self:GetFontString()
+			if font then
+				font:SetTextColor(1, 0.9, 0.6)
+			end
+			if self.navTip then
+				GameTooltip:SetOwner(self, "ANCHOR_TOP")
+				GameTooltip:SetText(self.navTip)
+				GameTooltip:Show()
+			end
 		end)
 		button:SetScript("OnLeave", function(self)
+			local font = self:GetFontString()
+			if font then
+				font:SetTextColor(0.93, 0.90, 0.78)
+			end
 			if GameTooltip:IsOwned(self) then
 				GameTooltip:Hide()
 			end
 		end)
-	end
-
-	local function MakePageArrow(parent, direction)
-		local button = CreateFrame("Button", nil, parent)
-		button:SetSize(28, 28)
-		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-		if direction < 0 then
-			button:SetNormalTexture(PAGE_PREV_UP)
-			button:SetPushedTexture(PAGE_PREV_DOWN)
-			button:SetDisabledTexture(PAGE_PREV_DISABLED)
-		else
-			button:SetNormalTexture(PAGE_NEXT_UP)
-			button:SetPushedTexture(PAGE_NEXT_DOWN)
-			button:SetDisabledTexture(PAGE_NEXT_DISABLED)
-		end
-		button:SetHighlightTexture(PAGE_HILIGHT, "ADD")
-		return button
-	end
-
-	-- No Forever first/last page art; stack two spellbook arrows for << / >>.
-	local function MakeEdgeArrow(parent, direction)
-		local button = CreateFrame("Button", nil, parent)
-		button:SetSize(30, 28)
-		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-		local up = direction < 0 and PAGE_PREV_UP or PAGE_NEXT_UP
-		local down = direction < 0 and PAGE_PREV_DOWN or PAGE_NEXT_DOWN
-		local a = button:CreateTexture(nil, "ARTWORK")
-		a:SetTexture(up)
-		a:SetSize(20, 20)
-		local b = button:CreateTexture(nil, "ARTWORK")
-		b:SetTexture(up)
-		b:SetSize(20, 20)
-		if direction < 0 then
-			a:SetPoint("CENTER", -5, 0)
-			b:SetPoint("CENTER", 4, 0)
-		else
-			a:SetPoint("CENTER", -4, 0)
-			b:SetPoint("CENTER", 5, 0)
-		end
-		button.iconA = a
-		button.iconB = b
-		button.upTex = up
-		button.downTex = down
-		local hi = button:CreateTexture(nil, "HIGHLIGHT")
-		hi:SetTexture(PAGE_HILIGHT)
-		hi:SetBlendMode("ADD")
-		hi:SetAllPoints()
-		local function ShowUp(self)
-			self.iconA:SetTexture(self.upTex)
-			self.iconB:SetTexture(self.upTex)
-		end
-		button:SetScript("OnMouseDown", function(self)
-			self.iconA:SetTexture(self.downTex)
-			self.iconB:SetTexture(self.downTex)
-		end)
-		button:SetScript("OnMouseUp", ShowUp)
-		button:SetScript("OnHide", ShowUp)
 		return button
 	end
 
@@ -4419,33 +4372,33 @@ function ns.Replay:CreateFrame()
 	chapterStrip:SetBackdropColor(0.04, 0.03, 0.02, 0.85)
 	chapterStrip:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.9)
 
-	local chapterStart = MakeEdgeArrow(chapterStrip, -1)
+	local chapterStart = MakeNavGlyph(chapterStrip, "«", 24)
 	chapterStart:SetPoint("LEFT", 4, 0)
+	chapterStart.navTip = L["Jump to start"]
 	chapterStart:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(false)
 	end)
-	TipFor(chapterStart, L["Jump to start"])
 
-	local chapterPrev = MakePageArrow(chapterStrip, -1)
-	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 2, 0)
+	local chapterPrev = MakeNavGlyph(chapterStrip, "‹", 22)
+	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 0, 0)
+	chapterPrev.navTip = L["Previous chapter"]
 	chapterPrev:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(-1)
 	end)
-	TipFor(chapterPrev, L["Previous chapter"])
 
-	local chapterEnd = MakeEdgeArrow(chapterStrip, 1)
+	local chapterEnd = MakeNavGlyph(chapterStrip, "»", 24)
 	chapterEnd:SetPoint("RIGHT", -4, 0)
+	chapterEnd.navTip = L["Jump to end"]
 	chapterEnd:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(true)
 	end)
-	TipFor(chapterEnd, L["Jump to end"])
 
-	local chapterNext = MakePageArrow(chapterStrip, 1)
-	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", -2, 0)
+	local chapterNext = MakeNavGlyph(chapterStrip, "›", 22)
+	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", 0, 0)
+	chapterNext.navTip = L["Next chapter"]
 	chapterNext:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(1)
 	end)
-	TipFor(chapterNext, L["Next chapter"])
 
 	local chapterText = chapterStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	chapterText:SetPoint("LEFT", chapterPrev, "RIGHT", 6, 0)
@@ -4914,8 +4867,8 @@ function ns.Replay:ApplySkin()
 				buttons[#buttons + 1] = self.jumpButtons[j]
 			end
 		end
-		-- Chapter / start / end use Blizzard page-arrow textures; leave them
-		-- unsinned so Ellesmere does not replace the Forever spellbook icons.
+		-- Chapter nav glyphs are bare text on the strip; skip Button paint so
+		-- Ellesmere does not wrap them in extra chrome.
 		buttons[#buttons + 1] = self.levelsButton
 		for i = 1, #buttons do
 			local button = buttons[i]
@@ -4929,6 +4882,15 @@ function ns.Replay:ApplySkin()
 		end
 		if self.chapterText then
 			paint(skin.Font, self.chapterText)
+		end
+		for _, nav in ipairs({ self.chapterStart, self.chapterPrev, self.chapterNext, self.chapterEnd }) do
+			if nav then
+				paint(skin.WhiteButtonLabel, nav)
+				local font = nav:GetFontString()
+				if font then
+					font:SetTextColor(0.93, 0.90, 0.78)
+				end
+			end
 		end
 		local bars = {
 			self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar),

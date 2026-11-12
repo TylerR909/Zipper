@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Replay chapter controls use the game's left/right page arrows, with jump-to-start and jump-to-end beside them, on a clearer gold-edged panel header.
+- Replay chapter controls use clean « ‹ › » marks on a gold-edged strip, with jump-to-start and jump-to-end beside previous and next chapter.
 
 ### Fixed
 
