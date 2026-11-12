@@ -30,6 +30,8 @@ ns.Kind = {
 	SLEEP = 21,
 	EAT = 22,
 	BOSS = 23,
+	FISH = 24,
+	IDLE = 25,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -64,6 +66,8 @@ ns.KindName = {
 	[21] = L["Sleeping bag"],
 	[22] = L["Eating"],
 	[23] = L["Boss"],
+	[24] = L["Fishing"],
+	[25] = L["Idle"],
 }
 
 ns.KindColor = {
@@ -90,6 +94,8 @@ ns.KindColor = {
 	[21] = { 0.55, 0.62, 0.95 },
 	[22] = { 0.72, 0.58, 0.32 },
 	[23] = { 1.00, 0.55, 0.20 },
+	[24] = { 0.25, 0.55, 0.95 },
+	[25] = { 0.62, 0.62, 0.68 },
 }
 
 -- Class file from UnitClass. Stored once per person, not on every path event.
@@ -186,6 +192,32 @@ function ns.MealSignal(name)
 		return false
 	end
 	return name == "Food" or name == "Drink" or name == "Refreshment"
+end
+
+-- Fishing is a channeled spell. Forever uses the Classic id; keep a few others.
+local FISHING_SPELL = {
+	[7620] = true,
+	[7731] = true,
+	[7732] = true,
+	[18248] = true,
+	[33095] = true,
+	[51294] = true,
+	[88868] = true,
+	[110410] = true,
+	[131474] = true,
+	[131476] = true,
+	[131490] = true,
+	[158743] = true,
+}
+
+function ns.FishingSpell(spellID, name)
+	if type(spellID) == "number" and not (issecretvalue and issecretvalue(spellID)) and FISHING_SPELL[spellID] then
+		return true
+	end
+	if type(name) == "string" and not (issecretvalue and issecretvalue(name)) and name == "Fishing" then
+		return true
+	end
+	return false
 end
 
 function ns.ProfessionId(line)

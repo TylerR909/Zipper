@@ -8,7 +8,11 @@ Not started. At max level there are no more dings, so time at the cap stays an o
 
 ## Pie charts
 
-Not started. Travel, combat, and AFK for a level.
+Not started. Travel, combat, idle, and AFK for a level.
+
+## Modular activities
+
+Not started. Adding a span activity (Fishing, Idle) still means hand-editing Enums, GPS, Replay, Config, DB, locales, and docs — see `adding-activities.md`. A registry for detect / busy / pin / stats / config would shrink the next ones.
 
 ## Party leftovers
 
@@ -37,3 +41,11 @@ Player text goes through AceLocale. English is the base. The other locale files 
 ### Dungeons, raids, and PvP
 
 A dungeon or raid is a chapter on the scrubber. Replay skips from the door to the exit, and indoor points are not drawn on the world map. Battlegrounds and arenas stay on the path. Login compares the live instance with the last saved door and writes the missing enter or leave, including across a relog. OneForAll's dungeon window is not used.
+
+### Fishing
+
+Channeled Fishing is its own span. Blue circle pin on the replay map. Cleared out of AFK and Idle. Not in the level-up recap. Settings → The road → Fishing.
+
+### Idle
+
+Stillness after 20 seconds, backdated to when you stopped, separate from AFK. Suppressed while eating, camping, fishing, in combat, moving, or in NPC panels. Empty playhead ring; Idle stats row. No map pin. Settings → The road → Idle.

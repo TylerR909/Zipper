@@ -12,7 +12,9 @@
 ### Added
 
 - Records your journey on the world map: where you walked, on foot, mounted, flying, or as a ghost.
-- Marks kills, quest pickups and turn-ins, deaths, hearths and teleports, flight paths, campfires, trainers, portals, summons, and group joins along the route.
+- Marks kills, quest pickups and turn-ins, deaths, hearths and teleports, flight paths, campfires, fishing, trainers, portals, summons, and group joins along the route.
+- Fishing is its own activity: blue circle pins on the replay map, kept out of AFK and idle, and left out of the level-up recap.
+- Idle stillness is recorded separately from AFK: recognized after 20 seconds standing still, backdated to when you stopped, and suppressed while eating, camping, fishing, in combat, or talking to an NPC.
 - Replay a session, a run of sessions, one level, a range of levels, or the whole journey, at up to 600× speed with chapter skips.
 - A level-up recap in chat: how long the level took, where it started and ended, and the kills, quests, and deaths along the way, with a link to replay it. `/zip ding` reprints it, and `/zip ding 28` recaps any finished level.
 - Remembers who you grouped with and where you first met, shown on player tooltips and when you hover the route.

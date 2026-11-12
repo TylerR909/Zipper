@@ -10,7 +10,7 @@ Zipper records your journey zipping around the map, so you can replay it later �
 
 ## What it tracks
 
-Where you walked — the trail across zones, on foot, mounted, flying, or as a ghost. Along it, marks for the events that happened: kills, quest pickups and turn-ins, deaths, hearths and teleports, flight paths, mounts, campfires, trainers, portals, summons, and joins.
+Where you walked — the trail across zones, on foot, mounted, flying, or as a ghost. Along it, marks for the events that happened: kills, quest pickups and turn-ins, deaths, hearths and teleports, flight paths, mounts, campfires, fishing, trainers, portals, summons, and joins.
 
 ## Play it back
 

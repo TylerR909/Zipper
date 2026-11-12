@@ -1292,6 +1292,7 @@ local QUIET_KEEP = {
 	[ns.Kind.TRAINER] = true,
 	[ns.Kind.CAMP] = true,
 	[ns.Kind.SLEEP] = true,
+	[ns.Kind.FISH] = true,
 }
 
 function ns.DB:SessionWorthKeeping(journey, session)
@@ -1311,7 +1312,7 @@ function ns.DB:SessionWorthKeeping(journey, session)
 	for i = 1, #(track.ek or {}) do
 		local kind = track.ek[i]
 		local extra = track.ea[i] or 0
-		if kind == ns.Kind.CAMP or kind == ns.Kind.SLEEP then
+		if kind == ns.Kind.CAMP or kind == ns.Kind.SLEEP or kind == ns.Kind.FISH then
 			if extra ~= 1 then
 				return true
 			end
@@ -1646,18 +1647,38 @@ function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 		session.quests = (session.quests or 0) + 1
 	end
 	local track = self:Track(session)
-	local offset = now - session.s
+	local offset = math.floor(now - session.s)
 	if offset < 0 then
 		offset = 0
 	end
-	local n = #track.ek + 1
-	track.et[n] = math.floor(offset)
-	track.ek[n] = kind
-	track.em[n] = mapID
-	track.ex[n] = self:PackCoord(x)
-	track.ey[n] = self:PackCoord(y)
-	track.ea[n] = extra or 0
-	session.seen = now
+	local n = #track.ek
+	local insertAt = n + 1
+	-- Idle start is backdated; keep et ordered so replay scans stay correct.
+	if n > 0 and offset < (track.et[n] or 0) then
+		insertAt = 1
+		for i = n, 1, -1 do
+			if (track.et[i] or 0) <= offset then
+				insertAt = i + 1
+				break
+			end
+			insertAt = i
+		end
+		for i = n, insertAt, -1 do
+			track.et[i + 1] = track.et[i]
+			track.ek[i + 1] = track.ek[i]
+			track.em[i + 1] = track.em[i]
+			track.ex[i + 1] = track.ex[i]
+			track.ey[i + 1] = track.ey[i]
+			track.ea[i + 1] = track.ea[i]
+		end
+	end
+	track.et[insertAt] = offset
+	track.ek[insertAt] = kind
+	track.em[insertAt] = mapID
+	track.ex[insertAt] = self:PackCoord(x)
+	track.ey[insertAt] = self:PackCoord(y)
+	track.ea[insertAt] = extra or 0
+	session.seen = self:Now()
 	if kind ~= ns.Kind.GROUP and self:CompanyQualifies(kind) then
 		self:CreditCompany(now)
 	end

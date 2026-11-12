@@ -366,7 +366,7 @@ function ns.Replay:AcquireMarker()
 				end
 			elseif pin.kind == Kind.GROUP then
 				ns.Replay:GroupTooltip(pin)
-			elseif pin.kind == Kind.PORTAL or pin.kind == Kind.TRAINER or pin.kind == Kind.SUMMON or pin.kind == Kind.CAMP or pin.kind == Kind.SLEEP then
+			elseif pin.kind == Kind.PORTAL or pin.kind == Kind.TRAINER or pin.kind == Kind.SUMMON or pin.kind == Kind.CAMP or pin.kind == Kind.SLEEP or pin.kind == Kind.FISH then
 				ns.Replay:TravelTooltip(pin)
 			else
 				GameTooltip:SetText(ns.KindName[pin.kind] or L["Event"], 1, 0.9, 0.4)
@@ -840,9 +840,9 @@ function ns.Replay:DrawMarkers(sessions)
 				local kind = track.ek[i]
 				local isKill = kind == Kind.KILL
 				local when = session.s + (track.et[i] or 0)
-				local restEnd = (kind == Kind.CAMP or kind == Kind.SLEEP) and track.ea[i] == 1
+				local spanEnd = (kind == Kind.CAMP or kind == Kind.SLEEP or kind == Kind.FISH) and track.ea[i] == 1
 				local outside = self.mode == "level" and self.t0 and (when < self.t0 or when > (self.t1 or when))
-				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and not restEnd and not outside and self:SegmentFade(when) > 0 then
+				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and kind ~= Kind.IDLE and not spanEnd and not outside and self:SegmentFade(when) > 0 then
 					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 					if px then
 						shown = shown + 1
@@ -854,6 +854,12 @@ function ns.Replay:DrawMarkers(sessions)
 							marker.texture:SetTexCoord(0, 1, 0, 1)
 							marker.texture:SetVertexColor(0.86, 0.12, 0.10, 1)
 							size = elite and ELITE_PIP or KILL_PIP
+						elseif kind == Kind.FISH then
+							local color = ns.KindColor[Kind.FISH]
+							marker.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
+							marker.texture:SetTexCoord(0, 1, 0, 1)
+							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
+							size = 10
 						elseif kind == Kind.LEVEL then
 							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
 							marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -955,8 +961,8 @@ function ns.Replay:PlayheadParked()
 	if not sessions or not when then
 		return false
 	end
-	local afk = false
-	local camp, sleep, meal = false, false, false
+	local afk, idle = false, false
+	local camp, sleep, meal, fish = false, false, false, false
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
@@ -971,6 +977,10 @@ function ns.Replay:PlayheadParked()
 				afk = true
 			elseif kind == Kind.AFK_END then
 				afk = false
+			elseif kind == Kind.IDLE and (not extra or extra == 0) then
+				idle = true
+			elseif kind == Kind.IDLE and extra == 1 then
+				idle = false
 			elseif kind == Kind.CAMP and (not extra or extra == 0) then
 				afk = false
 				camp = true
@@ -986,13 +996,18 @@ function ns.Replay:PlayheadParked()
 				meal = true
 			elseif kind == Kind.EAT and extra == 1 then
 				meal = false
+			elseif kind == Kind.FISH and (not extra or extra == 0) then
+				afk = false
+				fish = true
+			elseif kind == Kind.FISH and extra == 1 then
+				fish = false
 			end
 		end
 	end
-	if camp or sleep or meal then
+	if camp or sleep or meal or fish then
 		return false
 	end
-	if afk then
+	if idle or afk then
 		return true
 	end
 	local s1, i1, s2, i2 = Locate(sessions, when)
@@ -1167,7 +1182,7 @@ function ns.Replay:RestStillSeconds(track, modes, sessionStart, fromT, toT)
 end
 
 function ns.Replay:CollectStats(sessions)
-	local recorded, afk = 0, 0
+	local recorded, afk, idle = 0, 0, 0
 	local footTime, mountTime, flightTime = 0, 0, 0
 	local footYards, mountYards, flightYards = 0, 0, 0
 	local yardsKnown = false
@@ -1253,7 +1268,7 @@ function ns.Replay:CollectStats(sessions)
 			end
 			end
 		end
-		local afkStart, instStart, instType, campStart, sleepStart
+		local afkStart, idleStart, instStart, instType, campStart, sleepStart
 		for i = 1, #(track.ek or {}) do
 			local kind = track.ek[i]
 			local t = session.s + (track.et[i] or 0)
@@ -1272,6 +1287,13 @@ function ns.Replay:CollectStats(sessions)
 					afk = afk + (t - afkStart)
 				end
 				afkStart = nil
+			elseif kind == Kind.IDLE and (not extra or extra == 0) then
+				idleStart = t
+			elseif kind == Kind.IDLE and extra == 1 and idleStart then
+				if t > idleStart then
+					idle = idle + (t - idleStart)
+				end
+				idleStart = nil
 			elseif kind == Kind.CAMP and (not extra or extra == 0) then
 				campStart = t
 			elseif kind == Kind.CAMP and extra == 1 and campStart then
@@ -1317,6 +1339,9 @@ function ns.Replay:CollectStats(sessions)
 		if afkStart and endT > afkStart then
 			afk = afk + (endT - afkStart)
 		end
+		if idleStart and endT > idleStart then
+			idle = idle + (endT - idleStart)
+		end
 		if campStart and endT > campStart then
 			camp = camp + self:RestStillSeconds(track, modes, session.s, campStart, endT)
 		end
@@ -1355,6 +1380,7 @@ function ns.Replay:CollectStats(sessions)
 		{ L["On foot"], FormatClock(footTime) },
 		{ L["Mounted"], FormatClock(mountTime) },
 		{ L["Flight path"], FormatClock(flightTime) },
+		{ L["Idle"], FormatClock(idle) },
 		{ L["AFK"], FormatClock(afk) },
 		{ L["Camped"], FormatClock(camp) },
 		{ L["Slept"], FormatClock(slept) },
@@ -1462,6 +1488,8 @@ function ns.Replay:TravelTooltip(pin)
 		GameTooltip:SetText(L["Campfire"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.SLEEP then
 		GameTooltip:SetText(L["Sleeping bag"], color[1], color[2], color[3])
+	elseif pin.kind == Kind.FISH then
+		GameTooltip:SetText(L["Fishing"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.TRAINER then
 		GameTooltip:SetText(self:TrainerTitle(pin.extra), color[1], color[2], color[3])
 	elseif pin.extra and pin.extra > 0 then

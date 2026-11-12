@@ -278,15 +278,22 @@ function ns.GPS:SampleClock()
 end
 
 function ns.GPS:Mark(kind, extra)
+	return self:MarkAt(kind, extra, ns.DB:Now())
+end
+
+function ns.GPS:MarkAt(kind, extra, when)
 	if not ns.Config:WantsKind(kind) then
 		return true
+	end
+	if type(when) ~= "number" then
+		when = ns.DB:Now()
 	end
 	self:ConsiderSample(0, true)
 	local mapID, x, y = self:ReadPosition()
 	if not mapID then
 		return false
 	end
-	ns.DB:AddEvent(kind, mapID, x, y, ns.DB:Now(), extra or 0)
+	ns.DB:AddEvent(kind, mapID, x, y, when, extra or 0)
 	Notify()
 	return true
 end
@@ -391,6 +398,9 @@ function ns.GPS:SyncTaxi()
 		if self.restKind then
 			self:EndRest()
 		end
+		self:ClearStill()
+	else
+		self.stillSince = nil
 	end
 	self:Mark(taxi and Kind.FLIGHT_START or Kind.FLIGHT_END, 0)
 end
@@ -423,7 +433,7 @@ function ns.GPS:SyncAFK()
 	if afk == nil then
 		return
 	end
-	if self.restKind or self.meal then
+	if self.restKind or self.meal or self.fishing then
 		if self.afk then
 			self.afk = false
 			self:Mark(Kind.AFK_END, 0)
@@ -525,6 +535,7 @@ function ns.GPS:BeginRest(kind)
 	if self.restKind then
 		self:EndRest()
 	end
+	self:ClearStill()
 	if self.afk then
 		self.afk = false
 		self:Mark(Kind.AFK_END, 0)
@@ -542,6 +553,7 @@ function ns.GPS:EndRest()
 	self.restKind = nil
 	self.restSince = nil
 	self:Mark(kind, 1)
+	self:ClearStill()
 	self:SyncAFK()
 end
 
@@ -644,6 +656,7 @@ function ns.GPS:BeginMeal()
 	if self.meal then
 		return
 	end
+	self:ClearStill()
 	if self.afk then
 		self.afk = false
 		self:Mark(Kind.AFK_END, 0)
@@ -658,6 +671,7 @@ function ns.GPS:EndMeal()
 	end
 	self.meal = false
 	self:Mark(Kind.EAT, 1)
+	self:ClearStill()
 	self:SyncAFK()
 end
 
@@ -670,6 +684,167 @@ function ns.GPS:WatchMeal()
 		self:BeginMeal()
 	else
 		self:EndMeal()
+	end
+end
+
+-- Brief pause between casts stays one fishing span so the map gets one pin.
+local FISH_END_GRACE = 2.5
+
+function ns.GPS:IsFishingChannel(spellID)
+	if ns.FishingSpell(spellID) then
+		return true
+	end
+	local name = SpellName(spellID)
+	if ns.FishingSpell(nil, name) then
+		return true
+	end
+	if not UnitChannelInfo then
+		return false
+	end
+	local channelName, _, _, _, _, _, _, channelID = UnitChannelInfo("player")
+	if ns.FishingSpell(channelID, channelName) then
+		return true
+	end
+	return false
+end
+
+function ns.GPS:BeginFish()
+	if not ns.Config:WantsKind(Kind.FISH) then
+		return
+	end
+	self.fishEndGen = (self.fishEndGen or 0) + 1
+	if self.fishing then
+		return
+	end
+	self:ClearStill()
+	if self.afk then
+		self.afk = false
+		self:Mark(Kind.AFK_END, 0)
+	end
+	self.fishing = true
+	self:Mark(Kind.FISH, 0)
+end
+
+function ns.GPS:EndFish()
+	self.fishEndGen = (self.fishEndGen or 0) + 1
+	if not self.fishing then
+		return
+	end
+	self.fishing = false
+	self:Mark(Kind.FISH, 1)
+	self:ClearStill()
+	self:SyncAFK()
+end
+
+function ns.GPS:ScheduleEndFish()
+	if not self.fishing then
+		return
+	end
+	self.fishEndGen = (self.fishEndGen or 0) + 1
+	local gen = self.fishEndGen
+	if C_Timer and C_Timer.After then
+		C_Timer.After(FISH_END_GRACE, function()
+			if self.active and self.fishing and self.fishEndGen == gen then
+				self:EndFish()
+			end
+		end)
+	else
+		self:EndFish()
+	end
+end
+
+function ns.GPS:WatchFish()
+	if not ns.Config:WantsKind(Kind.FISH) then
+		if self.fishing then
+			self:EndFish()
+		end
+		return
+	end
+	if self:IsFishingChannel() then
+		self:BeginFish()
+	elseif self.fishing then
+		self:ScheduleEndFish()
+	end
+end
+
+-- Recognized after this much stillness; the recorded span backdates to when
+-- stillness began. Same window as the parked playhead ring.
+local IDLE_RECOGNIZE = 20
+
+function ns.GPS:BusyForIdle()
+	return self.moving
+		or self.onTaxi
+		or self.inCombat
+		or self.restKind
+		or self.meal
+		or self.fishing
+		or self.npcBusy
+		or false
+end
+
+function ns.GPS:ClearStill()
+	self.stillSince = nil
+	if self.idle then
+		self:EndIdle()
+	end
+end
+
+function ns.GPS:SetNpcBusy(busy)
+	busy = busy and true or false
+	if self.npcBusy == busy then
+		return
+	end
+	self.npcBusy = busy
+	if busy then
+		self:ClearStill()
+	else
+		self.stillSince = nil
+	end
+end
+
+function ns.GPS:BeginIdle(when)
+	if not ns.Config:WantsKind(Kind.IDLE) then
+		return
+	end
+	if self.idle or self:BusyForIdle() then
+		return
+	end
+	if type(when) ~= "number" then
+		when = self.stillSince or ns.DB:Now()
+	end
+	if not self:MarkAt(Kind.IDLE, 0, when) then
+		return
+	end
+	self.idle = true
+end
+
+function ns.GPS:EndIdle()
+	if not self.idle then
+		return
+	end
+	self.idle = false
+	self:Mark(Kind.IDLE, 1)
+end
+
+function ns.GPS:WatchIdle()
+	if not ns.Config:WantsKind(Kind.IDLE) then
+		self:ClearStill()
+		return
+	end
+	if self:BusyForIdle() then
+		self:ClearStill()
+		return
+	end
+	local now = ns.DB:Now()
+	if not self.stillSince then
+		self.stillSince = now
+		return
+	end
+	if self.idle then
+		return
+	end
+	if now - self.stillSince >= IDLE_RECOGNIZE then
+		self:BeginIdle(self.stillSince)
 	end
 end
 
@@ -697,6 +872,11 @@ function ns.GPS:OnCombat(entered)
 	self.inCombat = entered and true or false
 	if was == self.inCombat then
 		return
+	end
+	if self.inCombat then
+		self:ClearStill()
+	else
+		self.stillSince = nil
 	end
 	if self.moving or self.onTaxi then
 		self:ConsiderSample(STEP_YARDS, false)
@@ -866,9 +1046,26 @@ function ns.GPS:EnsureEvents()
 	frame:RegisterEvent("QUEST_TURNED_IN")
 	frame:RegisterEvent("CONFIRM_SUMMON")
 	frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+	frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+	frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
 	frame:RegisterEvent("TRAINER_SHOW")
 	frame:RegisterEvent("TRAINER_UPDATE")
 	frame:RegisterEvent("TRAINER_CLOSED")
+	frame:RegisterEvent("GOSSIP_SHOW")
+	frame:RegisterEvent("GOSSIP_CLOSED")
+	frame:RegisterEvent("MERCHANT_SHOW")
+	frame:RegisterEvent("MERCHANT_CLOSED")
+	frame:RegisterEvent("MAIL_SHOW")
+	frame:RegisterEvent("MAIL_CLOSED")
+	frame:RegisterEvent("BANKFRAME_OPENED")
+	frame:RegisterEvent("BANKFRAME_CLOSED")
+	frame:RegisterEvent("AUCTION_HOUSE_SHOW")
+	frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
+	frame:RegisterEvent("QUEST_GREETING")
+	frame:RegisterEvent("QUEST_DETAIL")
+	frame:RegisterEvent("QUEST_PROGRESS")
+	frame:RegisterEvent("QUEST_COMPLETE")
+	frame:RegisterEvent("QUEST_FINISHED")
 	frame:RegisterEvent("UNIT_AURA")
 	frame:RegisterEvent("PARTY_KILL")
 	frame:RegisterEvent("BOSS_KILL")
@@ -893,6 +1090,7 @@ function ns.GPS:Tick()
 	self:SyncTaxi()
 	self:SyncInstance()
 	self:CheckSummon()
+	self:WatchIdle()
 	if self.needAnchor then
 		if self:ReadPosition() then
 			self:ConsiderSample(0, true)
@@ -920,10 +1118,16 @@ function ns.GPS:OnEvent(event, ...)
 		if self.meal then
 			self:EndMeal()
 		end
+		if self.fishing then
+			self:EndFish()
+		end
+		self:ClearStill()
 		self:ConsiderSample(STOP_YARDS, false)
 	elseif event == "PLAYER_STOPPED_MOVING" then
 		self.moving = false
+		self.stillSince = nil
 		self:ConsiderSample(STOP_YARDS, false)
+		self:WatchIdle()
 	elseif event == "PLAYER_STOPPED_TURNING" then
 		self:OnStopTurning()
 	elseif event == "PLAYER_REGEN_DISABLED" then
@@ -980,7 +1184,20 @@ function ns.GPS:OnEvent(event, ...)
 				end
 			end
 		end
+	elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+		local unit, _, spellID = ...
+		if not (issecretvalue and issecretvalue(unit)) and unit == "player" and self:IsFishingChannel(spellID) then
+			self:BeginFish()
+		end
+	elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+		local unit, _, spellID = ...
+		if not (issecretvalue and issecretvalue(unit)) and unit == "player" then
+			if self.fishing or self:IsFishingChannel(spellID) then
+				self:ScheduleEndFish()
+			end
+		end
 	elseif event == "TRAINER_SHOW" then
+		self:SetNpcBusy(true)
 		self.trainerSeen = false
 		if C_Timer and C_Timer.After then
 			C_Timer.After(0.2, function()
@@ -993,6 +1210,16 @@ function ns.GPS:OnEvent(event, ...)
 		self:OnTrainer()
 	elseif event == "TRAINER_CLOSED" then
 		self.trainerSeen = false
+		self:SetNpcBusy(false)
+	elseif event == "GOSSIP_SHOW" or event == "MERCHANT_SHOW" or event == "MAIL_SHOW"
+		or event == "BANKFRAME_OPENED" or event == "AUCTION_HOUSE_SHOW"
+		or event == "QUEST_GREETING" or event == "QUEST_DETAIL"
+		or event == "QUEST_PROGRESS" or event == "QUEST_COMPLETE" then
+		self:SetNpcBusy(true)
+	elseif event == "GOSSIP_CLOSED" or event == "MERCHANT_CLOSED" or event == "MAIL_CLOSED"
+		or event == "BANKFRAME_CLOSED" or event == "AUCTION_HOUSE_CLOSED"
+		or event == "QUEST_FINISHED" then
+		self:SetNpcBusy(false)
 	elseif event == "UNIT_AURA" then
 		local unit = ...
 		if unit == "player" and not (issecretvalue and issecretvalue(unit)) then
@@ -1041,10 +1268,17 @@ function ns.GPS:Start(continued)
 		self:RememberWorld()
 	end
 
+	self.npcBusy = false
+	self.stillSince = nil
+	if self.idle then
+		self:EndIdle()
+	end
 	self:SyncMount()
 	self:SyncAFK()
 	self:SyncTaxi()
 	self:WatchMeal()
+	self:WatchFish()
+	self:WatchIdle()
 
 	if not self.ticker then
 		self.ticker = C_Timer.NewTicker(1, function()
@@ -1056,8 +1290,12 @@ end
 
 function ns.GPS:Stop()
 	self:EndMeal()
+	self:EndFish()
 	self:EndRest()
 	self:StopRestWatch()
+	self:EndIdle()
+	self.stillSince = nil
+	self.npcBusy = false
 	self.active = false
 	self.moving = false
 	ns.DB:NoteProgress()
