@@ -60,6 +60,18 @@ local function IsPlainNumber(value)
 	return true
 end
 
+-- UnitIsAFK / IsMounted / UnitOnTaxi can return a secret boolean. `secret and true`
+-- is a boolean test and throws while Zipper is tainted.
+local function PlainBool(value, fallback)
+	if value == nil or (issecretvalue and issecretvalue(value)) then
+		if fallback == nil then
+			return nil
+		end
+		return fallback and true or false
+	end
+	return value and true or false
+end
+
 local function SpellName(spellID)
 	if not IsPlainNumber(spellID) or not C_Spell or not C_Spell.GetSpellInfo then
 		return nil
@@ -152,11 +164,7 @@ function ns.GPS:IsGhost()
 	if not UnitIsGhost then
 		return false
 	end
-	local ghost = UnitIsGhost("player")
-	if ghost == nil or (issecretvalue and issecretvalue(ghost)) then
-		return self.ghost and true or false
-	end
-	return ghost and true or false
+	return PlainBool(UnitIsGhost("player"), self.ghost) == true
 end
 
 function ns.GPS:SyncGhost()
@@ -359,7 +367,10 @@ function ns.GPS:OnBossKill(encounterID)
 end
 
 function ns.GPS:SyncTaxi()
-	local taxi = UnitOnTaxi("player") and true or false
+	local taxi = PlainBool(UnitOnTaxi("player"))
+	if taxi == nil then
+		return
+	end
 	if self.taxiReady ~= true then
 		self.onTaxi = taxi
 		if self.continued or not taxi then
@@ -385,7 +396,10 @@ function ns.GPS:SyncTaxi()
 end
 
 function ns.GPS:SyncMount()
-	local mounted = IsMounted() and true or false
+	local mounted = PlainBool(IsMounted())
+	if mounted == nil then
+		return
+	end
 	if self.mountReady ~= true then
 		self.mounted = mounted
 		self.mountReady = true
@@ -405,7 +419,10 @@ function ns.GPS:SyncMount()
 end
 
 function ns.GPS:SyncAFK()
-	local afk = UnitIsAFK("player") and true or false
+	local afk = PlainBool(UnitIsAFK("player"))
+	if afk == nil then
+		return
+	end
 	if self.restKind or self.meal then
 		if self.afk then
 			self.afk = false
@@ -439,11 +456,11 @@ function ns.GPS:AuraIndexSecret(index)
 	-- GetBuffDataByIndex throws while auras are secret and the caller is tainted.
 	-- The predicate is safe. inCombat is the fallback when that API is missing.
 	if C_Secrets and C_Secrets.ShouldUnitAuraIndexBeSecret then
-		local secret = C_Secrets.ShouldUnitAuraIndexBeSecret("player", index)
-		if secret == nil or (issecretvalue and issecretvalue(secret)) then
+		local secret = PlainBool(C_Secrets.ShouldUnitAuraIndexBeSecret("player", index))
+		if secret == nil then
 			return true
 		end
-		return secret and true or false
+		return secret
 	end
 	return self.inCombat and true or false
 end
@@ -717,10 +734,10 @@ function ns.GPS:CheckSummon()
 	if self.hearthUntil and now < self.hearthUntil then
 		return
 	end
-	if UnitIsGhost and UnitIsGhost("player") then
+	if self:IsGhost() then
 		return
 	end
-	if UnitOnTaxi("player") then
+	if PlainBool(UnitOnTaxi("player")) == true then
 		return
 	end
 
@@ -812,13 +829,13 @@ function ns.GPS:CombatLocked()
 	if not InCombatLockdown then
 		return false
 	end
-	local locked = InCombatLockdown()
-	-- In combat this boolean can be secret. A tainted `if locked` then falls
-	-- through, and the following RegisterEvent calls are forbidden.
-	if issecretvalue and issecretvalue(locked) then
+	-- In combat this boolean can be secret. Treat unknown as locked so we do
+	-- not RegisterEvent while the client would forbid it.
+	local locked = PlainBool(InCombatLockdown())
+	if locked == nil then
 		return true
 	end
-	return locked and true or false
+	return locked
 end
 
 function ns.GPS:EnsureEvents()
@@ -998,10 +1015,10 @@ function ns.GPS:Start(continued)
 	self.continued = continued and true or false
 	local moving = false
 	if IsPlayerMoving then
-		moving = IsPlayerMoving() and true or false
+		moving = PlainBool(IsPlayerMoving(), false) == true
 	end
 	self.moving = moving
-	self.inCombat = UnitAffectingCombat and UnitAffectingCombat("player") and true or false
+	self.inCombat = PlainBool(UnitAffectingCombat and UnitAffectingCombat("player"), false) == true
 	self.needAnchor = not self.continued
 	self.instanceReady = false
 	self.instanceExtra = nil
