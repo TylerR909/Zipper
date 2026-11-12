@@ -1190,23 +1190,33 @@ end
 
 function ns.Replay:StyleDot(mode)
 	local dot = self.dot
-	if not dot or dot.mode == mode then
+	if not dot then
+		return
+	end
+	-- ClassColor keys off the viewed journey. Switching characters keeps mode
+	-- "move", so also refresh when the view's class color changes.
+	local viewKey = ns.DB.viewKey or ns.DB.playerKey
+	local r, g, b
+	if mode == "fish" then
+		local color = ns.KindColor[Kind.FISH]
+		r, g, b = color[1], color[2], color[3]
+	else
+		r, g, b = self:ClassColor()
+	end
+	if dot.mode == mode and dot.colorView == viewKey and dot.colorR == r and dot.colorG == g and dot.colorB == b then
 		return
 	end
 	dot.mode = mode
+	dot.colorView = viewKey
+	dot.colorR, dot.colorG, dot.colorB = r, g, b
 	if mode == "fish" then
-		local color = ns.KindColor[Kind.FISH]
 		dot.texture:SetTexture(MEDIA_CIRCLE)
-		dot.texture:SetVertexColor(color[1], color[2], color[3], 1)
 	elseif mode == "parked" then
 		dot.texture:SetTexture(MEDIA_RING)
-		local r, g, b = self:ClassColor()
-		dot.texture:SetVertexColor(r, g, b, 1)
 	else
 		dot.texture:SetTexture(MEDIA_CIRCLE)
-		local r, g, b = self:ClassColor()
-		dot.texture:SetVertexColor(r, g, b, 1)
 	end
+	dot.texture:SetVertexColor(r, g, b, 1)
 end
 
 function ns.Replay:PositionDot(x, y)
