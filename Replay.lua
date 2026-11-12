@@ -32,6 +32,14 @@ local LINE_CAP = 500
 local MARKER_CAP = 300
 local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.9
 local SPEEDS = ns.Replay.speeds
+local MEDIA_CIRCLE = "Interface\\AddOns\\Zipper\\Media\\Circle"
+local MEDIA_RING = "Interface\\AddOns\\Zipper\\Media\\Ring"
+-- Quest pips stay darker than KindColor so dense clusters still read on the map.
+local QUEST_ACCEPT_R, QUEST_ACCEPT_G, QUEST_ACCEPT_B = 0.58, 0.44, 0.06
+local QUEST_TURNIN_R, QUEST_TURNIN_G, QUEST_TURNIN_B = 0.235, 0.702, 0.443
+local KILL_R, KILL_G, KILL_B = 0.86, 0.12, 0.10
+local DEATH_R, DEATH_G, DEATH_B = 0.72, 0.08, 0.08
+local LEVEL_R, LEVEL_G, LEVEL_B = 1.00, 0.92, 0.45
 
 local function PlainNumber(value)
 	return type(value) == "number" and not (issecretvalue and issecretvalue(value))
@@ -342,7 +350,8 @@ function ns.Replay:AcquireMarker()
 		marker:SetSize(12, 12)
 		marker.texture = marker:CreateTexture(nil, "OVERLAY")
 		marker.texture:SetAllPoints()
-		marker.texture:SetTexture("Interface\\BUTTONS\\WHITE8X8")
+		marker.texture:SetTexture(MEDIA_CIRCLE)
+		marker.pipSize = PIP
 		marker:EnableMouse(true)
 		marker.zipperPin = true
 		marker:SetScript("OnEnter", function(pin)
@@ -414,7 +423,57 @@ function ns.Replay:HideSpareMarkers()
 	for i = self.markerUsed + 1, #self.markers do
 		self.markers[i]:Hide()
 		self.markers[i].kind = nil
+		self.markers[i].pipSize = nil
 	end
+end
+
+-- Circle for dense marks; Ring for rarer milestones. Sizes stay small so kills
+-- and quest clusters do not blot out the route.
+function ns.Replay:PaintMarker(marker, kind, extra)
+	local texture = MEDIA_CIRCLE
+	local size = PIP
+	local r, g, b = 1, 0.82, 0.28
+	if kind == Kind.KILL then
+		local _, elite = ns.DB:ReadKill(extra)
+		r, g, b = KILL_R, KILL_G, KILL_B
+		size = elite and ELITE_PIP or KILL_PIP
+	elseif kind == Kind.FISH then
+		local color = ns.KindColor[Kind.FISH]
+		r, g, b = color[1], color[2], color[3]
+		size = 10
+	elseif kind == Kind.LEVEL then
+		texture = MEDIA_RING
+		r, g, b = LEVEL_R, LEVEL_G, LEVEL_B
+		size = 9
+	elseif kind == Kind.DEATH then
+		texture = MEDIA_RING
+		r, g, b = DEATH_R, DEATH_G, DEATH_B
+		size = 8
+	elseif kind == Kind.BOSS then
+		texture = MEDIA_RING
+		local color = ns.KindColor[Kind.BOSS]
+		r, g, b = color[1], color[2], color[3]
+		size = 9
+	elseif kind == Kind.GROUP then
+		local color = ns.KindColor[Kind.GROUP]
+		r, g, b = color[1], color[2], color[3]
+		size = 7
+	elseif kind == Kind.QUEST_ACCEPT then
+		r, g, b = QUEST_ACCEPT_R, QUEST_ACCEPT_G, QUEST_ACCEPT_B
+	elseif kind == Kind.QUEST_TURNIN then
+		r, g, b = QUEST_TURNIN_R, QUEST_TURNIN_G, QUEST_TURNIN_B
+	else
+		local color = ns.KindColor[kind]
+		if color then
+			r, g, b = color[1], color[2], color[3]
+		end
+		size = 7
+	end
+	marker.texture:SetTexture(texture)
+	marker.texture:SetTexCoord(0, 1, 0, 1)
+	marker.texture:SetVertexColor(r, g, b, 1)
+	marker.pipSize = size
+	return size
 end
 
 local function FirstIndexAtOrAfter(times, origin, threshold)
@@ -847,53 +906,7 @@ function ns.Replay:DrawMarkers(sessions)
 					if px then
 						shown = shown + 1
 						local marker = self:AcquireMarker()
-						local size = PIP
-						if isKill then
-							local _, elite = ns.DB:ReadKill(track.ea[i])
-							marker.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(0.86, 0.12, 0.10, 1)
-							size = elite and ELITE_PIP or KILL_PIP
-						elseif kind == Kind.FISH then
-							local color = ns.KindColor[Kind.FISH]
-							marker.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
-							size = 10
-						elseif kind == Kind.LEVEL then
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(1, 0.92, 0.45, 1)
-							size = 7
-						elseif kind == Kind.DEATH then
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(0.72, 0.08, 0.08, 1)
-							size = 8
-						elseif kind == Kind.GROUP then
-							local color = ns.KindColor[Kind.GROUP]
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
-							size = 7
-						elseif kind == Kind.QUEST_ACCEPT then
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(0.58, 0.44, 0.06, 1)
-						elseif kind == Kind.QUEST_TURNIN then
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(0.235, 0.702, 0.443, 1)
-						elseif kind == Kind.PORTAL or kind == Kind.TRAINER or kind == Kind.CAMP or kind == Kind.SLEEP then
-							local color = ns.KindColor[kind]
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(color[1], color[2], color[3], 1)
-						else
-							marker.texture:SetTexture("Interface\\Buttons\\WHITE8X8")
-							marker.texture:SetTexCoord(0, 1, 0, 1)
-							marker.texture:SetVertexColor(1, 0.82, 0.28, 1)
-						end
+						local size = self:PaintMarker(marker, kind, track.ea[i])
 						marker:SetAlpha(self:SegmentFade(when))
 						ns.Map:Use():FitPin(marker, size)
 						marker.kind = kind
@@ -3741,6 +3754,7 @@ function ns.Replay:HookMap()
 		if ns.Replay.playButton then
 			ns.Replay.playButton:SetText(L["Play"])
 		end
+		ns.Replay:HideMapLegend()
 		ns.Replay:ClearOverlay()
 	end)
 	local canvas = self:Canvas()
@@ -3773,7 +3787,8 @@ function ns.Replay:RescalePins()
 	local host = ns.Map:Use()
 	if self.markers then
 		for i = 1, self.markerUsed or 0 do
-			host:FitPin(self.markers[i], PIP)
+			local marker = self.markers[i]
+			host:FitPin(marker, marker.pipSize or PIP)
 		end
 	end
 	if self.dot then
@@ -4451,6 +4466,159 @@ function ns.Replay:RaiseMapButton(button)
 	button:SetFrameLevel(510)
 end
 
+local function LegendSwatchColor(entry)
+	if entry.r then
+		return entry.r, entry.g, entry.b
+	end
+	local color = ns.KindColor[entry.kind]
+	if color then
+		return color[1], color[2], color[3]
+	end
+	return 1, 0.82, 0.28
+end
+
+function ns.Replay:LegendEntries()
+	local fish = ns.KindColor[Kind.FISH]
+	local group = ns.KindColor[Kind.GROUP]
+	local hearth = ns.KindColor[Kind.HEARTH]
+	local portal = ns.KindColor[Kind.PORTAL]
+	local camp = ns.KindColor[Kind.CAMP]
+	local sleep = ns.KindColor[Kind.SLEEP]
+	local trainer = ns.KindColor[Kind.TRAINER]
+	local instance = ns.KindColor[Kind.INSTANCE_ENTER]
+	return {
+		{ label = L["Kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 8 },
+		{ label = L["Elite kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 11 },
+		{ label = L["Quest pickups"], texture = MEDIA_CIRCLE, r = QUEST_ACCEPT_R, g = QUEST_ACCEPT_G, b = QUEST_ACCEPT_B, size = 8 },
+		{ label = L["Quest turn-ins"], texture = MEDIA_CIRCLE, r = QUEST_TURNIN_R, g = QUEST_TURNIN_G, b = QUEST_TURNIN_B, size = 8 },
+		{ label = L["Death"], texture = MEDIA_RING, r = DEATH_R, g = DEATH_G, b = DEATH_B, size = 10 },
+		{ label = L["Level up"], texture = MEDIA_RING, r = LEVEL_R, g = LEVEL_G, b = LEVEL_B, size = 10 },
+		{ label = L["Fishing"], texture = MEDIA_CIRCLE, r = fish[1], g = fish[2], b = fish[3], size = 10 },
+		{ label = L["Joined"], texture = MEDIA_CIRCLE, r = group[1], g = group[2], b = group[3], size = 9 },
+		{ label = L["Hearth"], texture = MEDIA_CIRCLE, r = hearth[1], g = hearth[2], b = hearth[3], size = 9 },
+		{ label = L["Portal"], texture = MEDIA_CIRCLE, r = portal[1], g = portal[2], b = portal[3], size = 9 },
+		{ label = L["Campfire"], texture = MEDIA_CIRCLE, r = camp[1], g = camp[2], b = camp[3], size = 9 },
+		{ label = L["Sleeping bag"], texture = MEDIA_CIRCLE, r = sleep[1], g = sleep[2], b = sleep[3], size = 9 },
+		{ label = L["Trainer"], texture = MEDIA_CIRCLE, r = trainer[1], g = trainer[2], b = trainer[3], size = 9 },
+		{ label = L["Entered instance"], texture = MEDIA_CIRCLE, r = instance[1], g = instance[2], b = instance[3], size = 9 },
+	}
+end
+
+function ns.Replay:HideMapLegend()
+	self.legendWanted = false
+	if self.mapLegend then
+		self.mapLegend:Hide()
+	end
+end
+
+function ns.Replay:HideMapLegendSoon()
+	self.legendWanted = false
+	C_Timer.After(0.12, function()
+		if self.legendWanted then
+			return
+		end
+		local legend = self.mapLegend
+		local button = self.mapButton
+		if legend and legend:IsMouseOver() then
+			return
+		end
+		if button and button:IsMouseOver() then
+			return
+		end
+		self:HideMapLegend()
+	end)
+end
+
+function ns.Replay:EnsureMapLegend()
+	if self.mapLegend then
+		return self.mapLegend
+	end
+	local frame = CreateFrame("Frame", "ZipperMapLegend", UIParent, "BackdropTemplate")
+	frame:SetFrameStrata("TOOLTIP")
+	frame:SetClampedToScreen(true)
+	frame:EnableMouse(true)
+	frame:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1,
+	})
+	frame:SetBackdropColor(0.05, 0.05, 0.06, 0.94)
+	frame:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.9)
+	frame:Hide()
+
+	local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	title:SetPoint("TOPLEFT", 10, -8)
+	title:SetText(L["Map markers"])
+	title:SetTextColor(1, 0.82, 0)
+
+	local entries = self:LegendEntries()
+	local rows = {}
+	local y = -28
+	for i = 1, #entries do
+		local entry = entries[i]
+		local row = CreateFrame("Frame", nil, frame)
+		row:SetSize(168, 16)
+		row:SetPoint("TOPLEFT", 10, y)
+		local swatch = row:CreateTexture(nil, "ARTWORK")
+		local size = entry.size or 8
+		swatch:SetSize(size, size)
+		swatch:SetPoint("LEFT", 0, 0)
+		swatch:SetTexture(entry.texture or MEDIA_CIRCLE)
+		local r, g, b = LegendSwatchColor(entry)
+		swatch:SetVertexColor(r, g, b, 1)
+		local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		label:SetPoint("LEFT", swatch, "RIGHT", 8, 0)
+		label:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+		label:SetJustifyH("LEFT")
+		label:SetText(entry.label)
+		rows[i] = row
+		y = y - 16
+	end
+
+	y = y - 6
+	local rule = frame:CreateTexture(nil, "ARTWORK")
+	rule:SetColorTexture(0.62, 0.50, 0.22, 0.55)
+	rule:SetHeight(1)
+	rule:SetPoint("TOPLEFT", 10, y)
+	rule:SetPoint("TOPRIGHT", -10, y)
+
+	y = y - 8
+	local hints = {
+		L["Left click: show or hide the route."],
+		L["Right click: open the replay and show the route."],
+		L["Shift+right click: open settings."],
+	}
+	for i = 1, #hints do
+		local hint = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		hint:SetPoint("TOPLEFT", 10, y)
+		hint:SetPoint("TOPRIGHT", -10, y)
+		hint:SetJustifyH("LEFT")
+		hint:SetText(hints[i])
+		hint:SetTextColor(0.85, 0.85, 0.85)
+		y = y - 14
+	end
+
+	frame:SetSize(188, -y + 10)
+	frame:SetScript("OnEnter", function()
+		ns.Replay.legendWanted = true
+	end)
+	frame:SetScript("OnLeave", function()
+		ns.Replay:HideMapLegendSoon()
+	end)
+	self.mapLegend = frame
+	self.mapLegendRows = rows
+	return frame
+end
+
+function ns.Replay:ShowMapLegend(anchor)
+	local frame = self:EnsureMapLegend()
+	self.legendWanted = true
+	frame:ClearAllPoints()
+	frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 4)
+	frame:SetFrameStrata("TOOLTIP")
+	frame:Show()
+end
+
 function ns.Replay:StyleMapButton(button)
 	button:SetSize(32, 32)
 	self:RaiseMapButton(button)
@@ -4470,6 +4638,7 @@ function ns.Replay:StyleMapButton(button)
 	-- This client rejects modifier click names such as Shift-RightButtonUp.
 	button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	button:SetScript("OnClick", function(_, mouseButton)
+		ns.Replay:HideMapLegend()
 		local shift = false
 		if mouseButton == "RightButton" and IsShiftKeyDown then
 			shift = IsShiftKeyDown()
@@ -4486,15 +4655,10 @@ function ns.Replay:StyleMapButton(button)
 		end
 	end)
 	button:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:AddLine(L["Zipper"], 1, 0.82, 0)
-		GameTooltip:AddLine(L["Left click: show or hide the route."], 1, 1, 1, true)
-		GameTooltip:AddLine(L["Right click: open the replay and show the route."], 1, 1, 1, true)
-		GameTooltip:AddLine(L["Shift+right click: open settings."], 1, 1, 1, true)
-		GameTooltip:Show()
+		ns.Replay:ShowMapLegend(self)
 	end)
 	button:SetScript("OnLeave", function()
-		GameTooltip:Hide()
+		ns.Replay:HideMapLegendSoon()
 	end)
 	-- Krowi calls this on every map change before it reflows the column.
 	button.Refresh = function()
