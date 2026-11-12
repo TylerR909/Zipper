@@ -11,6 +11,7 @@
 
 ### Added
 
+- Replay speed buttons show a short hover tip that turns 30x into wall time, like "1 hr = 2 min".
 - Records your journey on the world map: where you walked, on foot, mounted, flying, or as a ghost.
 - Marks kills, quest pickups and turn-ins, deaths, hearths and teleports, flight paths, campfires, fishing, trainers, portals, summons, and group joins along the route.
 - Fishing is its own activity: blue circle pins on the replay map, kept out of AFK and idle, and left out of the level-up recap.

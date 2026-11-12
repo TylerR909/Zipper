@@ -3639,6 +3639,70 @@ function ns.Replay:TogglePlay()
 	self:Redraw()
 end
 
+-- Hover delay for speed tips. Forever has no built-in tooltip hover delay.
+local SPEED_TIP_DELAY = 0.5
+
+local function FormatSpeedWall(seconds)
+	seconds = math.floor((seconds or 0) + 0.5)
+	if seconds < 60 then
+		return string.format(L["%d sec"], seconds)
+	end
+	local totalMins = math.floor(seconds / 60)
+	local hours = math.floor(totalMins / 60)
+	local mins = totalMins % 60
+	if hours <= 0 then
+		return string.format(L["%d min"], totalMins)
+	end
+	if mins == 0 then
+		if hours == 1 then
+			return L["1 hr"]
+		end
+		return string.format(L["%d hr"], hours)
+	end
+	return string.format(L["%d hr %d min"], hours, mins)
+end
+
+function ns.Replay:CancelSpeedTooltip(button)
+	if not button then
+		return
+	end
+	if button.speedTip then
+		button.speedTip:Cancel()
+		button.speedTip = nil
+	end
+	if GameTooltip:IsOwned(button) then
+		GameTooltip:Hide()
+	end
+end
+
+function ns.Replay:ShowSpeedTooltip(button)
+	local rate = button and button.speed
+	if not rate or rate <= 0 then
+		return
+	end
+	GameTooltip:SetOwner(button, "ANCHOR_TOP")
+	GameTooltip:SetText(rate .. "x", 1, 0.86, 0.45)
+	GameTooltip:AddLine(string.format(L["1 hr = %s"], FormatSpeedWall(3600 / rate)), 1, 1, 1)
+	GameTooltip:Show()
+end
+
+function ns.Replay:ScheduleSpeedTooltip(button)
+	self:CancelSpeedTooltip(button)
+	if not button then
+		return
+	end
+	if not C_Timer or not C_Timer.NewTimer then
+		self:ShowSpeedTooltip(button)
+		return
+	end
+	button.speedTip = C_Timer.NewTimer(SPEED_TIP_DELAY, function()
+		button.speedTip = nil
+		if button:IsMouseOver() then
+			ns.Replay:ShowSpeedTooltip(button)
+		end
+	end)
+end
+
 function ns.Replay:StyleSpeedButtons()
 	local buttons = self.speedButtons
 	if not buttons then
@@ -4127,9 +4191,18 @@ function ns.Replay:CreateFrame()
 		speed.speed = rate
 		speed:SetPoint("TOPLEFT", 76 + ((i - 1) * (speedWidth + speedGap)), -418)
 		speed:SetScript("OnClick", function(button)
+			ns.Replay:CancelSpeedTooltip(button)
 			ns.Replay:SetSpeed(button.speed)
 		end)
-		speed:SetScript("OnLeave", function()
+		speed:SetScript("OnEnter", function(self)
+			local font = self:GetFontString()
+			if font then
+				font:SetTextColor(1, 0.9, 0.6)
+			end
+			ns.Replay:ScheduleSpeedTooltip(self)
+		end)
+		speed:SetScript("OnLeave", function(self)
+			ns.Replay:CancelSpeedTooltip(self)
 			ns.Replay:StyleSpeedButtons()
 		end)
 		speedButtons[i] = speed
