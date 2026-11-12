@@ -4328,12 +4328,17 @@ function ns.Replay:CreateFrame()
 	end
 
 	-- Typographic arrows sit on the gold strip with no extra button chrome.
+	-- Hit targets match the old 36×22 < / > MakeButtons; glyphs are scaled up.
 	local function MakeNavGlyph(parent, glyph, width)
 		local button = CreateFrame("Button", nil, parent)
-		button:SetSize(width or 22, 28)
+		button:SetSize(width or 36, 28)
 		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-		label:SetPoint("CENTER", 0, 0)
+		label:SetPoint("CENTER", 0, 1)
+		local face, _, flags = label:GetFont()
+		if face then
+			label:SetFont(face, 22, flags)
+		end
 		label:SetText(glyph)
 		label:SetTextColor(0.93, 0.90, 0.78)
 		button:SetFontString(label)
@@ -4372,28 +4377,28 @@ function ns.Replay:CreateFrame()
 	chapterStrip:SetBackdropColor(0.04, 0.03, 0.02, 0.85)
 	chapterStrip:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.9)
 
-	local chapterStart = MakeNavGlyph(chapterStrip, "«", 24)
-	chapterStart:SetPoint("LEFT", 4, 0)
+	local chapterStart = MakeNavGlyph(chapterStrip, "«", 36)
+	chapterStart:SetPoint("LEFT", 2, 0)
 	chapterStart.navTip = L["Jump to start"]
 	chapterStart:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(false)
 	end)
 
-	local chapterPrev = MakeNavGlyph(chapterStrip, "‹", 22)
+	local chapterPrev = MakeNavGlyph(chapterStrip, "‹", 36)
 	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 0, 0)
 	chapterPrev.navTip = L["Previous chapter"]
 	chapterPrev:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(-1)
 	end)
 
-	local chapterEnd = MakeNavGlyph(chapterStrip, "»", 24)
-	chapterEnd:SetPoint("RIGHT", -4, 0)
+	local chapterEnd = MakeNavGlyph(chapterStrip, "»", 36)
+	chapterEnd:SetPoint("RIGHT", -2, 0)
 	chapterEnd.navTip = L["Jump to end"]
 	chapterEnd:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(true)
 	end)
 
-	local chapterNext = MakeNavGlyph(chapterStrip, "›", 22)
+	local chapterNext = MakeNavGlyph(chapterStrip, "›", 36)
 	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", 0, 0)
 	chapterNext.navTip = L["Next chapter"]
 	chapterNext:SetScript("OnClick", function()
