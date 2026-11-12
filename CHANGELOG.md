@@ -14,7 +14,8 @@
 - Well-Rested no longer opens a sleeping-bag mark every time you pause between pulls; short false camp/sleep starts stay off the map so kill pips can show again.
 - A replay trail length counts played time, so a logout overnight no longer wipes the route when you keep playing the same level.
 - The finishing level-up ring sits above the class tip so it stays visible at the end of a level.
-- Same-zone hearths no longer open a new chapter; brief continent map samples no longer yank the replay camera out of the zone.
+- Brief continent map samples no longer yank the replay camera out of the zone.
+- Hearth keeps the cast-to-arrival route line, and hearth chapters read Hearthed - Zone.
 - Selecting a session or level with the scrubber at the start shows the whole route on the map until you hit Play, which then clears it and redraws from the playhead.
 - Clicking a session or level moves an already-open world map to the scrubber's place without opening the map if it was closed.
 - Opening the world map with the route still on no longer jumps away from your zone view.

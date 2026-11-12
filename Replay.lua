@@ -532,10 +532,11 @@ function ns.Replay:CrossesBreak(prevT, t, times, index)
 	return false, index
 end
 
--- Death, hearth, an accepted summon, and a mage teleport cut the trail so
--- replay never draws a line across the jump. Portal: and ritual casts stay put.
+-- Death and an accepted summon cut the trail so replay never draws a line
+-- across the jump. Hearth keeps the cast→arrival connector (same look as a
+-- same-zone teleport hop). Mage Teleport: still breaks; Portal: / ritual stay put.
 function ns.Replay:BreaksPath(kind, extra)
-	if kind == Kind.DEATH or kind == Kind.HEARTH then
+	if kind == Kind.DEATH then
 		return true
 	end
 	if kind == Kind.SUMMON then
@@ -2551,7 +2552,10 @@ function ns.Replay:ChapterName(kind, mapID, chapter)
 	end
 	local zone = self:MapTitle(mapID)
 	if kind == "hearth" then
-		return string.format(L["Hearth · %s"], zone)
+		if zone and zone ~= "" and zone ~= L["Zone"] then
+			return string.format(L["Hearthed - %s"], zone)
+		end
+		return L["Hearthed"]
 	elseif kind == "teleport" then
 		return string.format(L["Teleport · %s"], zone)
 	elseif kind == "land" then
@@ -2729,12 +2733,7 @@ function ns.Replay:CollectChapters(sessions)
 			if kind == Kind.FLIGHT_END then
 				chapterKind = "land"
 			elseif kind == Kind.HEARTH then
-				-- Same-zone hearth (inn in the zone you already occupy) is not a
-				-- new chapter; it still breaks the drawn path via BreaksPath.
-				local previous = chapters[#chapters]
-				if not previous or not mapID or mapID == 0 or previous.map ~= mapID then
-					chapterKind = "hearth"
-				end
+				chapterKind = "hearth"
 			elseif kind == Kind.PORTAL and self:BreaksPath(kind, extra) then
 				local arrival = self:TeleportArrival(sessions, eventT, mapID)
 				if arrival then
