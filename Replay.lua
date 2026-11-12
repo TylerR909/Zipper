@@ -3950,7 +3950,7 @@ function ns.Replay:Layout(width, height)
 		self.chapterStrip:ClearAllPoints()
 		self.chapterStrip:SetPoint("TOPLEFT", 14, y + 2)
 		self.chapterStrip:SetPoint("TOPRIGHT", -14, y + 2)
-		self.chapterStrip:SetHeight(32)
+		self.chapterStrip:SetHeight(36)
 	end
 	if self.chapterStart then
 		self.chapterStart:ClearAllPoints()
@@ -4359,16 +4359,16 @@ function ns.Replay:CreateFrame()
 	end
 
 	-- Typographic arrows sit on the gold strip with no extra button chrome.
-	-- Hit targets match the old 36×22 < / > MakeButtons; glyphs are scaled up.
+	-- Sized to read as large as the old 36px < / > MakeButtons.
 	local function MakeNavGlyph(parent, glyph, width)
 		local button = CreateFrame("Button", nil, parent)
-		button:SetSize(width or 36, 28)
+		button:SetSize(width or 40, 36)
 		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		label:SetPoint("CENTER", 0, 1)
 		local face, _, flags = label:GetFont()
 		if face then
-			label:SetFont(face, 22, flags)
+			label:SetFont(face, 30, flags)
 		end
 		label:SetText(glyph)
 		label:SetTextColor(0.93, 0.90, 0.78)
@@ -4399,7 +4399,7 @@ function ns.Replay:CreateFrame()
 	local chapterStrip = CreateFrame("Frame", nil, frame, "BackdropTemplate")
 	chapterStrip:SetPoint("TOPLEFT", 14, -296)
 	chapterStrip:SetPoint("RIGHT", frame, "RIGHT", -14, 0)
-	chapterStrip:SetHeight(32)
+	chapterStrip:SetHeight(36)
 	chapterStrip:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -4408,28 +4408,28 @@ function ns.Replay:CreateFrame()
 	chapterStrip:SetBackdropColor(0.04, 0.03, 0.02, 0.85)
 	chapterStrip:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.9)
 
-	local chapterStart = MakeNavGlyph(chapterStrip, "«", 36)
+	local chapterStart = MakeNavGlyph(chapterStrip, "«", 40)
 	chapterStart:SetPoint("LEFT", 2, 0)
 	chapterStart.navTip = L["Jump to start"]
 	chapterStart:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(false)
 	end)
 
-	local chapterPrev = MakeNavGlyph(chapterStrip, "‹", 36)
+	local chapterPrev = MakeNavGlyph(chapterStrip, "‹", 40)
 	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 0, 0)
 	chapterPrev.navTip = L["Previous chapter"]
 	chapterPrev:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(-1)
 	end)
 
-	local chapterEnd = MakeNavGlyph(chapterStrip, "»", 36)
+	local chapterEnd = MakeNavGlyph(chapterStrip, "»", 40)
 	chapterEnd:SetPoint("RIGHT", -2, 0)
 	chapterEnd.navTip = L["Jump to end"]
 	chapterEnd:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(true)
 	end)
 
-	local chapterNext = MakeNavGlyph(chapterStrip, "›", 36)
+	local chapterNext = MakeNavGlyph(chapterStrip, "›", 40)
 	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", 0, 0)
 	chapterNext.navTip = L["Next chapter"]
 	chapterNext:SetScript("OnClick", function()
