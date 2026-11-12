@@ -2602,6 +2602,25 @@ function ns.Replay:CollectChapters(sessions)
 		end
 		merged = kept
 	end
+	-- Session and level windows always open on a chapter. A zone visit that
+	-- began before the level (or session) is clipped away above, so ding-in-place
+	-- would otherwise wait until the next zone change for the first marker.
+	if self.t0 then
+		local map = ns.DB:MapAt(ns.DB.char, self.t0)
+		local first = merged[1]
+		local needsStart = not first or first.t > self.t0 + 1
+		if needsStart and first and first.kind ~= "instance" and (first.t - self.t0) <= CHAPTER_MERGE then
+			first.t = self.t0
+			if (not first.map or first.map == 0) and map then
+				first.map = map
+			end
+			first.name = self:ChapterName(first.kind, first.map, first)
+		elseif needsStart then
+			local start = { t = self.t0, map = map, kind = "zone" }
+			start.name = self:ChapterName("zone", map, start)
+			table.insert(merged, 1, start)
+		end
+	end
 	return merged
 end
 

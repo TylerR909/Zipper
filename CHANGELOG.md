@@ -2,6 +2,10 @@
 
 ## 0.1.0-beta
 
+### Fixed
+
+- Session and level replays always place a chapter marker at the start of the window, so leveling up and staying in the same zone no longer waits until a later zone change for the first chapter.
+
 ### Added
 
 - Records your journey on the world map: where you walked, on foot, mounted, flying, or as a ghost.
