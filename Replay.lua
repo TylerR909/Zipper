@@ -40,6 +40,9 @@ local QUEST_TURNIN_R, QUEST_TURNIN_G, QUEST_TURNIN_B = 0.235, 0.702, 0.443
 local KILL_R, KILL_G, KILL_B = 0.86, 0.12, 0.10
 local DEATH_R, DEATH_G, DEATH_B = 0.72, 0.08, 0.08
 local LEVEL_R, LEVEL_G, LEVEL_B = 1.00, 0.92, 0.45
+-- Elite portrait chrome is gold; keep the kill fill red and ring the pip.
+local ELITE_BORDER_R, ELITE_BORDER_G, ELITE_BORDER_B = 1.00, 0.82, 0.20
+local MAP_TYPE_ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 
 local function PlainNumber(value)
 	return type(value) == "number" and not (issecretvalue and issecretvalue(value))
@@ -348,6 +351,10 @@ function ns.Replay:AcquireMarker()
 	if not marker then
 		marker = CreateFrame("Frame", nil, canvas)
 		marker:SetSize(12, 12)
+		marker.border = marker:CreateTexture(nil, "ARTWORK")
+		marker.border:SetAllPoints()
+		marker.border:SetTexture(MEDIA_RING)
+		marker.border:Hide()
 		marker.texture = marker:CreateTexture(nil, "OVERLAY")
 		marker.texture:SetAllPoints()
 		marker.texture:SetTexture(MEDIA_CIRCLE)
@@ -433,8 +440,10 @@ function ns.Replay:PaintMarker(marker, kind, extra)
 	local texture = MEDIA_CIRCLE
 	local size = PIP
 	local r, g, b = 1, 0.82, 0.28
+	local elite = false
 	if kind == Kind.KILL then
-		local _, elite = ns.DB:ReadKill(extra)
+		local _
+		_, elite = ns.DB:ReadKill(extra)
 		r, g, b = KILL_R, KILL_G, KILL_B
 		size = elite and ELITE_PIP or KILL_PIP
 	elseif kind == Kind.FISH then
@@ -472,7 +481,24 @@ function ns.Replay:PaintMarker(marker, kind, extra)
 	marker.texture:SetTexture(texture)
 	marker.texture:SetTexCoord(0, 1, 0, 1)
 	marker.texture:SetVertexColor(r, g, b, 1)
+	if marker.border then
+		if elite then
+			-- Gold ring under the red fill; inset the fill so chrome peeks out.
+			marker.border:SetTexture(MEDIA_RING)
+			marker.border:SetVertexColor(ELITE_BORDER_R, ELITE_BORDER_G, ELITE_BORDER_B, 1)
+			marker.border:SetAllPoints()
+			marker.texture:ClearAllPoints()
+			marker.texture:SetPoint("TOPLEFT", 2, -2)
+			marker.texture:SetPoint("BOTTOMRIGHT", -2, 2)
+			marker.border:Show()
+		else
+			marker.border:Hide()
+			marker.texture:ClearAllPoints()
+			marker.texture:SetAllPoints()
+		end
+	end
 	marker.pipSize = size
+	marker.milestone = kind == Kind.LEVEL or kind == Kind.DEATH or kind == Kind.BOSS
 	return size
 end
 
@@ -967,7 +993,15 @@ function ns.Replay:DrawMarkers(sessions)
 						marker.when = when
 						marker.session = session
 						ns.Map:Use():Place(marker, px, py)
-						marker:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + (isKill and 3 or 5))
+						-- Level/death/boss sit above the class tip (+15) so the
+						-- finishing ding ring is not covered at the playhead.
+						local bump = 5
+						if marker.milestone then
+							bump = 18
+						elseif isKill then
+							bump = 3
+						end
+						marker:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + bump)
 						marker:Show()
 					end
 				end
@@ -2631,7 +2665,12 @@ function ns.Replay:CollectChapters(sessions)
 			if kind == Kind.FLIGHT_END then
 				chapterKind = "land"
 			elseif kind == Kind.HEARTH then
-				chapterKind = "hearth"
+				-- Same-zone hearth (inn in the zone you already occupy) is not a
+				-- new chapter; it still breaks the drawn path via BreaksPath.
+				local previous = chapters[#chapters]
+				if not previous or not mapID or mapID == 0 or previous.map ~= mapID then
+					chapterKind = "hearth"
+				end
 			elseif kind == Kind.PORTAL and self:BreaksPath(kind, extra) then
 				local arrival = self:TeleportArrival(sessions, eventT, mapID)
 				if arrival then
@@ -3238,6 +3277,41 @@ function ns.Replay:ClearOverlay()
 	end
 end
 
+-- Login/hearth often logs 1–2 samples on the continent before the zone map.
+-- Do not yank the open map up to Continent/World for those blips.
+function ns.Replay:MapTooWide(mapID)
+	if not mapID or not C_Map or not C_Map.GetMapInfo then
+		return false
+	end
+	local info = C_Map.GetMapInfo(mapID)
+	local mapType = info and info.mapType
+	return type(mapType) == "number" and mapType < MAP_TYPE_ZONE
+end
+
+function ns.Replay:NearbyZoneMap(when, window)
+	local sessions = self.sessions
+	if not sessions or not when then
+		return nil
+	end
+	window = window or 20
+	local best, bestDist
+	for s = 1, #sessions do
+		local session = sessions[s]
+		local track = ns.DB:Track(session)
+		for i = 1, #(track.t or {}) do
+			local mapID = track.m[i]
+			if mapID and not self:MapTooWide(mapID) then
+				local at = session.s + (track.t[i] or 0)
+				local dist = math.abs(at - when)
+				if dist <= window and (not bestDist or dist < bestDist) then
+					best, bestDist = mapID, dist
+				end
+			end
+		end
+	end
+	return best
+end
+
 -- Move the open world map to the playhead map. Never opens the map.
 function ns.Replay:SnapMapToPlayhead()
 	if self.settingMap then
@@ -3247,6 +3321,14 @@ function ns.Replay:SnapMapToPlayhead()
 	local map = self:EnsureMap()
 	if not mapID or not map or not map:IsShown() or not map.SetMapID or not map.GetMapID then
 		return
+	end
+	if self:MapTooWide(mapID) then
+		local zone = self:NearbyZoneMap(self.playhead, 30)
+		if zone then
+			mapID = zone
+		else
+			return
+		end
 	end
 	if map:GetMapID() == mapID then
 		return
