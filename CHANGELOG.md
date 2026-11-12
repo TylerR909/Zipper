@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Standing still no longer keeps the whole journey unpacked in memory, so Zipper stops climbing while you are idle.
 - Well-Rested no longer opens a sleeping-bag mark every time you pause between pulls; short false camp/sleep starts stay off the map so kill pips can show again.
 - A replay trail length counts played time, so a logout overnight no longer wipes the route when you keep playing the same level.
 - Playing a level to the end keeps the finishing level-up ring on the map.

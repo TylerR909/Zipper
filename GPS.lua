@@ -72,6 +72,34 @@ local function PlainBool(value, fallback)
 	return value and true or false
 end
 
+-- Duration ticks (updatedAuraInstanceIDs only) do not change rest or food.
+-- A missing or secret payload still means "scan", same as a full update.
+local function AuraRosterChanged(info)
+	if type(info) ~= "table" or (issecretvalue and issecretvalue(info)) then
+		return true
+	end
+	if PlainBool(info.isFullUpdate) then
+		return true
+	end
+	local removed = info.removedAuraInstanceIDs
+	local added = info.addedAuras
+	if type(removed) == "table" then
+		if not (issecretvalue and issecretvalue(removed)) and next(removed) then
+			return true
+		end
+	elseif removed ~= nil then
+		return true
+	end
+	if type(added) == "table" then
+		if not (issecretvalue and issecretvalue(added)) and next(added) then
+			return true
+		end
+	elseif added ~= nil then
+		return true
+	end
+	return false
+end
+
 local function SpellName(spellID)
 	if not IsPlainNumber(spellID) or not C_Spell or not C_Spell.GetSpellInfo then
 		return nil
@@ -874,12 +902,12 @@ function ns.GPS:WatchIdle()
 		self:ClearStill()
 		return
 	end
+	if self.idle then
+		return
+	end
 	local now = ns.DB:Now()
 	if not self.stillSince then
 		self.stillSince = now
-		return
-	end
-	if self.idle then
 		return
 	end
 	if now - self.stillSince >= IDLE_RECOGNIZE then
@@ -1118,6 +1146,25 @@ function ns.GPS:EnsureEvents()
 	return true
 end
 
+-- World position is enough to know a standing player has not jumped.
+-- GetPlayerMapPosition builds a new object every call, and a flickering map
+-- id would otherwise record a point once a second.
+function ns.GPS:StillPlanted()
+	if self.moving or self.onTaxi or self.needAnchor or not UnitPosition then
+		return false
+	end
+	local px, py, _, instance = UnitPosition("player")
+	if not IsPlainNumber(px) or not IsPlainNumber(py) or (issecretvalue and issecretvalue(instance)) then
+		return false
+	end
+	if not IsPlainNumber(self.lastWorldX) or self.lastInstance ~= instance then
+		return false
+	end
+	local dx = px - self.lastWorldX
+	local dy = py - self.lastWorldY
+	return (dx * dx + dy * dy) < (JUMP_YARDS * JUMP_YARDS)
+end
+
 function ns.GPS:Tick()
 	if not self.active then
 		return
@@ -1143,7 +1190,7 @@ function ns.GPS:Tick()
 	end
 	if self.moving or self.onTaxi then
 		self:SampleClock()
-	else
+	elseif not self:StillPlanted() then
 		self:ConsiderSample(JUMP_YARDS, false)
 	end
 end
@@ -1264,8 +1311,8 @@ function ns.GPS:OnEvent(event, ...)
 		or event == "QUEST_FINISHED" then
 		self:SetNpcBusy(false)
 	elseif event == "UNIT_AURA" then
-		local unit = ...
-		if unit == "player" and not (issecretvalue and issecretvalue(unit)) then
+		local unit, updateInfo = ...
+		if unit == "player" and not (issecretvalue and issecretvalue(unit)) and AuraRosterChanged(updateInfo) then
 			self:WatchRest()
 			self:WatchMeal()
 		end

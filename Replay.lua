@@ -1989,9 +1989,20 @@ end
 
 function ns.Replay:StatsKey(sessions)
 	local parts = { tostring(#sessions) }
+	local live = ns.DB.session
+	local liveTracks = ns.DB.record and ns.DB.record.tracks
 	for i = 1, #sessions do
 		local session = sessions[i]
-		local track = ns.DB:Track(session)
+		local points, events = 0, 0
+		-- Only the recording in progress is already a table. Track() here used
+		-- to unpack every other session on the half-second readout.
+		if session == live and type(liveTracks) == "table" then
+			local track = liveTracks[session.id]
+			if type(track) == "table" then
+				points = #(track.t or {})
+				events = #(track.ek or {})
+			end
+		end
 		parts[#parts + 1] = string.format(
 			"%s.%s.%s.%s.%s.%s.%s.%s",
 			session.id or i,
@@ -2000,8 +2011,8 @@ function ns.Replay:StatsKey(sessions)
 			session.quests or 0,
 			session.el or 0,
 			session.ex or 0,
-			#track.t,
-			#(track.ek or {})
+			points,
+			events
 		)
 	end
 	parts[#parts + 1] = string.format(
@@ -3285,6 +3296,12 @@ function ns.Replay:Redraw()
 end
 
 function ns.Replay:OnDataChanged()
+	local panel = self.frame and self.frame.IsShown and self.frame:IsShown()
+	local mapShown = WorldMapFrame and WorldMapFrame.IsShown and WorldMapFrame:IsShown()
+	if not panel and not (self.route and mapShown) then
+		self.dirty = true
+		return
+	end
 	if not self.route then
 		self.dirty = true
 		return
@@ -3608,16 +3625,50 @@ function ns.Replay:LevelRowLabel(group)
 	return text
 end
 
+function ns.Replay:ListStamp(sessions)
+	local last = sessions and sessions[#sessions]
+	local seen = last and (last.seen or last.s) or 0
+	local stamp = table.concat({
+		tostring(sessions and #sessions or 0),
+		tostring(seen),
+		tostring(last and last.kills or 0),
+		tostring(last and last.quests or 0),
+		tostring(last and last.ex or 0),
+		self.mode or "",
+		tostring(self.index or ""),
+		tostring(self.sessionLo or ""),
+		tostring(self.sessionHi or ""),
+		tostring(self.levelLo or ""),
+		tostring(self.levelHi or ""),
+		tostring(ns.DB.viewKey or ""),
+	}, ":")
+	if self.mode == "level" then
+		stamp = stamp .. ":" .. math.floor(ns.DB:Now())
+	end
+	return stamp
+end
+
+function ns.Replay:ReleaseIfIdle()
+	if ns.DB and ns.DB.HistoryVisible and not ns.DB:HistoryVisible() then
+		ns.DB:ReleaseHistory()
+	end
+end
+
 function ns.Replay:RefreshList()
 	local content = self.listContent
 	if not content then
 		return
 	end
+	local sessions = ns.DB:Sessions()
+	local stamp = self:ListStamp(sessions)
+	if stamp == self.listStamp then
+		return
+	end
+	self.listStamp = stamp
 	if self.mode == "level" then
 		self:RefreshLevelList()
 		return
 	end
-	local sessions = ns.DB:Sessions()
 	if self.charButton and ns.DB.char then
 		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
 	end
@@ -3895,6 +3946,7 @@ function ns.Replay:HookMap()
 		end
 		ns.Replay:HideMapLegend()
 		ns.Replay:ClearOverlay()
+		ns.Replay:ReleaseIfIdle()
 	end)
 	local canvas = self:Canvas()
 	if canvas then
@@ -4088,6 +4140,7 @@ function ns.Replay:CreateFrame()
 		-- Closing replay keeps the route on when it was on, and drops past /
 		-- other-character browse so a later standalone map shows the live trail.
 		ns.Replay:UseCurrentTrailOutsidePanel()
+		ns.Replay:ReleaseIfIdle()
 	end)
 	frame:SetScript("OnUpdate", function(self, elapsed)
 		ns.Replay:OnUpdate(self, elapsed)
