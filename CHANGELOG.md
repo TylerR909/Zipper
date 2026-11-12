@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Well-Rested no longer opens a sleeping-bag mark every time you pause between pulls; short false camp/sleep starts stay off the map so kill pips can show again.
 - A replay trail length counts played time, so a logout overnight no longer wipes the route when you keep playing the same level.
 - Playing a level to the end keeps the finishing level-up ring on the map.
 - Selecting a session or level with the scrubber at the start shows the whole route on the map until you hit Play, which then clears it and redraws from the playhead.

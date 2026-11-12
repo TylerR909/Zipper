@@ -461,6 +461,8 @@ end
 
 local CAMPFIRE_AURA = 1283391
 local REST_SECONDS = 60
+-- Sleeping-bag cast arms a short window; Well-Rested alone must not keep it open.
+local SLEEP_ARM_SECONDS = 180
 
 function ns.GPS:AuraIndexSecret(index)
 	-- GetBuffDataByIndex throws while auras are secret and the caller is tainted.
@@ -507,8 +509,13 @@ function ns.GPS:ReadRest()
 		end
 		local which, ready = ns.RestSignal(name, spellID)
 		if which == "sleep" then
-			sleep = true
-			earned = earned or ready
+			-- Well-Rested is ready=true only. A future non-ready sleep aura would
+			-- mean real proximity; do not treat lingering earned rest as in-bag.
+			if ready then
+				earned = true
+			else
+				sleep = true
+			end
 		elseif which == "camp" then
 			if ready then
 				earned = true
@@ -518,6 +525,23 @@ function ns.GPS:ReadRest()
 		end
 	end
 	return camp, sleep, earned
+end
+
+function ns.GPS:BagArmed(now)
+	if not self.sleepArmed then
+		return false
+	end
+	now = now or ns.DB:Now()
+	if now - self.sleepArmed > SLEEP_ARM_SECONDS then
+		self.sleepArmed = nil
+		return false
+	end
+	return true
+end
+
+function ns.GPS:ArmSleepBag()
+	self.sleepArmed = ns.DB:Now()
+	self:EnsureRestWatch()
 end
 
 function ns.GPS:PlayerAura(spellID)
@@ -552,6 +576,9 @@ function ns.GPS:EndRest()
 	end
 	self.restKind = nil
 	self.restSince = nil
+	if kind == Kind.SLEEP then
+		self.sleepArmed = nil
+	end
 	self:Mark(kind, 1)
 	self:ClearStill()
 	self:SyncAFK()
@@ -578,6 +605,7 @@ end
 function ns.GPS:WatchRest()
 	if not ns.Config:WantsKind(Kind.CAMP) then
 		self.restSince = nil
+		self.sleepArmed = nil
 		if self.restKind then
 			self:EndRest()
 		end
@@ -588,12 +616,14 @@ function ns.GPS:WatchRest()
 	if camp == nil then
 		return
 	end
+	local now = ns.DB:Now()
+	local sleepProx = sleep or self:BagArmed(now)
+	-- Camp ends when you leave the fire. Sleep ends on move/combat, not when
+	-- Well-Rested flickers, or bag-armed windows would restart every pause.
 	if self.restKind == Kind.CAMP and not camp then
 		self:EndRest()
-	elseif self.restKind == Kind.SLEEP and not sleep then
-		self:EndRest()
 	end
-	if not camp and not sleep then
+	if not camp and not sleepProx then
 		self.restSince = nil
 		if not self.restKind then
 			self:StopRestWatch()
@@ -601,7 +631,7 @@ function ns.GPS:WatchRest()
 		return
 	end
 	self:EnsureRestWatch()
-	if self.moving or self.onTaxi then
+	if self.moving or self.onTaxi or self.inCombat then
 		self.restSince = nil
 		if self.restKind then
 			self:EndRest()
@@ -611,15 +641,24 @@ function ns.GPS:WatchRest()
 	if self.restKind then
 		return
 	end
-	if earned then
-		self:BeginRest(sleep and Kind.SLEEP or Kind.CAMP)
+	-- Earned camp benefits only start a camp while you are still at the fire.
+	-- Sleeping-bag / Well-Rested always needs the stillness timer so a recent
+	-- bag cast cannot spam starts between pulls.
+	if earned and camp then
+		self:BeginRest(Kind.CAMP)
 		return
 	end
-	local now = ns.DB:Now()
+	local want = camp and Kind.CAMP or (sleepProx and Kind.SLEEP) or nil
+	if not want then
+		return
+	end
 	if not self.restSince then
 		self.restSince = now
 	elseif now - self.restSince >= REST_SECONDS then
-		self:BeginRest(sleep and Kind.SLEEP or Kind.CAMP)
+		self:BeginRest(want)
+		if want == Kind.SLEEP then
+			self.sleepArmed = nil
+		end
 	end
 end
 
@@ -874,6 +913,10 @@ function ns.GPS:OnCombat(entered)
 		return
 	end
 	if self.inCombat then
+		self.restSince = nil
+		if self.restKind then
+			self:EndRest()
+		end
 		self:ClearStill()
 	else
 		self.stillSince = nil
@@ -1180,7 +1223,7 @@ function ns.GPS:OnEvent(event, ...)
 				elseif cast == "ritual" then
 					self:Mark(Kind.SUMMON, spellID)
 				elseif spellID == 1307230 or (name and string.find(name, "Sleeping Bag", 1, true)) then
-					self:EnsureRestWatch()
+					self:ArmSleepBag()
 				end
 			end
 		end
@@ -1295,6 +1338,7 @@ function ns.GPS:Stop()
 	self:StopRestWatch()
 	self:EndIdle()
 	self.stillSince = nil
+	self.sleepArmed = nil
 	self.npcBusy = false
 	self.active = false
 	self.moving = false

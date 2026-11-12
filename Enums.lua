@@ -167,6 +167,9 @@ local PROFESSION_WORD = {
 -- Campfire and sleeping-bag auras.
 -- ready=false is proximity (at the fire). ready=true only confirms earned rest and
 -- can linger after you leave, so ReadRest must not treat it as still camping.
+-- Well-Rested is earned-only: it stacks from a Cozy Sleeping Bag and sticks around
+-- while you quest, so it must not count as "in the bag" or every pause between
+-- pulls opens a sleep span.
 function ns.RestSignal(name, spellID)
 	if spellID == 1283391 then
 		return "camp", false

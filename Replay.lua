@@ -893,6 +893,32 @@ function ns.Replay:DrawPath(sessions)
 	self:HideSpareLines()
 end
 
+-- Camp/sleep starts that never stayed still (old Well-Rested spam) stay off the map.
+function ns.Replay:RestStartWorthDrawing(track, index, sessionStart)
+	local kind = track.ek[index]
+	if kind ~= Kind.CAMP and kind ~= Kind.SLEEP then
+		return true
+	end
+	if track.ea[index] == 1 then
+		return false
+	end
+	local startAt = sessionStart + (track.et[index] or 0)
+	for j = index + 1, #track.ek do
+		if track.ek[j] == kind then
+			local extra = track.ea[j]
+			local at = sessionStart + (track.et[j] or 0)
+			if extra == 1 then
+				return (at - startAt) >= REST_STAT_MIN
+			end
+			if not extra or extra == 0 then
+				return false
+			end
+		end
+	end
+	local stop = self.t1 or (ns.DB and ns.DB:Now()) or startAt
+	return (stop - startAt) >= REST_STAT_MIN
+end
+
 function ns.Replay:DrawMarkers(sessions)
 	self.markerUsed = 0
 	if not ns.Config:ShowMarkers() then
@@ -920,11 +946,14 @@ function ns.Replay:DrawMarkers(sessions)
 				local isKill = kind == Kind.KILL
 				local when = session.s + (track.et[i] or 0)
 				local spanEnd = (kind == Kind.CAMP or kind == Kind.SLEEP or kind == Kind.FISH) and track.ea[i] == 1
+				local shortRest = (kind == Kind.CAMP or kind == Kind.SLEEP)
+					and not spanEnd
+					and not self:RestStartWorthDrawing(track, i, session.s)
 				-- Level bounds and the ding mark share a timestamp; allow a 1.5s
 				-- pad so the finishing level-up pip is not clipped off the end.
 				local outside = self.mode == "level" and self.t0
 					and (when < self.t0 - 1.5 or when > ((self.t1 or when) + 1.5))
-				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and kind ~= Kind.IDLE and not spanEnd and not outside and self:SegmentFade(when) > 0 then
+				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and kind ~= Kind.IDLE and not spanEnd and not shortRest and not outside and self:SegmentFade(when) > 0 then
 					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 					if px then
 						shown = shown + 1
