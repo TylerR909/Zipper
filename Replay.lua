@@ -4853,7 +4853,7 @@ function ns.Replay:LegendEntries()
 	local instance = ns.KindColor[Kind.INSTANCE_ENTER]
 	return {
 		{ label = L["Kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 8 },
-		{ label = L["Elite kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 11 },
+		{ label = L["Elite kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 11, elite = true },
 		{ label = L["Quest pickup"], texture = MEDIA_CIRCLE, r = QUEST_ACCEPT_R, g = QUEST_ACCEPT_G, b = QUEST_ACCEPT_B, size = 8 },
 		{ label = L["Quest turn-in"], texture = MEDIA_CIRCLE, r = QUEST_TURNIN_R, g = QUEST_TURNIN_G, b = QUEST_TURNIN_B, size = 8 },
 		{ label = L["Death"], texture = MEDIA_RING, r = DEATH_R, g = DEATH_G, b = DEATH_B, size = 10 },
@@ -4925,15 +4925,29 @@ function ns.Replay:EnsureMapLegend()
 		local row = CreateFrame("Frame", nil, frame)
 		row:SetSize(contentWidth, 16)
 		row:SetPoint("TOPLEFT", 10, y)
-		local swatch = row:CreateTexture(nil, "ARTWORK")
 		local size = entry.size or 8
-		swatch:SetSize(size, size)
-		swatch:SetPoint("LEFT", 0, 0)
-		swatch:SetTexture(entry.texture or MEDIA_CIRCLE)
+		local swatchHost = CreateFrame("Frame", nil, row)
+		swatchHost:SetSize(size, size)
+		swatchHost:SetPoint("LEFT", 0, 0)
 		local r, g, b = LegendSwatchColor(entry)
-		swatch:SetVertexColor(r, g, b, 1)
+		if entry.elite then
+			local border = swatchHost:CreateTexture(nil, "ARTWORK")
+			border:SetAllPoints()
+			border:SetTexture(MEDIA_RING)
+			border:SetVertexColor(ELITE_BORDER_R, ELITE_BORDER_G, ELITE_BORDER_B, 1)
+			local fill = swatchHost:CreateTexture(nil, "OVERLAY")
+			fill:SetPoint("TOPLEFT", 2, -2)
+			fill:SetPoint("BOTTOMRIGHT", -2, 2)
+			fill:SetTexture(entry.texture or MEDIA_CIRCLE)
+			fill:SetVertexColor(r, g, b, 1)
+		else
+			local swatch = swatchHost:CreateTexture(nil, "ARTWORK")
+			swatch:SetAllPoints()
+			swatch:SetTexture(entry.texture or MEDIA_CIRCLE)
+			swatch:SetVertexColor(r, g, b, 1)
+		end
 		local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-		label:SetPoint("LEFT", swatch, "RIGHT", 8, 0)
+		label:SetPoint("LEFT", swatchHost, "RIGHT", 8, 0)
 		label:SetPoint("RIGHT", row, "RIGHT", 0, 0)
 		label:SetJustifyH("LEFT")
 		label:SetText(entry.label)
