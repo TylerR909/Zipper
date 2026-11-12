@@ -213,16 +213,11 @@ local function Encode64(raw)
 	return table.concat(out)
 end
 
-local DECODE64
-
 local function Decode64(text)
-	if not DECODE64 then
-		DECODE64 = {}
-		for i = 1, #B64 do
-			DECODE64[B64:sub(i, i)] = i - 1
-		end
+	local map = {}
+	for i = 1, #B64 do
+		map[B64:sub(i, i)] = i - 1
 	end
-	local map = DECODE64
 	local out = {}
 	text = (text or ""):gsub("%s", "")
 	local i = 1
@@ -414,89 +409,6 @@ function ns.DB:UnpackTrack(packed)
 	return track
 end
 
--- Skip `count` varints. A value ends on the first byte below 128.
-local function SkipVars(bytes, index, count)
-	local seen = 0
-	local n = #bytes
-	while seen < count and index <= n do
-		local byte = bytes:byte(index)
-		index = index + 1
-		if not byte then
-			break
-		end
-		if byte < 128 then
-			seen = seen + 1
-		end
-	end
-	return index
-end
-
--- Mode and speed runs end with a 0 length. Consume that terminator too.
-local function SkipRuns(bytes, index)
-	while index <= #bytes do
-		local run
-		run, index = ReadVar(bytes, index)
-		if not run or run <= 0 then
-			return index
-		end
-		local _
-		_, index = ReadVar(bytes, index)
-	end
-	return index
-end
-
--- Events only. Point arrays stay packed so a scan cannot pin the journey in RAM.
-local function WalkPackedEvents(packed, origin, fn)
-	if type(packed) ~= "string" or packed:sub(1, 3) ~= "Z3:" then
-		return false
-	end
-	local bytes = Decode64(packed:sub(4))
-	if bytes:byte(1) ~= string.byte("Z") or bytes:byte(2) ~= string.byte("3") then
-		return false
-	end
-	local index = 3
-	local count, events
-	count, index = ReadVar(bytes, index)
-	events, index = ReadVar(bytes, index)
-	if not count or not events or events <= 0 then
-		return false
-	end
-	index = SkipVars(bytes, index, count)
-	index = SkipVars(bytes, index, count)
-	index = SkipVars(bytes, index, count)
-	index = SkipVars(bytes, index, count)
-	index = SkipRuns(bytes, index)
-	index = SkipRuns(bytes, index)
-	local previous = 0
-	for _ = 1, events do
-		local delta, kind, mapID, extra
-		delta, index = ReadVar(bytes, index)
-		previous = previous + (delta or 0)
-		kind, index = ReadVar(bytes, index)
-		mapID, index = ReadVar(bytes, index)
-		local _
-		_, index = ReadVar(bytes, index)
-		_, index = ReadVar(bytes, index)
-		extra, index = ReadVar(bytes, index)
-		if fn(origin + previous, kind, Unzig(extra or 0), Unzig(mapID or 0)) then
-			return true
-		end
-	end
-	return false
-end
-
-local function JourneyOwns(journey, session)
-	if type(journey) ~= "table" or type(journey.sessions) ~= "table" or not session then
-		return false
-	end
-	for i = 1, #journey.sessions do
-		if journey.sessions[i] == session then
-			return true
-		end
-	end
-	return false
-end
-
 function ns.DB:NewJourney(name, realm)
 	return {
 		name = name or "Character",
@@ -681,90 +593,24 @@ function ns.DB:Init()
 end
 
 function ns.DB:HostFor(session)
-	if JourneyOwns(self.record, session) then
-		return self.record
-	end
-	if JourneyOwns(self.char, session) then
-		return self.char
-	end
-	return self.record or self.char
-end
-
--- Read events without Track(). Track() replaces a packed string with tables and
--- keeps them until logout, which is how an idle login held the whole journey.
-function ns.DB:EachEvent(session, fn)
-	if not Usable(session) or type(fn) ~= "function" then
-		return false
-	end
-	local host = self:HostFor(session)
-	local track = host and type(host.tracks) == "table" and host.tracks[session.id]
-	if type(track) == "table" then
-		local origin = session.s
-		for i = 1, #(track.ek or {}) do
-			if fn(origin + (track.et[i] or 0), track.ek[i], track.ea[i] or 0, track.em[i] or 0) then
+	local function owns(journey)
+		if type(journey) ~= "table" or type(journey.sessions) ~= "table" or not session then
+			return false
+		end
+		for i = 1, #journey.sessions do
+			if journey.sessions[i] == session then
 				return true
 			end
 		end
 		return false
 	end
-	if type(track) ~= "string" then
-		return false
+	if owns(self.record) then
+		return self.record
 	end
-	return WalkPackedEvents(track, session.s, fn) or false
-end
-
-function ns.DB:PointCount(session)
-	if not Usable(session) then
-		return 0
+	if owns(self.char) then
+		return self.char
 	end
-	local host = self:HostFor(session)
-	local track = host and type(host.tracks) == "table" and host.tracks[session.id]
-	if type(track) == "table" then
-		return #(track.t or {})
-	end
-	if type(track) ~= "string" or track:sub(1, 3) ~= "Z3:" then
-		return 0
-	end
-	local bytes = Decode64(track:sub(4))
-	if bytes:byte(1) ~= string.byte("Z") or bytes:byte(2) ~= string.byte("3") then
-		return 0
-	end
-	local count = ReadVar(bytes, 3)
-	return count or 0
-end
-
-function ns.DB:HistoryVisible()
-	local replay = ns.Replay
-	if type(replay) ~= "table" then
-		return false
-	end
-	if replay.frame and replay.frame.IsShown and replay.frame:IsShown() then
-		return true
-	end
-	if replay.route and WorldMapFrame and WorldMapFrame.IsShown and WorldMapFrame:IsShown() then
-		return true
-	end
-	return false
-end
-
--- Pack every session except the one being recorded. Call only when the map
--- and the replay panel are both closed, or the next redraw would unpack again.
-function ns.DB:ReleaseHistory()
-	if type(ZipperDB) ~= "table" or type(ZipperDB.journeys) ~= "table" then
-		return
-	end
-	local live = self.session
-	local liveHost = self.record
-	for _, journey in pairs(ZipperDB.journeys) do
-		local tracks = type(journey) == "table" and journey.tracks
-		if type(tracks) == "table" then
-			for id, track in pairs(tracks) do
-				if type(track) == "table" and not (journey == liveHost and live and id == live.id) then
-					tracks[id] = self:PackTrack(track)
-				end
-			end
-		end
-	end
+	return self.record or self.char
 end
 
 function ns.DB:Flush()
@@ -1462,29 +1308,24 @@ function ns.DB:SessionWorthKeeping(journey, session)
 	if type(session.reach) == "number" and session.reach >= (ns.QUIET_YARDS or 250) then
 		return true
 	end
-	local keep = false
-	self:EachEvent(session, function(_, kind, extra)
-		extra = extra or 0
+	local track = self:Track(session)
+	for i = 1, #(track.ek or {}) do
+		local kind = track.ek[i]
+		local extra = track.ea[i] or 0
 		if kind == ns.Kind.CAMP or kind == ns.Kind.SLEEP or kind == ns.Kind.FISH then
 			if extra ~= 1 then
-				keep = true
 				return true
 			end
 		elseif kind == ns.Kind.GROUP then
 			if extra >= self.GROUP_KEPT then
-				keep = true
 				return true
 			end
 		elseif QUIET_KEEP[kind] then
-			keep = true
 			return true
 		end
-	end)
-	if keep then
-		return true
 	end
 	-- Older stops have no measured distance. Leave those alone.
-	if self:PointCount(session) > 0 and type(session.reach) ~= "number" then
+	if #(track.t or {}) > 0 and type(session.reach) ~= "number" then
 		return true
 	end
 	return false
@@ -1850,18 +1691,14 @@ function ns.DB:LastInstanceDoor()
 	if type(sessions) ~= "table" then
 		return nil
 	end
-	-- The first idle tick calls this. Track() would unpack every session that
-	-- has no door and keep those tables until logout.
 	for s = #sessions, 1, -1 do
 		local session = sessions[s]
-		local foundKind, foundExtra
-		self:EachEvent(session, function(_, kind, extra)
+		local track = self:Track(session)
+		for i = #(track.ek or {}), 1, -1 do
+			local kind = track.ek[i]
 			if kind == ns.Kind.INSTANCE_ENTER or kind == ns.Kind.INSTANCE_LEAVE then
-				foundKind, foundExtra = kind, extra
+				return kind, track.ea[i], session
 			end
-		end)
-		if foundKind then
-			return foundKind, foundExtra, session
 		end
 	end
 end
@@ -2105,15 +1942,12 @@ function ns.DB:RangeHasWork(journey, startAt, stopAt)
 	for i = 1, #sessions do
 		local session = sessions[i]
 		if type(session) == "table" and type(session.s) == "number" and session.s <= stopAt then
-			local hit = false
-			self:EachEvent(session, function(when, kind)
-				if when >= startAt and when <= stopAt and self:CompanyQualifies(kind) then
-					hit = true
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				local when = session.s + (track.et[n] or 0)
+				if when >= startAt and when <= stopAt and self:CompanyQualifies(track.ek[n]) then
 					return true
 				end
-			end)
-			if hit then
-				return true
 			end
 		end
 	end
@@ -2128,15 +1962,15 @@ function ns.DB:HasKeptMarker(journey, startAt)
 	for i = 1, #sessions do
 		local session = sessions[i]
 		if type(session) == "table" and type(session.s) == "number" then
-			local hit = false
-			self:EachEvent(session, function(when, kind, extra)
-				if kind == ns.Kind.GROUP and (extra or 0) >= self.GROUP_KEPT and math.abs(when - startAt) <= 2 then
-					hit = true
-					return true
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				if track.ek[n] == ns.Kind.GROUP then
+					local when = session.s + (track.et[n] or 0)
+					local extra = track.ea[n] or 0
+					if extra >= self.GROUP_KEPT and math.abs(when - startAt) <= 2 then
+						return true
+					end
 				end
-			end)
-			if hit then
-				return true
 			end
 		end
 	end
@@ -2214,15 +2048,14 @@ function ns.DB:HasJoinMarker(journey, when)
 	for i = 1, #sessions do
 		local session = sessions[i]
 		if type(session) == "table" and type(session.s) == "number" then
-			local hit = false
-			self:EachEvent(session, function(at, kind)
-				if kind == ns.Kind.GROUP and math.abs(at - when) <= 2 then
-					hit = true
-					return true
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				if track.ek[n] == ns.Kind.GROUP then
+					local at = session.s + (track.et[n] or 0)
+					if math.abs(at - when) <= 2 then
+						return true
+					end
 				end
-			end)
-			if hit then
-				return true
 			end
 		end
 	end
@@ -2321,16 +2154,6 @@ local function DropIdleMarkers(self, journey, starts)
 	for i = 1, #sessions do
 		local session = sessions[i]
 		if type(session) == "table" and type(session.s) == "number" and journey.tracks and journey.tracks[session.id] then
-			local needsDrop = false
-			self:EachEvent(session, function(when, kind)
-				if kind == ns.Kind.GROUP and not MarkerNear(when, starts) then
-					needsDrop = true
-					return true
-				end
-			end)
-			if not needsDrop then
-				-- Packed history stays packed. Unpacking here used to keep every session.
-			else
 			local track = self:Track(session)
 			local et, ek, em, ex, ey, ea = {}, {}, {}, {}, {}, {}
 			local count = 0
@@ -2353,7 +2176,6 @@ local function DropIdleMarkers(self, journey, starts)
 			if dropped then
 				track.et, track.ek, track.em = et, ek, em
 				track.ex, track.ey, track.ea = ex, ey, ea
-			end
 			end
 		end
 	end
@@ -2419,26 +2241,24 @@ function ns.DB:PruneIdleCompany(closedOnly)
 		end
 	end
 	local people = ZipperDB.people
-	if type(people) == "table" then
-		for guid in pairs(people) do
-			local used = false
-			for _, journey in pairs(journeys) do
-				local with = type(journey) == "table" and journey.with or nil
-				if type(with) == "table" and type(with[guid]) == "table" and #with[guid] > 0 then
-					used = true
-					break
-				end
-			end
-			if not used then
-				people[guid] = nil
+	if type(people) ~= "table" then
+		return
+	end
+	for guid in pairs(people) do
+		local used = false
+		for _, journey in pairs(journeys) do
+			local with = type(journey) == "table" and journey.with or nil
+			if type(with) == "table" and type(with[guid]) == "table" and #with[guid] > 0 then
+				used = true
+				break
 			end
 		end
-		if not next(people) then
-			ZipperDB.people = nil
+		if not used then
+			people[guid] = nil
 		end
 	end
-	if not self:HistoryVisible() then
-		self:ReleaseHistory()
+	if not next(people) then
+		ZipperDB.people = nil
 	end
 end
 
@@ -2567,9 +2387,12 @@ local function CompanyInstanceRuns(self, sessions)
 	end
 	for i = 1, #(sessions or {}) do
 		local session = sessions[i]
-		self:EachEvent(session, function(when, kind, extra, mapID)
-			extra = extra or 0
-			mapID = mapID or 0
+		local track = self:Track(session)
+		for n = 1, #(track.ek or {}) do
+			local when = session.s + (track.et[n] or 0)
+			local kind = track.ek[n]
+			local extra = track.ea[n] or 0
+			local mapID = track.em and track.em[n] or 0
 			if kind == ns.Kind.INSTANCE_ENTER then
 				local instType, instanceID = self:ReadInstance(extra)
 				if instType == ns.Instance.PARTY or instType == ns.Instance.RAID then
@@ -2600,7 +2423,7 @@ local function CompanyInstanceRuns(self, sessions)
 					open.bossWhen = when
 				end
 			end
-		end)
+		end
 	end
 	flush()
 	return runs
@@ -2684,8 +2507,12 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 			for _, row in pairs(rows) do
 				row.seconds = row.seconds + SpanOverlap(row.spans, startAt, stopAt, liveEnd)
 			end
-			self:EachEvent(session, function(when, kind, extra)
+			local track = self:Track(session)
+			for n = 1, #(track.ek or {}) do
+				local when = session.s + (track.et[n] or 0)
 				if when >= startAt and when <= stopAt then
+					local kind = track.ek[n]
+					local extra = track.ea[n]
 					for _, row in pairs(rows) do
 						if SpanCovers(row.spans, when, liveEnd) then
 							if kind == ns.Kind.QUEST_TURNIN then
@@ -2706,7 +2533,7 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 						end
 					end
 				end
-			end)
+			end
 		end
 	end
 	local runs = CompanyInstanceRuns(self, sessions)
@@ -3016,21 +2843,6 @@ function ns.DB:EstimateBytes(value)
 	return #table.concat(out)
 end
 
--- Stand-in for a loaded track. The five-minute size poll used to PackTrack
--- every table, which encoded the whole journey into temporary strings while
--- you stood still. Packed strings still report their real length.
-local function EstimateTrack(track)
-	if type(track) == "string" then
-		return #track
-	end
-	if type(track) ~= "table" then
-		return 0
-	end
-	local points = #(track.t or {})
-	local events = #(track.ek or {})
-	return 24 + (points * 12) + (events * 8)
-end
-
 function ns.DB:MeasureJourney(journey)
 	if type(journey) ~= "table" or type(journey.tracks) ~= "table" then
 		return 0
@@ -3038,7 +2850,14 @@ function ns.DB:MeasureJourney(journey)
 	local bytes = #(journey.sessions or {}) * 48
 	bytes = bytes + MeasureWith(journey.with)
 	for _, track in pairs(journey.tracks) do
-		bytes = bytes + EstimateTrack(track)
+		if type(track) == "string" then
+			bytes = bytes + #track
+		elseif type(track) == "table" then
+			local ok, packed = pcall(self.PackTrack, self, track)
+			if ok and type(packed) == "string" then
+				bytes = bytes + #packed
+			end
+		end
 	end
 	return bytes
 end
