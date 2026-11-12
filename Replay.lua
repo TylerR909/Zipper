@@ -4746,10 +4746,11 @@ function ns.Replay:EnsureMapLegend()
 	local entries = self:LegendEntries()
 	local rows = {}
 	local y = -28
+	local contentWidth = 196
 	for i = 1, #entries do
 		local entry = entries[i]
 		local row = CreateFrame("Frame", nil, frame)
-		row:SetSize(168, 16)
+		row:SetSize(contentWidth, 16)
 		row:SetPoint("TOPLEFT", 10, y)
 		local swatch = row:CreateTexture(nil, "ARTWORK")
 		local size = entry.size or 8
@@ -4783,14 +4784,22 @@ function ns.Replay:EnsureMapLegend()
 	for i = 1, #hints do
 		local hint = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 		hint:SetPoint("TOPLEFT", 10, y)
-		hint:SetPoint("TOPRIGHT", -10, y)
+		hint:SetWidth(contentWidth)
 		hint:SetJustifyH("LEFT")
+		hint:SetJustifyV("TOP")
+		hint:SetWordWrap(true)
+		hint:SetNonSpaceWrap(true)
 		hint:SetText(hints[i])
 		hint:SetTextColor(0.85, 0.85, 0.85)
-		y = y - 14
+		local height = hint:GetStringHeight() or 12
+		if height < 12 then
+			height = 12
+		end
+		hint:SetHeight(height)
+		y = y - (height + 4)
 	end
 
-	frame:SetSize(188, -y + 10)
+	frame:SetSize(contentWidth + 20, -y + 10)
 	frame:SetScript("OnEnter", function()
 		ns.Replay.legendWanted = true
 	end)
