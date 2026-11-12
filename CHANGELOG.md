@@ -7,6 +7,7 @@
 - Replay chapter controls use clean « ‹ › » marks on a gold-edged strip, with jump-to-start and jump-to-end beside previous and next chapter.
 - The map-button legend is titled Zipper, and labels say Joined Party, Teleport, Quest pickup, and Quest turn-in.
 - Elite kill pips try a gold ring around the red fill.
+- While the playhead is fishing, the tip turns into the blue fishing mark (like idle replaces the tip); same-hole casts within about 10 yards share one pip.
 
 ### Fixed
 

@@ -20,6 +20,8 @@ local PARK_SECONDS = 20
 local PARK_DIST = 0.0035
 local TRAVEL_GAP = 20
 local STAY_SECONDS = 240
+-- Same-spot casts collapse; the tip also hides fish pips under the playhead.
+local FISH_DEDUP_YARDS = 10
 -- Camp/sleep stats: drop spans that moved, and brief Boosted Rest stop-loot flicker.
 local REST_STILL = PARK_DIST * 2
 local REST_STAT_MIN = 30
@@ -956,6 +958,9 @@ function ns.Replay:DrawMarkers(sessions)
 		self:HideSpareMarkers()
 		return
 	end
+	local fishCluster = {}
+	local tipFishing = self:PlayheadStance() == "fish"
+	local tipMap, tipX, tipY = self:PlayheadPlace()
 	local function draw(wantKill, cap)
 		local shown = 0
 		for s = #sessions, 1, -1 do
@@ -980,29 +985,47 @@ function ns.Replay:DrawMarkers(sessions)
 				local outside = self.mode == "level" and self.t0
 					and (when < self.t0 - 1.5 or when > ((self.t1 or when) + 1.5))
 				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and kind ~= Kind.IDLE and not spanEnd and not shortRest and not outside and self:SegmentFade(when) > 0 then
-					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
-					if px then
-						shown = shown + 1
-						local marker = self:AcquireMarker()
-						local size = self:PaintMarker(marker, kind, track.ea[i])
-						marker:SetAlpha(self:SegmentFade(when))
-						ns.Map:Use():FitPin(marker, size)
-						marker.kind = kind
-						marker.extra = track.ea[i]
-						marker.mapID = track.em[i]
-						marker.when = when
-						marker.session = session
-						ns.Map:Use():Place(marker, px, py)
-						-- Level/death/boss sit above the class tip (+15) so the
-						-- finishing ding ring is not covered at the playhead.
-						local bump = 5
-						if marker.milestone then
-							bump = 18
-						elseif isKill then
-							bump = 3
+					local mapID = track.em[i]
+					local nx = track.ex[i] / ns.COORD_SCALE
+					local ny = track.ey[i] / ns.COORD_SCALE
+					local skipFish = false
+					if kind == Kind.FISH then
+						-- Tip already shows fishing; skip the pip underfoot.
+						if tipFishing and tipMap and mapID == tipMap
+							and tipX and tipY
+							and self:YardsApart(mapID, nx, ny, tipX, tipY) <= FISH_DEDUP_YARDS then
+							skipFish = true
+						elseif self:FishNearCluster(fishCluster, mapID, nx, ny) then
+							skipFish = true
+						else
+							fishCluster[#fishCluster + 1] = { mapID = mapID, x = nx, y = ny }
 						end
-						marker:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + bump)
-						marker:Show()
+					end
+					if not skipFish then
+						local px, py = self:Project(mapID, nx, ny)
+						if px then
+							shown = shown + 1
+							local marker = self:AcquireMarker()
+							local size = self:PaintMarker(marker, kind, track.ea[i])
+							marker:SetAlpha(self:SegmentFade(when))
+							ns.Map:Use():FitPin(marker, size)
+							marker.kind = kind
+							marker.extra = track.ea[i]
+							marker.mapID = mapID
+							marker.when = when
+							marker.session = session
+							ns.Map:Use():Place(marker, px, py)
+							-- Level/death/boss sit above the class tip (+15) so the
+							-- finishing ding ring is not covered at the playhead.
+							local bump = 5
+							if marker.milestone then
+								bump = 18
+							elseif isKill then
+								bump = 3
+							end
+							marker:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + bump)
+							marker:Show()
+						end
 					end
 				end
 			end
@@ -1054,11 +1077,12 @@ function ns.Replay:ClassColor()
 	return r, g, b
 end
 
-function ns.Replay:PlayheadParked()
+-- "fish" replaces the class tip entirely; "parked" is the idle/AFK ring.
+function ns.Replay:PlayheadStance()
 	local sessions = self.sessions
 	local when = self.playhead
 	if not sessions or not when then
-		return false
+		return "move"
 	end
 	local afk, idle = false, false
 	local camp, sleep, meal, fish = false, false, false, false
@@ -1103,15 +1127,18 @@ function ns.Replay:PlayheadParked()
 			end
 		end
 	end
-	if camp or sleep or meal or fish then
-		return false
+	if fish then
+		return "fish"
+	end
+	if camp or sleep or meal then
+		return "move"
 	end
 	if idle or afk then
-		return true
+		return "parked"
 	end
 	local s1, i1, s2, i2 = Locate(sessions, when)
 	if not s1 then
-		return false
+		return "move"
 	end
 	local map1, x1, y1, t1 = self:SampleXY(sessions[s1], i1)
 	local map2, x2, y2, t2 = self:SampleXY(sessions[s2], i2)
@@ -1120,28 +1147,65 @@ function ns.Replay:PlayheadParked()
 		map2, x2, y2, t2 = self:SampleXY(sessions[s2], i2)
 	end
 	if map1 ~= map2 then
-		return false
+		return "move"
 	end
 	local dx, dy = (x2 or x1) - x1, (y2 or y1) - y1
 	if (dx * dx) + (dy * dy) > (PARK_DIST * PARK_DIST) then
-		return false
+		return "move"
 	end
-	return (when - t1) >= PARK_SECONDS
+	if (when - t1) >= PARK_SECONDS then
+		return "parked"
+	end
+	return "move"
 end
 
-function ns.Replay:StyleDot(parked)
+function ns.Replay:PlayheadParked()
+	return self:PlayheadStance() == "parked"
+end
+
+function ns.Replay:YardsApart(mapID, x1, y1, x2, y2)
+	local size = self:MapYards(mapID)
+	if not size then
+		local dx, dy = x1 - x2, y1 - y2
+		return math.sqrt(dx * dx + dy * dy) * 1000
+	end
+	local dx = (x1 - x2) * size[1]
+	local dy = (y1 - y2) * size[2]
+	return math.sqrt(dx * dx + dy * dy)
+end
+
+function ns.Replay:FishNearCluster(cluster, mapID, x, y)
+	if not mapID or not x or not y then
+		return false
+	end
+	for i = 1, #cluster do
+		local spot = cluster[i]
+		if spot.mapID == mapID and self:YardsApart(mapID, x, y, spot.x, spot.y) <= FISH_DEDUP_YARDS then
+			return true
+		end
+	end
+	return false
+end
+
+function ns.Replay:StyleDot(mode)
 	local dot = self.dot
-	if not dot or dot.parked == parked then
+	if not dot or dot.mode == mode then
 		return
 	end
-	dot.parked = parked
-	if parked then
-		dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Ring")
+	dot.mode = mode
+	if mode == "fish" then
+		local color = ns.KindColor[Kind.FISH]
+		dot.texture:SetTexture(MEDIA_CIRCLE)
+		dot.texture:SetVertexColor(color[1], color[2], color[3], 1)
+	elseif mode == "parked" then
+		dot.texture:SetTexture(MEDIA_RING)
+		local r, g, b = self:ClassColor()
+		dot.texture:SetVertexColor(r, g, b, 1)
 	else
-		dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
+		dot.texture:SetTexture(MEDIA_CIRCLE)
+		local r, g, b = self:ClassColor()
+		dot.texture:SetVertexColor(r, g, b, 1)
 	end
-	local r, g, b = self:ClassColor()
-	dot.texture:SetVertexColor(r, g, b, 1)
 end
 
 function ns.Replay:PositionDot(x, y)
@@ -1154,8 +1218,8 @@ function ns.Replay:PositionDot(x, y)
 		self.dot:Hide()
 		return
 	end
-	local parked = self:PlayheadParked()
-	self:StyleDot(parked)
+	local mode = self:PlayheadStance()
+	self:StyleDot(mode)
 	ns.Map:Use():FitPin(self.dot, 12)
 	ns.Map:Use():Place(self.dot, x, y)
 	self.dot:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + 15)
@@ -4679,7 +4743,7 @@ function ns.Replay:EnsureDot()
 	dot.texture:SetTexture("Interface\\AddOns\\Zipper\\Media\\Circle")
 	local r, g, b = self:ClassColor()
 	dot.texture:SetVertexColor(r, g, b, 1)
-	dot.parked = false
+	dot.mode = "move"
 	dot:EnableMouse(false)
 	self.dot = dot
 end
