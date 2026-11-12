@@ -344,8 +344,8 @@ local ROAD = {
 
 local MOMENTS = {
 	{ key = "kills", label = L["Kills"] },
-	{ key = "questAccept", label = L["Quest pickups"] },
-	{ key = "questTurnin", label = L["Quest turn-ins"] },
+	{ key = "questAccept", label = L["Quest pickup"] },
+	{ key = "questTurnin", label = L["Quest turn-in"] },
 	{ key = "death", label = L["Deaths"] },
 	{ key = "hearth", label = L["Hearths"] },
 	{ key = "summon", label = L["Summons"] },

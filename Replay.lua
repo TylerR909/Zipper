@@ -763,6 +763,7 @@ end
 
 -- Oldest sample that still belongs on the trail, and the "now" the solid part ends at.
 -- Full history has no oldest bound. The fade tail sits just past the solid window.
+-- Replay trail length is played time, so a logout gap does not eat the window.
 function ns.Replay:TrailSpan()
 	local nowT = self:TrailNow()
 	if self.t1 and nowT > self.t1 then
@@ -772,7 +773,17 @@ function ns.Replay:TrailSpan()
 	local oldest
 	if window then
 		local fade = math.min(45, math.max(10, window * 0.12))
-		oldest = nowT - window - fade
+		if self:UsingReplayTrail() then
+			local nowPlayed = self:PlayedAt(nowT)
+			local want = nowPlayed - window - fade
+			if want <= 0 then
+				oldest = self.t0
+			else
+				oldest = self:TimeAtPlayed(want)
+			end
+		else
+			oldest = nowT - window - fade
+		end
 	end
 	if self.t0 and (not oldest or oldest < self.t0) then
 		oldest = self.t0
@@ -782,14 +793,23 @@ end
 
 function ns.Replay:SegmentFade(older)
 	local nowT = self:TrailNow()
-	if not older or older > nowT then
+	-- A ding mark can land a tick past the playhead float; keep it if it is the tip.
+	if not older or older > nowT + 1.5 then
 		return 0
 	end
 	local window = self:TrailWindow()
 	if not window then
 		return 1
 	end
-	local age = nowT - older
+	local age
+	if self:UsingReplayTrail() then
+		age = self:PlayedAt(nowT) - self:PlayedAt(math.min(older, nowT))
+		if age < 0 then
+			age = 0
+		end
+	else
+		age = nowT - older
+	end
 	if age <= window then
 		return 1
 	end
@@ -900,7 +920,10 @@ function ns.Replay:DrawMarkers(sessions)
 				local isKill = kind == Kind.KILL
 				local when = session.s + (track.et[i] or 0)
 				local spanEnd = (kind == Kind.CAMP or kind == Kind.SLEEP or kind == Kind.FISH) and track.ea[i] == 1
-				local outside = self.mode == "level" and self.t0 and (when < self.t0 or when > (self.t1 or when))
+				-- Level bounds and the ding mark share a timestamp; allow a 1.5s
+				-- pad so the finishing level-up pip is not clipped off the end.
+				local outside = self.mode == "level" and self.t0
+					and (when < self.t0 - 1.5 or when > ((self.t1 or when) + 1.5))
 				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and kind ~= Kind.IDLE and not spanEnd and not outside and self:SegmentFade(when) > 0 then
 					local px, py = self:Project(track.em[i], track.ex[i] / ns.COORD_SCALE, track.ey[i] / ns.COORD_SCALE)
 					if px then
@@ -1418,7 +1441,7 @@ function ns.Replay:CollectStats(sessions)
 		{ header = L["Moments"] },
 		{ L["Summons"], Comma(summons) },
 		{ L["Hearths"], Comma(hearths) },
-		{ L["Portals"], Comma(portals) },
+		{ L["Teleports"], Comma(portals) },
 		{ L["Trainers"], Comma(trainers) },
 		{ L["Flights"], Comma(flights) },
 		{ L["Mounts"], Comma(mounts) },
@@ -1496,7 +1519,7 @@ end
 function ns.Replay:TravelTooltip(pin)
 	local color = ns.KindColor[pin.kind] or { 1, 0.9, 0.4 }
 	if pin.kind == Kind.PORTAL then
-		GameTooltip:SetText(self:SpellTitle(pin.extra) or L["Portal"], color[1], color[2], color[3])
+		GameTooltip:SetText(self:SpellTitle(pin.extra) or L["Teleport"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.CAMP then
 		GameTooltip:SetText(L["Campfire"], color[1], color[2], color[3])
 	elseif pin.kind == Kind.SLEEP then
@@ -1517,7 +1540,7 @@ function ns.Replay:TravelTooltip(pin)
 end
 
 function ns.Replay:GroupTooltip(pin)
-	GameTooltip:SetText(L["Joined"], 0.45, 0.75, 1)
+	GameTooltip:SetText(L["Joined Party"], 0.45, 0.75, 1)
 	local people = ns.DB:JoinsAt(ns.DB.char, pin.when or 0)
 	if #people == 0 then
 		local count = tonumber(pin.extra) or 0
@@ -3782,15 +3805,23 @@ function ns.Replay:OnUpdate(_, elapsed)
 		if gap and gap > self.playhead then
 			self.playhead = gap
 		end
+		local reachedEnd = false
 		if self.playhead >= self.t1 then
 			self.playhead = self.t1
 			self.playing = false
 			self.playButton:SetText(L["Play"])
+			reachedEnd = true
 		end
 		self:FollowPlayhead()
 		self:UpdateDot()
 		self:UpdateReadout()
 		self.trailDirty = true
+		-- Land the final frame (level-up ring, tip segment) without waiting on the throttle.
+		if reachedEnd and self.route then
+			self.trailDirty = false
+			self.lastTrailRedraw = GetTime()
+			self:Redraw()
+		end
 	end
 	-- Keep the drawn tip near the playhead. A multi-second lag (and the old
 	-- 0.05s floor at high speed) made kill/quest pins pop in behind the head.
@@ -4639,14 +4670,14 @@ function ns.Replay:LegendEntries()
 	return {
 		{ label = L["Kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 8 },
 		{ label = L["Elite kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 11 },
-		{ label = L["Quest pickups"], texture = MEDIA_CIRCLE, r = QUEST_ACCEPT_R, g = QUEST_ACCEPT_G, b = QUEST_ACCEPT_B, size = 8 },
-		{ label = L["Quest turn-ins"], texture = MEDIA_CIRCLE, r = QUEST_TURNIN_R, g = QUEST_TURNIN_G, b = QUEST_TURNIN_B, size = 8 },
+		{ label = L["Quest pickup"], texture = MEDIA_CIRCLE, r = QUEST_ACCEPT_R, g = QUEST_ACCEPT_G, b = QUEST_ACCEPT_B, size = 8 },
+		{ label = L["Quest turn-in"], texture = MEDIA_CIRCLE, r = QUEST_TURNIN_R, g = QUEST_TURNIN_G, b = QUEST_TURNIN_B, size = 8 },
 		{ label = L["Death"], texture = MEDIA_RING, r = DEATH_R, g = DEATH_G, b = DEATH_B, size = 10 },
 		{ label = L["Level up"], texture = MEDIA_RING, r = LEVEL_R, g = LEVEL_G, b = LEVEL_B, size = 10 },
 		{ label = L["Fishing"], texture = MEDIA_CIRCLE, r = fish[1], g = fish[2], b = fish[3], size = 10 },
-		{ label = L["Joined"], texture = MEDIA_CIRCLE, r = group[1], g = group[2], b = group[3], size = 9 },
+		{ label = L["Joined Party"], texture = MEDIA_CIRCLE, r = group[1], g = group[2], b = group[3], size = 9 },
 		{ label = L["Hearth"], texture = MEDIA_CIRCLE, r = hearth[1], g = hearth[2], b = hearth[3], size = 9 },
-		{ label = L["Portal"], texture = MEDIA_CIRCLE, r = portal[1], g = portal[2], b = portal[3], size = 9 },
+		{ label = L["Teleport"], texture = MEDIA_CIRCLE, r = portal[1], g = portal[2], b = portal[3], size = 9 },
 		{ label = L["Campfire"], texture = MEDIA_CIRCLE, r = camp[1], g = camp[2], b = camp[3], size = 9 },
 		{ label = L["Sleeping bag"], texture = MEDIA_CIRCLE, r = sleep[1], g = sleep[2], b = sleep[3], size = 9 },
 		{ label = L["Trainer"], texture = MEDIA_CIRCLE, r = trainer[1], g = trainer[2], b = trainer[3], size = 9 },
@@ -4698,7 +4729,7 @@ function ns.Replay:EnsureMapLegend()
 
 	local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	title:SetPoint("TOPLEFT", 10, -8)
-	title:SetText(L["Map markers"])
+	title:SetText(L["Zipper"])
 	title:SetTextColor(1, 0.82, 0)
 
 	local entries = self:LegendEntries()
