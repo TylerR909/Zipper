@@ -3208,8 +3208,12 @@ function ns.Replay:SetMode(mode, index, alreadyRemembered)
 	self:RestorePlayhead()
 	self:StyleModeButtons()
 	self:UpdateReadout()
-	-- If the map is already open, jump to the scrubber's map (do not force it open).
-	self:SnapMapToPlayhead()
+	-- Only while the replay panel is open: jump an already-shown map to the
+	-- scrubber. SetMode also runs from map OnShow via UseCurrentTrailOutsidePanel
+	-- when the panel is closed; snapping there stole the normal zone open.
+	if self.frame and self.frame:IsShown() then
+		self:SnapMapToPlayhead()
+	end
 	self:Redraw()
 end
 
@@ -3668,12 +3672,11 @@ function ns.Replay:OnUpdate(_, elapsed)
 		self:UpdateReadout()
 		self.trailDirty = true
 	end
-	-- Keep the drawn tip within about four seconds of travel. High playback speeds redraw more often.
-	local trailWait = 4 / math.max(self.speed or 1, 1)
-	if trailWait < 0.05 then
+	-- Keep the drawn tip near the playhead. A multi-second lag (and the old
+	-- 0.05s floor at high speed) made kill/quest pins pop in behind the head.
+	local trailWait = 0.25 / math.max(self.speed or 1, 1)
+	if trailWait > 0.05 then
 		trailWait = 0.05
-	elseif trailWait > 0.25 then
-		trailWait = 0.25
 	end
 	if self.trailDirty and (GetTime() - (self.lastTrailRedraw or 0)) >= trailWait then
 		self.lastTrailRedraw = GetTime()
