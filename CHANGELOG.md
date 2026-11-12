@@ -2,6 +2,10 @@
 
 ## 0.1.0-beta
 
+### Changed
+
+- Replay chapter controls use the game's left/right page arrows, with jump-to-start and jump-to-end beside them, on a clearer gold-edged panel header.
+
 ### Fixed
 
 - Selecting a session or level with the scrubber at the start shows the whole route on the map until you hit Play, which then clears it and redraws from the playhead.
