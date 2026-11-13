@@ -1,7 +1,8 @@
 package-as: Zipper
 
+# Built by release.yml from this tag's ## <version> section of CHANGELOG.md.
 manual-changelog:
-  filename: CHANGELOG.md
+  filename: RELEASE_NOTES.md
   markup-type: markdown
 
 ignore:
@@ -12,3 +13,4 @@ ignore:
   - AGENTS.md
   - NOTES.md
   - README.md
+  - RELEASE_NOTES.md
