@@ -625,39 +625,79 @@ function ns.Config:CreateFrame()
 	savedFooter:SetPoint("BOTTOMRIGHT", -16, 12)
 	savedFooter:SetHeight(168)
 
-	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", savedFooter, "UIPanelButtonTemplate")
-	purgeDrop:SetSize(280, 22)
-	purgeDrop:SetPoint("TOPLEFT", 0, 0)
-	purgeDrop:SetText(L["Saved characters"])
-	purgeDrop:SetScript("OnClick", function()
+	-- Same chrome RareScanner/AceGUI uses for "Warning sound for rare NPCs".
+	local purgeWrap = CreateFrame("Frame", nil, savedFooter)
+	purgeWrap:SetSize(280, 32)
+	purgeWrap:SetPoint("TOPLEFT", 0, 0)
+	local purgeDrop = CreateFrame("Frame", "ZipperConfigCharDrop", purgeWrap, "UIDropDownMenuTemplate")
+	purgeDrop:ClearAllPoints()
+	purgeDrop:SetPoint("TOPLEFT", purgeWrap, "TOPLEFT", -15, 0)
+	purgeDrop:SetPoint("BOTTOMRIGHT", purgeWrap, "BOTTOMRIGHT", 17, 0)
+	purgeDrop:SetScript("OnHide", nil)
+	local purgeLeft = purgeDrop.Left or _G[purgeDrop:GetName() .. "Left"]
+	local purgeMiddle = purgeDrop.Middle or _G[purgeDrop:GetName() .. "Middle"]
+	local purgeRight = purgeDrop.Right or _G[purgeDrop:GetName() .. "Right"]
+	local purgeText = purgeDrop.Text or _G[purgeDrop:GetName() .. "Text"]
+	local purgeButton = purgeDrop.Button or _G[purgeDrop:GetName() .. "Button"]
+	if purgeMiddle and purgeLeft and purgeRight then
+		purgeMiddle:ClearAllPoints()
+		purgeRight:ClearAllPoints()
+		purgeMiddle:SetPoint("LEFT", purgeLeft, "RIGHT", 0, 0)
+		purgeMiddle:SetPoint("RIGHT", purgeRight, "LEFT", 0, 0)
+		purgeRight:SetPoint("TOPRIGHT", purgeDrop, "TOPRIGHT", 0, 17)
+	end
+	if purgeText and purgeLeft and purgeRight then
+		purgeText:ClearAllPoints()
+		purgeText:SetPoint("LEFT", purgeLeft, "LEFT", 25, 2)
+		purgeText:SetPoint("RIGHT", purgeRight, "RIGHT", -43, 2)
+		purgeText:SetJustifyH("LEFT")
+		purgeText:SetWordWrap(false)
+		if purgeText.SetNonSpaceWrap then
+			purgeText:SetNonSpaceWrap(false)
+		end
+		purgeText:SetText(L["Saved characters"])
+	end
+	local function TogglePurgeMenu()
 		ns.Config:TogglePurgeList()
-	end)
+		if PlaySound then
+			PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+		end
+	end
+	if purgeButton then
+		purgeButton:SetScript("OnClick", TogglePurgeMenu)
+	end
+	local purgeCover = CreateFrame("Button", nil, purgeWrap)
+	purgeCover:SetPoint("TOPLEFT", 0, 0)
+	purgeCover:SetPoint("BOTTOMRIGHT", 0, 0)
+	purgeCover:SetScript("OnClick", TogglePurgeMenu)
 
 	local purgeList = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-	purgeList:SetPoint("TOPLEFT", purgeDrop, "BOTTOMLEFT", 0, -2)
-	purgeList:SetWidth(280)
+	purgeList:SetPoint("TOPLEFT", purgeWrap, "BOTTOMLEFT", 0, 2)
+	purgeList:SetPoint("TOPRIGHT", purgeWrap, "BOTTOMRIGHT", 0, 2)
 	purgeList:SetFrameStrata("FULLSCREEN_DIALOG")
 	purgeList:SetFrameLevel(20)
 	purgeList:Hide()
 	purgeList:EnableMouse(true)
 	purgeList:SetBackdrop({
-		bgFile = "Interface\\Buttons\\WHITE8X8",
-		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 1,
+		bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+		edgeSize = 32,
+		tileSize = 32,
+		tile = true,
+		insets = { left = 11, right = 12, top = 12, bottom = 11 },
 	})
-	purgeList:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
-	purgeList:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
+	purgeList:SetBackdropColor(0, 0, 0, 1)
 
 	local purge = CreateFrame("Button", "ZipperConfigPurge", savedFooter, "UIPanelButtonTemplate")
-	purge:SetSize(80, 22)
-	purge:SetPoint("LEFT", purgeDrop, "RIGHT", 8, 0)
+	purge:SetSize(80, 24)
+	purge:SetPoint("LEFT", purgeWrap, "RIGHT", 8, 4)
 	purge:SetText(L["Delete"])
 	purge:SetScript("OnClick", function()
 		ns.Config:ConfirmPurge()
 	end)
 
 	local quiet = AddCheck(savedFooter, "ZipperConfigSkipQuiet", L["Skip quiet stops"])
-	quiet:SetPoint("TOPLEFT", purgeDrop, "BOTTOMLEFT", -4, -14)
+	quiet:SetPoint("TOPLEFT", purgeWrap, "BOTTOMLEFT", -4, -10)
 	quiet:SetScript("OnClick", function(self)
 		ns.Config:SetSkipQuiet(self:GetChecked())
 	end)
@@ -730,7 +770,9 @@ function ns.Config:CreateFrame()
 	self.isoScroll = isoScroll
 	self.isoContent = isoContent
 	self.isoRows = {}
+	self.purgeWrap = purgeWrap
 	self.purgeDrop = purgeDrop
+	self.purgeDropText = purgeText
 	self.purgeList = purgeList
 	self.purgeRows = {}
 	self.purgeButton = purge
@@ -1013,7 +1055,7 @@ function ns.Config:PurgeLabel(row)
 end
 
 function ns.Config:RefreshPurgeList()
-	if not self.purgeDrop or not ns.DB or not ns.DB.CharacterList then
+	if not self.purgeDropText or not ns.DB or not ns.DB.CharacterList then
 		return
 	end
 	local list = ns.DB:CharacterList()
@@ -1028,7 +1070,7 @@ function ns.Config:RefreshPurgeList()
 		selected = list[1]
 		self.purgeKey = selected and selected.key or nil
 	end
-	self.purgeDrop:SetText(self:PurgeLabel(selected))
+	self.purgeDropText:SetText(self:PurgeLabel(selected))
 	if self.purgeButton then
 		if selected then
 			self.purgeButton:Enable()
@@ -1040,16 +1082,27 @@ function ns.Config:RefreshPurgeList()
 	if not menu then
 		return
 	end
+	-- Dialog-box border insets from AceGUI's Dropdown-Pullout.
+	local insetL, insetR, insetT, insetB = 14, 14, 14, 14
+	local sizeW = 72
 	self.purgeRows = self.purgeRows or {}
 	for i = 1, #list do
 		local row = self.purgeRows[i]
-		if not row then
+		if not row or not row.size then
 			row = CreateFrame("Button", nil, menu)
-			row:SetHeight(20)
+			row:SetHeight(16)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 8, 0)
-			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
+			row.label:SetWordWrap(false)
+			if row.label.SetNonSpaceWrap then
+				row.label:SetNonSpaceWrap(false)
+			end
+			row.size = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.size:SetJustifyH("RIGHT")
+			row.size:SetWordWrap(false)
+			if row.size.SetNonSpaceWrap then
+				row.size:SetNonSpaceWrap(false)
+			end
 			row:SetScript("OnClick", function(button)
 				ns.Config.purgeKey = button.charKey
 				if ns.Config.purgeList then
@@ -1057,24 +1110,41 @@ function ns.Config:RefreshPurgeList()
 				end
 				ns.Config:RefreshPurgeList()
 			end)
+			row:SetScript("OnEnter", function(frame)
+				frame.label:SetTextColor(1, 0.82, 0)
+				frame.size:SetTextColor(1, 0.82, 0)
+			end)
+			row:SetScript("OnLeave", function(frame)
+				local color = (frame.charKey == ns.Config.purgeKey) and { 1, 0.82, 0 } or { 1, 1, 1 }
+				frame.label:SetTextColor(color[1], color[2], color[3])
+				frame.size:SetTextColor(color[1], color[2], color[3])
+			end)
 			self.purgeRows[i] = row
 		end
 		row.charKey = list[i].key
-		row.label:SetText(self:PurgeLabel(list[i]))
+		row.label:SetText(list[i].label)
+		row.size:SetText(FormatBytes(list[i].bytes))
+		local r, g, b = 1, 1, 1
 		if list[i].key == self.purgeKey then
-			row.label:SetTextColor(1, 0.82, 0)
-		else
-			row.label:SetTextColor(1, 1, 1)
+			r, g, b = 1, 0.82, 0
 		end
+		row.label:SetTextColor(r, g, b)
+		row.size:SetTextColor(r, g, b)
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, -((i - 1) * 20))
-		row:SetPoint("RIGHT", menu, "RIGHT", 0, 0)
+		row:SetPoint("TOPLEFT", menu, "TOPLEFT", insetL, -insetT - ((i - 1) * 16))
+		row:SetPoint("RIGHT", menu, "RIGHT", -insetR, 0)
+		row.size:ClearAllPoints()
+		row.size:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+		row.size:SetWidth(sizeW)
+		row.label:ClearAllPoints()
+		row.label:SetPoint("LEFT", 0, 0)
+		row.label:SetPoint("RIGHT", row.size, "LEFT", -6, 0)
 		row:Show()
 	end
 	for i = #list + 1, #self.purgeRows do
 		self.purgeRows[i]:Hide()
 	end
-	menu:SetHeight(math.max(22, #list * 20 + 4))
+	menu:SetHeight(math.max(40, #list * 16 + insetT + insetB))
 end
 
 function ns.Config:TogglePurgeList()
