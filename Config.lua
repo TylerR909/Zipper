@@ -590,19 +590,39 @@ function ns.Config:CreateFrame()
 	isoNote:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -10)
 	isoNote:SetPoint("RIGHT", pages.saved, "RIGHT", -16, 0)
 	isoNote:SetJustifyH("LEFT")
-	isoNote:SetText(L["Uncheck Global to keep that character's journey in a per-character save. Other characters load less, but cannot replay it until you Globalize it again."])
+	isoNote:SetText(L["Pick Global or Non-Global for each character. Non-Global keeps that journey in a per-character save so other characters load less, but they cannot replay it until you make it Global again."])
 
-	local isoHeader = pages.saved:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	-- Column widths match RefreshIsolationList: name | Global | Non-Global
+	local ISO_GLOBAL_W, ISO_PRIVATE_W = 70, 90
+	local isoHeader = CreateFrame("Frame", nil, pages.saved)
 	isoHeader:SetPoint("TOPLEFT", isoNote, "BOTTOMLEFT", 0, -12)
-	isoHeader:SetText(L["Global"])
+	isoHeader:SetPoint("RIGHT", pages.saved, "RIGHT", -36, 0)
+	isoHeader:SetHeight(16)
+	local isoNameHead = isoHeader:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	isoNameHead:SetPoint("LEFT", 0, 0)
+	isoNameHead:SetPoint("RIGHT", isoHeader, "RIGHT", -(ISO_GLOBAL_W + ISO_PRIVATE_W), 0)
+	isoNameHead:SetJustifyH("LEFT")
+	isoNameHead:SetText(L["Character"])
+	local isoGlobalHead = isoHeader:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	isoGlobalHead:SetPoint("RIGHT", isoHeader, "RIGHT", -ISO_PRIVATE_W, 0)
+	isoGlobalHead:SetWidth(ISO_GLOBAL_W)
+	isoGlobalHead:SetJustifyH("CENTER")
+	isoGlobalHead:SetText(L["Global"])
+	local isoPrivateHead = isoHeader:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	isoPrivateHead:SetPoint("RIGHT", 0, 0)
+	isoPrivateHead:SetWidth(ISO_PRIVATE_W)
+	isoPrivateHead:SetJustifyH("CENTER")
+	isoPrivateHead:SetText(L["Non-Global"])
 
 	local isoScroll = CreateFrame("ScrollFrame", "ZipperConfigIsolationScroll", pages.saved, "UIPanelScrollFrameTemplate")
-	isoScroll:SetPoint("TOPLEFT", isoHeader, "BOTTOMLEFT", 0, -6)
+	isoScroll:SetPoint("TOPLEFT", isoHeader, "BOTTOMLEFT", 0, -4)
 	isoScroll:SetPoint("RIGHT", pages.saved, "RIGHT", -36, 0)
 	isoScroll:SetHeight(112)
 	local isoContent = CreateFrame("Frame", nil, isoScroll)
 	isoContent:SetSize(400, 16)
 	isoScroll:SetScrollChild(isoContent)
+	self.isoGlobalW = ISO_GLOBAL_W
+	self.isoPrivateW = ISO_PRIVATE_W
 
 	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", pages.saved, "UIPanelButtonTemplate")
 	purgeDrop:SetSize(280, 22)
@@ -777,6 +797,20 @@ function ns.Config:IsolationTooltip(row)
 	return L["You must log in to this character to migrate its data to Non-Global/Global."]
 end
 
+local function IsolationClicked(wantGlobal, box)
+	local key = box.charKey
+	if not key or not ns.DB.SetGlobal then
+		return
+	end
+	ns.DB:SetGlobal(key, wantGlobal)
+	ns.Config:RefreshIsolationList()
+	ns.Config:RefreshPurgeList()
+	ns.Config:RefreshSize()
+	if ns.OnDataChanged then
+		ns.OnDataChanged()
+	end
+end
+
 function ns.Config:RefreshIsolationList()
 	local content = self.isoContent
 	if not content or not ns.DB or not ns.DB.CharacterList then
@@ -788,38 +822,32 @@ function ns.Config:RefreshIsolationList()
 	if width < 200 then
 		width = 400
 	end
+	local globalW = self.isoGlobalW or 70
+	local privateW = self.isoPrivateW or 90
 	content:SetWidth(width)
 	for i = 1, #list do
 		local info = list[i]
 		local row = self.isoRows[i]
-		if not row then
+		if not row or not row.global then
 			row = CreateFrame("Frame", nil, content)
 			row:SetHeight(24)
-			row.box = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-			row.box:SetPoint("LEFT", 0, 0)
-			row.box:SetSize(24, 24)
-			row.box:SetScript("OnClick", function(box)
-				local key = box.charKey
-				if not key or not ns.DB.SetGlobal then
-					return
-				end
-				ns.DB:SetGlobal(key, box:GetChecked())
-				ns.Config:RefreshIsolationList()
-				ns.Config:RefreshPurgeList()
-				ns.Config:RefreshSize()
-				if ns.OnDataChanged then
-					ns.OnDataChanged()
-				end
-			end)
 			row.warn = row:CreateTexture(nil, "ARTWORK")
 			row.warn:SetSize(14, 14)
-			row.warn:SetPoint("LEFT", row.box, "RIGHT", 4, 0)
+			row.warn:SetPoint("LEFT", 0, 0)
 			row.warn:SetTexture("Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew")
 			row.warn:Hide()
 			row.label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", row.warn, "RIGHT", 4, 0)
-			row.label:SetPoint("RIGHT", row, "RIGHT", -4, 0)
 			row.label:SetJustifyH("LEFT")
+			row.private = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+			row.private:SetSize(24, 24)
+			row.private:SetScript("OnClick", function(box)
+				IsolationClicked(false, box)
+			end)
+			row.global = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+			row.global:SetSize(24, 24)
+			row.global:SetScript("OnClick", function(box)
+				IsolationClicked(true, box)
+			end)
 			row:SetScript("OnEnter", function(frame)
 				local tip = ns.Config:IsolationTooltip(frame.rowInfo)
 				if not tip then
@@ -835,8 +863,11 @@ function ns.Config:RefreshIsolationList()
 			self.isoRows[i] = row
 		end
 		row.rowInfo = info
-		row.box.charKey = info.key
-		row.box:SetChecked(info.scope ~= "private")
+		row.global.charKey = info.key
+		row.private.charKey = info.key
+		local isGlobal = info.scope ~= "private"
+		row.global:SetChecked(isGlobal)
+		row.private:SetChecked(not isGlobal)
 		row.label:SetText(string.format("%s   %s", info.label, FormatBytes(info.bytes)))
 		local pendingOther = info.pending and info.key ~= ns.DB.playerKey
 		row.warn:SetShown(pendingOther and true or false)
@@ -845,14 +876,18 @@ function ns.Config:RefreshIsolationList()
 			row.label:SetPoint("LEFT", row.warn, "RIGHT", 4, 0)
 			row.label:SetTextColor(1, 0.55, 0.2)
 		else
-			row.label:SetPoint("LEFT", row.box, "RIGHT", 4, 0)
+			row.label:SetPoint("LEFT", 0, 0)
 			if info.current then
 				row.label:SetTextColor(1, 0.86, 0.45)
 			else
 				row.label:SetTextColor(0.9, 0.88, 0.78)
 			end
 		end
-		row.label:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+		row.label:SetPoint("RIGHT", row, "RIGHT", -(globalW + privateW), 0)
+		row.private:ClearAllPoints()
+		row.private:SetPoint("CENTER", row, "RIGHT", -(privateW / 2), 0)
+		row.global:ClearAllPoints()
+		row.global:SetPoint("CENTER", row, "RIGHT", -(privateW + globalW / 2), 0)
 		row:ClearAllPoints()
 		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 24))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
