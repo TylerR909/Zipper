@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.2-beta
+
+### Added
+
+- Saved data can mark a character Non-Global so its journey moves into that character's own save. Other characters load less, and cannot replay it until you make it Global again. Global stays the default.
+- Non-Global alts stay in the replay picker as locked entries that point you at Saved data instead of opening an empty journey.
+
+### Changed
+
+- Saved data shows Global and Non-Global as two columns, with journey size on one line and a character list that stretches with the options window.
+- The Saved data delete picker uses Blizzard's dropdown chrome.
+
+### Fixed
+
+- Moving a journey to Non-Global or back to Global recovers across a half-finished login, so an interrupted migrate does not strand the route.
+- Private party names stay readable after other characters log out.
+- The locked replay view no longer redraws the previous character's trail.
+
 ## 0.1.1-beta
 
 ### Added
