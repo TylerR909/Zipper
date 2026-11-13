@@ -437,6 +437,120 @@ function ns.DB:EnsureStore()
 	end
 end
 
+-- A body owns sessions and tracks. A stripped roster stub must not grow empty
+-- tables or BindPlayer / Open will treat it as live history.
+local function HasBody(journey)
+	return type(journey) == "table"
+		and type(journey.sessions) == "table"
+		and type(journey.tracks) == "table"
+end
+
+local function ScopeOf(journey)
+	if type(journey) == "table" and journey.scope == "private" then
+		return "private"
+	end
+	return "global"
+end
+
+local function EnsureCharDB()
+	if type(ZipperCharDB) ~= "table" then
+		ZipperCharDB = {}
+	end
+	return ZipperCharDB
+end
+
+local function ClearLegacyCharKeys(db)
+	if type(db) ~= "table" then
+		return
+	end
+	db.sessions = nil
+	db.tracks = nil
+	db.version = nil
+	db.nextId = nil
+	db.sizeLog = nil
+	db.levels = nil
+	db.with = nil
+	db.name = nil
+	db.realm = nil
+	db.class = nil
+	db.bytes = nil
+end
+
+local function SessionCountOf(journey)
+	if type(journey) ~= "table" then
+		return 0
+	end
+	if type(journey.sessions) == "table" then
+		return #journey.sessions
+	end
+	if type(journey.sessionCount) == "number" then
+		return journey.sessionCount
+	end
+	return 0
+end
+
+local function NewStub(from, scope)
+	local stub = {
+		name = (from and from.name) or "Character",
+		realm = (from and from.realm) or "",
+		scope = scope or ScopeOf(from),
+		sessionCount = SessionCountOf(from),
+	}
+	if from and type(from.class) == "string" and from.class ~= "" then
+		stub.class = from.class
+	end
+	if from and type(from.bytes) == "number" then
+		stub.bytes = from.bytes
+	end
+	return stub
+end
+
+local function EnsureBodyShape(journey)
+	if type(journey) ~= "table" then
+		return false
+	end
+	if type(journey.sessions) ~= "table" then
+		journey.sessions = {}
+	end
+	if type(journey.tracks) ~= "table" then
+		journey.tracks = {}
+	end
+	if type(journey.nextId) ~= "number" then
+		journey.nextId = #journey.sessions + 1
+	end
+	if type(journey.version) ~= "number" then
+		journey.version = 3
+	end
+	return true
+end
+
+local function CharBody()
+	local db = type(ZipperCharDB) == "table" and ZipperCharDB or nil
+	if db and HasBody(db.journey) then
+		return db.journey
+	end
+	return nil
+end
+
+local function SyncStubFromBody(stub, body)
+	if type(stub) ~= "table" or type(body) ~= "table" then
+		return
+	end
+	if type(body.name) == "string" then
+		stub.name = body.name
+	end
+	if type(body.realm) == "string" then
+		stub.realm = body.realm
+	end
+	if type(body.class) == "string" and body.class ~= "" then
+		stub.class = body.class
+	end
+	stub.sessionCount = SessionCountOf(body)
+	if type(body.bytes) == "number" then
+		stub.bytes = body.bytes
+	end
+end
+
 function ns.DB:CopyLegacy(source, journey)
 	if type(source) ~= "table" then
 		return false
@@ -481,6 +595,289 @@ function ns.DB:CopyLegacy(source, journey)
 	return #journey.sessions > 0
 end
 
+function ns.DB:JourneyAccessible(key)
+	self:EnsureStore()
+	if type(key) ~= "string" then
+		return false
+	end
+	local roster = ZipperDB.journeys[key]
+	if type(roster) ~= "table" then
+		return false
+	end
+	local pending = roster.pending
+	if pending == "toGlobal" or pending == "purgePrivate" then
+		return key == self.playerKey and CharBody() ~= nil
+	end
+	if HasBody(roster) then
+		return true
+	end
+	if ScopeOf(roster) == "private" then
+		return key == self.playerKey and CharBody() ~= nil
+	end
+	return false
+end
+
+function ns.DB:JourneyBody(key)
+	if not self:JourneyAccessible(key) then
+		return nil
+	end
+	local roster = ZipperDB.journeys[key]
+	if HasBody(roster) then
+		return roster
+	end
+	if key == self.playerKey then
+		return CharBody()
+	end
+	return nil
+end
+
+function ns.DB:RosterBytes(entry)
+	if type(entry) ~= "table" then
+		return 0
+	end
+	if HasBody(entry) then
+		return self:JourneyBytes(entry)
+	end
+	if type(entry.bytes) == "number" then
+		return entry.bytes
+	end
+	return 0
+end
+
+-- Point CharDB at the live body table and put a new stub in the account roster.
+-- Do not deep-copy: self.session must keep pointing at the same session object.
+function ns.DB:MigrateSelfToPrivate()
+	self:EnsureStore()
+	local guid = self.playerKey
+	if type(guid) ~= "string" then
+		return false
+	end
+	local roster = ZipperDB.journeys[guid]
+	local body = self.record
+	if not HasBody(body) and HasBody(roster) then
+		body = roster
+	end
+	if not HasBody(body) then
+		return false
+	end
+	local charDB = EnsureCharDB()
+	if charDB.journey == body and roster ~= body and not HasBody(roster) then
+		if type(roster) ~= "table" then
+			roster = NewStub(body, "private")
+			ZipperDB.journeys[guid] = roster
+		end
+		roster.scope = "private"
+		roster.pending = nil
+		roster.migrating = nil
+		SyncStubFromBody(roster, body)
+		charDB.imported = true
+		ClearLegacyCharKeys(charDB)
+		self.record = body
+		if self.viewKey == guid then
+			self.char = body
+		end
+		return true
+	end
+	if type(roster) ~= "table" then
+		roster = NewStub(body, "private")
+		ZipperDB.journeys[guid] = roster
+	end
+	roster.migrating = true
+	charDB.imported = true
+	ClearLegacyCharKeys(charDB)
+	charDB.journey = body
+	local stub = NewStub(body, "private")
+	stub.migrating = nil
+	stub.pending = nil
+	ZipperDB.journeys[guid] = stub
+	self.record = body
+	if self.viewKey == guid then
+		self.char = body
+	end
+	return true
+end
+
+function ns.DB:MigrateSelfToGlobal()
+	self:EnsureStore()
+	local guid = self.playerKey
+	if type(guid) ~= "string" then
+		return false
+	end
+	local charDB = EnsureCharDB()
+	local body = CharBody() or self.record
+	local roster = ZipperDB.journeys[guid]
+	if not HasBody(body) then
+		if HasBody(roster) then
+			roster.scope = "global"
+			roster.pending = nil
+			roster.migrating = nil
+			self.record = roster
+			if self.viewKey == guid then
+				self.char = roster
+			end
+			return true
+		end
+		return false
+	end
+	if type(roster) == "table" then
+		roster.migrating = true
+		if type(roster.name) == "string" then
+			body.name = roster.name
+		end
+		if type(roster.realm) == "string" then
+			body.realm = roster.realm
+		end
+		if type(roster.class) == "string" and roster.class ~= "" then
+			body.class = roster.class
+		end
+	end
+	body.scope = "global"
+	body.pending = nil
+	body.migrating = nil
+	body.sessionCount = nil
+	ZipperDB.journeys[guid] = body
+	charDB.journey = nil
+	charDB.imported = true
+	ClearLegacyCharKeys(charDB)
+	self.record = body
+	if self.viewKey == guid then
+		self.char = body
+	end
+	return true
+end
+
+function ns.DB:ApplyPendingSelf()
+	local guid = self.playerKey
+	local roster = guid and ZipperDB.journeys[guid] or nil
+	if type(roster) ~= "table" then
+		return nil
+	end
+	local pending = roster.pending
+	if pending == "toPrivate" then
+		if self:MigrateSelfToPrivate() then
+			return "toPrivate"
+		end
+	elseif pending == "toGlobal" then
+		if self:MigrateSelfToGlobal() then
+			return "toGlobal"
+		end
+	elseif pending == "purgePrivate" then
+		local charDB = EnsureCharDB()
+		charDB.journey = nil
+		charDB.imported = true
+		ClearLegacyCharKeys(charDB)
+		local name = roster.name or "Character"
+		local realm = roster.realm or ""
+		local fresh = self:NewJourney(name, realm)
+		fresh.class = roster.class
+		fresh.scope = "global"
+		ZipperDB.journeys[guid] = fresh
+		self.record = fresh
+		if self.viewKey == guid then
+			self.char = fresh
+		end
+		return "purgePrivate"
+	end
+	return nil
+end
+
+function ns.DB:RecoverMigrating()
+	local guid = self.playerKey
+	local roster = guid and ZipperDB.journeys[guid] or nil
+	if type(roster) ~= "table" or not roster.migrating then
+		return false
+	end
+	local charBody = CharBody()
+	local accountBody = HasBody(roster) and roster or nil
+	if accountBody and charBody then
+		if ScopeOf(roster) == "private" or roster.pending == "toPrivate" then
+			local charDB = EnsureCharDB()
+			charDB.journey = charBody
+			local stub = NewStub(charBody, "private")
+			ZipperDB.journeys[guid] = stub
+			self.record = charBody
+		else
+			local charDB = EnsureCharDB()
+			charDB.journey = nil
+			ClearLegacyCharKeys(charDB)
+			accountBody.scope = "global"
+			accountBody.pending = nil
+			accountBody.migrating = nil
+			self.record = accountBody
+		end
+		return true
+	end
+	if charBody and not accountBody then
+		return self:MigrateSelfToPrivate()
+	end
+	if accountBody and not charBody then
+		roster.migrating = nil
+		if roster.pending == "toPrivate" then
+			return self:MigrateSelfToPrivate()
+		end
+		roster.scope = "global"
+		roster.pending = nil
+		self.record = accountBody
+		return true
+	end
+	roster.migrating = nil
+	return false
+end
+
+-- wantGlobal true = Global checkbox on. Missing scope stays Global until toggled.
+function ns.DB:SetGlobal(key, wantGlobal)
+	self:EnsureStore()
+	if type(key) ~= "string" then
+		return false
+	end
+	local roster = ZipperDB.journeys[key]
+	if type(roster) ~= "table" then
+		return false
+	end
+	wantGlobal = wantGlobal and true or false
+	if key == self.playerKey then
+		if wantGlobal then
+			if roster.pending == "toPrivate" and HasBody(roster) then
+				roster.scope = "global"
+				roster.pending = nil
+				roster.migrating = nil
+				return true
+			end
+			return self:MigrateSelfToGlobal()
+		end
+		if roster.pending == "toGlobal" then
+			roster.scope = "private"
+			roster.pending = nil
+			return true
+		end
+		return self:MigrateSelfToPrivate()
+	end
+	if wantGlobal then
+		if roster.pending == "toPrivate" and HasBody(roster) then
+			roster.scope = "global"
+			roster.pending = nil
+			return true
+		end
+		if ScopeOf(roster) == "global" and roster.pending == nil then
+			return true
+		end
+		roster.scope = "global"
+		roster.pending = "toGlobal"
+		return true
+	end
+	if roster.pending == "toGlobal" then
+		roster.scope = "private"
+		roster.pending = nil
+		return true
+	end
+	if ScopeOf(roster) == "private" and not HasBody(roster) and roster.pending == nil then
+		return true
+	end
+	roster.scope = "private"
+	roster.pending = "toPrivate"
+	return true
+end
+
 function ns.DB:BindPlayer()
 	self:EnsureStore()
 	local guid = UnitGUID and UnitGUID("player") or nil
@@ -495,34 +892,94 @@ function ns.DB:BindPlayer()
 	if type(realm) ~= "string" then
 		realm = ""
 	end
-	local journey = ZipperDB.journeys[guid]
-	if type(journey) ~= "table" then
-		journey = self:NewJourney(name, realm)
-		ZipperDB.journeys[guid] = journey
+	self.playerKey = guid
+
+	local roster = ZipperDB.journeys[guid]
+	if type(roster) ~= "table" then
+		roster = self:NewJourney(name, realm)
+		ZipperDB.journeys[guid] = roster
 	end
-	journey.name = name
-	journey.realm = realm
+	roster.name = name
+	roster.realm = realm
 	local _, classFile = UnitClass and UnitClass("player") or nil
 	if type(classFile) == "string" and classFile ~= "" and not (issecretvalue and issecretvalue(classFile)) then
-		journey.class = classFile
+		roster.class = classFile
 	end
-	if type(journey.sessions) ~= "table" then
-		journey.sessions = {}
+
+	local charDB = type(ZipperCharDB) == "table" and ZipperCharDB or nil
+	if charDB and HasBody(charDB.journey) then
+		charDB.imported = true
+		ClearLegacyCharKeys(charDB)
+	elseif charDB and not charDB.imported then
+		if HasBody(roster) and #roster.sessions == 0 then
+			if self:CopyLegacy(charDB, roster) then
+				charDB.imported = true
+				ClearLegacyCharKeys(charDB)
+			end
+		elseif not HasBody(roster) and ScopeOf(roster) == "global" and roster.pending == nil then
+			EnsureBodyShape(roster)
+			if self:CopyLegacy(charDB, roster) then
+				charDB.imported = true
+				ClearLegacyCharKeys(charDB)
+			end
+		end
+		if not charDB.imported and not HasBody(charDB) and not (type(charDB.sessions) == "table" and #charDB.sessions > 0) then
+			charDB.imported = true
+		end
 	end
-	if type(journey.tracks) ~= "table" then
-		journey.tracks = {}
+
+	self:RecoverMigrating()
+	self:ApplyPendingSelf()
+
+	roster = ZipperDB.journeys[guid]
+	local body
+	if ScopeOf(roster) == "private" or roster.pending == "toGlobal" or roster.pending == "purgePrivate" then
+		body = CharBody()
+		if not body and HasBody(roster) and roster.pending == "toPrivate" then
+			body = roster
+		end
+	elseif HasBody(roster) then
+		body = roster
+	else
+		body = CharBody()
 	end
-	if type(journey.nextId) ~= "number" then
-		journey.nextId = #journey.sessions + 1
+
+	if not HasBody(body) then
+		if ScopeOf(roster) == "private" and not HasBody(roster) then
+			-- Private stub with no CharDB body yet: start a fresh private body.
+			body = self:NewJourney(name, realm)
+			body.class = roster.class
+			local db = EnsureCharDB()
+			db.imported = true
+			ClearLegacyCharKeys(db)
+			db.journey = body
+			local stub = NewStub(roster, "private")
+			stub.pending = nil
+			stub.migrating = nil
+			ZipperDB.journeys[guid] = stub
+			roster = stub
+		else
+			EnsureBodyShape(roster)
+			body = roster
+		end
+	elseif body == roster then
+		EnsureBodyShape(body)
+	else
+		EnsureBodyShape(body)
+		SyncStubFromBody(roster, body)
 	end
-	if #journey.sessions == 0 and type(ZipperCharDB) == "table" and not ZipperCharDB.imported then
-		self:CopyLegacy(ZipperCharDB, journey)
-	end
-	self.playerKey = guid
-	self.record = journey
+
+	self.record = body
 	if not self.viewKey or not ZipperDB.journeys[self.viewKey] then
 		self.viewKey = guid
-		self.char = journey
+		self.char = body
+	elseif self.viewKey == guid then
+		self.char = body
+	elseif not self:JourneyAccessible(self.viewKey) then
+		self.viewKey = guid
+		self.char = body
+	else
+		self.char = self:JourneyBody(self.viewKey) or body
 	end
 	return true
 end
@@ -547,6 +1004,12 @@ function ns.DB:JourneyClass(journey, key)
 			classFile = person.c
 		end
 	end
+	if not classFile and type(key) == "string" then
+		local roster = ZipperDB and ZipperDB.journeys and ZipperDB.journeys[key]
+		if type(roster) == "table" and type(roster.class) == "string" and roster.class ~= "" then
+			classFile = roster.class
+		end
+	end
 	if classFile and type(journey) == "table" then
 		journey.class = classFile
 	end
@@ -555,26 +1018,49 @@ end
 
 function ns.DB:SetView(key)
 	self:EnsureStore()
-	local journey = ZipperDB.journeys[key]
-	if type(journey) ~= "table" then
+	if not self:JourneyAccessible(key) then
+		return false
+	end
+	local body = self:JourneyBody(key)
+	if type(body) ~= "table" then
 		return false
 	end
 	self.viewKey = key
-	self.char = journey
+	self.char = body
 	return true
 end
 
 function ns.DB:CharacterList()
 	self:EnsureStore()
 	local list = {}
-	for key, journey in pairs(ZipperDB.journeys) do
-		if type(journey) == "table" then
+	for key, roster in pairs(ZipperDB.journeys) do
+		if type(roster) == "table" then
+			local body = self:JourneyBody(key)
+			local sessions
+			if HasBody(roster) then
+				sessions = #roster.sessions
+			else
+				sessions = SessionCountOf(roster)
+			end
+			local bytes
+			if body then
+				bytes = self:JourneyBytes(body)
+				if not HasBody(roster) then
+					roster.bytes = bytes
+					roster.sessionCount = sessions
+				end
+			else
+				bytes = self:RosterBytes(roster)
+			end
 			list[#list + 1] = {
 				key = key,
-				label = self:JourneyLabel(journey),
-				sessions = type(journey.sessions) == "table" and #journey.sessions or 0,
-				bytes = self:JourneyBytes(journey),
+				label = self:JourneyLabel(roster),
+				sessions = sessions,
+				bytes = bytes,
 				current = key == self.playerKey,
+				scope = ScopeOf(roster),
+				pending = roster.pending,
+				accessible = body ~= nil,
 			}
 		end
 	end
@@ -613,17 +1099,39 @@ function ns.DB:HostFor(session)
 	return self.record or self.char
 end
 
+local function PackJourneyHost(self, journey)
+	if type(journey) ~= "table" or type(journey.tracks) ~= "table" then
+		return nil
+	end
+	for id, track in pairs(journey.tracks) do
+		if type(track) == "table" then
+			journey.tracks[id] = self:PackTrack(track)
+		end
+	end
+	local bytes = self:MeasureJourney(journey)
+	journey.bytes = bytes
+	return bytes
+end
+
 function ns.DB:Flush()
 	self:EnsureStore()
 	self:PruneIdleCompany(false)
+	local packed = {}
 	for _, journey in pairs(ZipperDB.journeys) do
-		if type(journey) == "table" and type(journey.tracks) == "table" then
-			for id, track in pairs(journey.tracks) do
-				if type(track) == "table" then
-					journey.tracks[id] = self:PackTrack(track)
-				end
-			end
-			journey.bytes = self:MeasureJourney(journey)
+		if HasBody(journey) then
+			PackJourneyHost(self, journey)
+			packed[journey] = true
+		end
+	end
+	local record = self.record
+	if HasBody(record) and not packed[record] then
+		local bytes = PackJourneyHost(self, record)
+		local guid = self.playerKey
+		local stub = guid and ZipperDB.journeys[guid] or nil
+		if type(stub) == "table" and stub ~= record then
+			stub.bytes = bytes
+			stub.sessionCount = SessionCountOf(record)
+			SyncStubFromBody(stub, record)
 		end
 	end
 end
@@ -1377,18 +1885,32 @@ function ns.DB:DropQuietSessions()
 		return 0
 	end
 	local dropped = 0
-	for _, journey in pairs(journeys) do
-		local sessions = type(journey) == "table" and journey.sessions or nil
-		if type(sessions) == "table" then
-			for i = #sessions, 1, -1 do
-				local session = sessions[i]
-				if session ~= self.session and not self:SessionWorthKeeping(journey, session) then
-					if self:RemoveSession(journey, i) then
-						dropped = dropped + 1
-					end
+	local seen = {}
+	local function sweep(journey)
+		if type(journey) ~= "table" or seen[journey] then
+			return
+		end
+		seen[journey] = true
+		local sessions = journey.sessions
+		if type(sessions) ~= "table" then
+			return
+		end
+		for i = #sessions, 1, -1 do
+			local session = sessions[i]
+			if session ~= self.session and not self:SessionWorthKeeping(journey, session) then
+				if self:RemoveSession(journey, i) then
+					dropped = dropped + 1
 				end
 			end
 		end
+	end
+	for _, journey in pairs(journeys) do
+		if HasBody(journey) then
+			sweep(journey)
+		end
+	end
+	if HasBody(self.record) then
+		sweep(self.record)
 	end
 	if dropped > 0 then
 		self:PruneIdleCompany(false)
@@ -1404,6 +1926,9 @@ function ns.DB:Open(now, forceNew)
 	end
 	local host = self.record
 	if not host then
+		return nil, false
+	end
+	if not EnsureBodyShape(host) then
 		return nil, false
 	end
 	if self.session and not forceNew then
@@ -2189,8 +2714,22 @@ function ns.DB:PruneIdleCompany(closedOnly)
 	if type(journeys) ~= "table" then
 		return
 	end
+	local hosts = {}
+	local function addHost(journey)
+		if type(journey) == "table" and not hosts[journey] then
+			hosts[journey] = true
+			hosts[#hosts + 1] = journey
+		end
+	end
 	for _, journey in pairs(journeys) do
-		local with = type(journey) == "table" and journey.with or nil
+		if HasBody(journey) then
+			addHost(journey)
+		end
+	end
+	addHost(self.record)
+	for i = 1, #hosts do
+		local journey = hosts[i]
+		local with = journey.with
 		if type(with) == "table" then
 			local liveEnd = 0
 			if journey == self.record and self.session then
@@ -2246,8 +2785,8 @@ function ns.DB:PruneIdleCompany(closedOnly)
 	end
 	for guid in pairs(people) do
 		local used = false
-		for _, journey in pairs(journeys) do
-			local with = type(journey) == "table" and journey.with or nil
+		for i = 1, #hosts do
+			local with = hosts[i].with
 			if type(with) == "table" and type(with[guid]) == "table" and #with[guid] > 0 then
 				used = true
 				break
@@ -2430,6 +2969,17 @@ local function CompanyInstanceRuns(self, sessions)
 end
 
 local function JourneyKey(journey)
+	if type(journey) ~= "table" then
+		return nil
+	end
+	local db = ns.DB
+	if db and journey == db.record and type(db.playerKey) == "string" then
+		return db.playerKey
+	end
+	local charBody = CharBody()
+	if charBody and journey == charBody and db and type(db.playerKey) == "string" then
+		return db.playerKey
+	end
 	if not ZipperDB or type(ZipperDB.journeys) ~= "table" then
 		return nil
 	end
@@ -2897,8 +3447,24 @@ end
 function ns.DB:EstimateAll()
 	self:EnsureStore()
 	local total = self:MeasurePeople()
-	for _, journey in pairs(ZipperDB.journeys) do
-		total = total + self:JourneyBytes(journey)
+	local counted = {}
+	for key, roster in pairs(ZipperDB.journeys) do
+		if type(roster) == "table" then
+			local body = self:JourneyBody(key)
+			if body and not counted[body] then
+				counted[body] = true
+				total = total + self:JourneyBytes(body)
+				if not HasBody(roster) then
+					roster.bytes = body.bytes
+					roster.sessionCount = SessionCountOf(body)
+				end
+			elseif not body then
+				total = total + self:RosterBytes(roster)
+			end
+		end
+	end
+	if HasBody(self.record) and not counted[self.record] then
+		total = total + self:JourneyBytes(self.record)
 	end
 	return total
 end
@@ -2981,17 +3547,22 @@ end
 function ns.DB:Purge(key)
 	self:EnsureStore()
 	key = key or self.playerKey
-	if not key or type(ZipperDB.journeys[key]) ~= "table" then
+	local roster = key and ZipperDB.journeys[key] or nil
+	if not key or type(roster) ~= "table" then
 		return false
 	end
 	local removingCurrent = key == self.playerKey
 	if removingCurrent then
-		local name, realm = "Character", ""
-		if self.record then
-			name = self.record.name or name
-			realm = self.record.realm or realm
-		end
+		local name = (self.record and self.record.name) or roster.name or "Character"
+		local realm = (self.record and self.record.realm) or roster.realm or ""
+		local class = (self.record and self.record.class) or roster.class
+		local charDB = EnsureCharDB()
+		charDB.journey = nil
+		charDB.imported = true
+		ClearLegacyCharKeys(charDB)
 		local fresh = self:NewJourney(name, realm)
+		fresh.class = class
+		fresh.scope = "global"
 		ZipperDB.journeys[key] = fresh
 		self.record = fresh
 		self.session = nil
@@ -2999,8 +3570,20 @@ function ns.DB:Purge(key)
 			self.char = fresh
 		end
 		self:Open(self:Now(), true)
-	else
+	elseif HasBody(roster) then
+		-- Body still in the account file (Global or pending toPrivate).
 		ZipperDB.journeys[key] = nil
+		if self.viewKey == key then
+			self.viewKey = self.playerKey
+			self.char = self.record
+		end
+	else
+		-- Body only on that character's CharDB. Keep the stub until they log in.
+		roster.scope = "private"
+		roster.pending = "purgePrivate"
+		roster.migrating = nil
+		roster.bytes = 0
+		roster.sessionCount = 0
 		if self.viewKey == key then
 			self.viewKey = self.playerKey
 			self.char = self.record
