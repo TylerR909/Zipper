@@ -17,6 +17,15 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		-- A reload within a few minutes of the last logout stamp continues that session.
 		ns.started = true
 		ns.DB:BindPlayer()
+		local migrated = ns.DB.pendingNotice
+		ns.DB.pendingNotice = nil
+		if migrated == "toPrivate" then
+			ns:Print(string.format(L["Moved %s to a Non-Global save."], ns.DB:JourneyLabel(ns.DB.record)))
+		elseif migrated == "toGlobal" then
+			ns:Print(string.format(L["Moved %s back to the Global save."], ns.DB:JourneyLabel(ns.DB.record)))
+		elseif migrated == "purgePrivate" then
+			ns:Print(string.format(L["Finished deleting %s's Non-Global journey."], ns.DB:JourneyLabel(ns.DB.record)))
+		end
 		if ns.Config:SkipQuiet() and ns.DB:DropQuietTail() > 0 then
 			ns:Print(L["Skipped a quiet stop from the last login."])
 		end

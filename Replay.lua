@@ -2230,9 +2230,61 @@ function ns.Replay:StyleCharButton()
 	end
 end
 
+function ns.Replay:ClearBlocked()
+	self.blockedKey = nil
+	if self.blockedText then
+		self.blockedText:Hide()
+	end
+	if self.blockedLink then
+		self.blockedLink:Hide()
+	end
+	if self.scroll then
+		self.scroll:Show()
+	end
+end
+
+function ns.Replay:ShowBlocked(key, label, pending)
+	self.blockedKey = key
+	self.blockedLabel = label
+	self.blockedPending = pending
+	if self.charPicker then
+		self.charPicker:Hide()
+	end
+	if self.charButton and label then
+		self.charButton:SetText(label)
+	end
+	if self.scroll then
+		self.scroll:Hide()
+	end
+	if self.blockedText then
+		if pending == "toGlobal" then
+			self.blockedText:SetText(string.format(
+				L["%s's journey is not on this character yet. Log in as them once to finish moving it to Global, or open Saved data to change your mind."],
+				label
+			))
+		else
+			self.blockedText:SetText(string.format(
+				L["%s's data is Non-Global; can't access it from this character. Globalize their data in Saved data to view."],
+				label
+			))
+		end
+		self.blockedText:Show()
+	end
+	if self.blockedLink then
+		self.blockedLink:Show()
+	end
+	if self.scopeText then
+		self.scopeText:SetText(self:ScopeCaption())
+	end
+end
+
 function ns.Replay:RefreshCharacters()
-	if self.charButton and ns.DB.char then
-		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+	if self.charButton then
+		if self.blockedKey and self.blockedLabel then
+			self.charButton:SetText(self.blockedLabel)
+		elseif ns.DB.char then
+			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+		end
 	end
 	local picker = self.charPicker
 	if not picker then
@@ -2250,11 +2302,17 @@ function ns.Replay:RefreshCharacters()
 			row.label:SetPoint("RIGHT", -6, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
-				ns.Replay:RememberPlayhead()
-				ns.DB:SetView(button.charKey)
+				local info = button.rowInfo
 				if ns.Replay.charPicker then
 					ns.Replay.charPicker:Hide()
 				end
+				if info and not info.accessible then
+					ns.Replay:ShowBlocked(info.key, info.label, info.pending)
+					return
+				end
+				ns.Replay:ClearBlocked()
+				ns.Replay:RememberPlayhead()
+				ns.DB:SetView(button.charKey)
 				if button.charKey == ns.DB.playerKey then
 					ns.Replay:SetMode("current", nil, true)
 				else
@@ -2264,10 +2322,18 @@ function ns.Replay:RefreshCharacters()
 			self.charRows[i] = row
 		end
 		row.charKey = list[i].key
+		row.rowInfo = list[i]
 		local mark = list[i].current and "  · recording" or ""
+		if not list[i].accessible then
+			mark = mark .. "  · locked"
+		end
 		row.label:SetText(string.format("%s  (%d)%s", list[i].label, list[i].sessions, mark))
-		if list[i].key == ns.DB.viewKey then
+		if self.blockedKey and list[i].key == self.blockedKey then
+			row.label:SetTextColor(1, 0.55, 0.2)
+		elseif list[i].key == ns.DB.viewKey and not self.blockedKey then
 			row.label:SetTextColor(1, 0.86, 0.45)
+		elseif not list[i].accessible then
+			row.label:SetTextColor(0.55, 0.52, 0.48)
 		else
 			row.label:SetTextColor(0.9, 0.88, 0.78)
 		end
@@ -2283,6 +2349,12 @@ function ns.Replay:RefreshCharacters()
 end
 
 function ns.Replay:ScopeCaption()
+	if self.blockedKey and self.blockedLabel then
+		if self.blockedPending == "toGlobal" then
+			return string.format(L["%s is waiting on a login before their journey is Global here."], self.blockedLabel)
+		end
+		return string.format(L["%s's journey is Non-Global on this character."], self.blockedLabel)
+	end
 	local who = ns.DB:JourneyLabel(ns.DB.char)
 	local other = ns.DB.viewKey and ns.DB.playerKey and ns.DB.viewKey ~= ns.DB.playerKey
 	local count = #ns.DB:Sessions()
@@ -3457,6 +3529,7 @@ function ns.Replay:OnDataChanged()
 end
 
 function ns.Replay:SetMode(mode, index, alreadyRemembered)
+	self:ClearBlocked()
 	if mode == "current" and ns.DB.playerKey then
 		ns.DB:SetView(ns.DB.playerKey)
 	end
@@ -4445,6 +4518,39 @@ function ns.Replay:CreateFrame()
 	content:SetSize(260, 22)
 	scroll:SetScrollChild(content)
 
+	local blockedText = inset:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	blockedText:SetPoint("TOPLEFT", 12, -14)
+	blockedText:SetPoint("RIGHT", inset, "RIGHT", -12, 0)
+	blockedText:SetJustifyH("LEFT")
+	blockedText:SetJustifyV("TOP")
+	blockedText:SetWordWrap(true)
+	blockedText:SetTextColor(0.93, 0.82, 0.55)
+	blockedText:Hide()
+
+	local blockedLink = CreateFrame("Button", nil, inset)
+	blockedLink:SetPoint("TOPLEFT", blockedText, "BOTTOMLEFT", 0, -10)
+	blockedLink:SetSize(160, 18)
+	blockedLink.label = blockedLink:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	blockedLink.label:SetAllPoints()
+	blockedLink.label:SetJustifyH("LEFT")
+	blockedLink.label:SetTextColor(0.35, 0.75, 1)
+	blockedLink.label:SetText(L["Open Saved data"])
+	blockedLink:SetFontString(blockedLink.label)
+	blockedLink:SetScript("OnClick", function()
+		if ns.Config and ns.Config.OpenSaved then
+			ns.Config:OpenSaved()
+		elseif ns.Config then
+			ns.Config:Toggle()
+		end
+	end)
+	blockedLink:SetScript("OnEnter", function(self)
+		self.label:SetTextColor(0.55, 0.88, 1)
+	end)
+	blockedLink:SetScript("OnLeave", function(self)
+		self.label:SetTextColor(0.35, 0.75, 1)
+	end)
+	blockedLink:Hide()
+
 	local play = MakeButton(frame, L["Play"], 56)
 	play:SetPoint("TOPLEFT", 14, -418)
 	play:SetScript("OnClick", function()
@@ -4687,6 +4793,8 @@ function ns.Replay:CreateFrame()
 	self.charButton = charButton
 	self.charPicker = charPicker
 	self.charRows = {}
+	self.blockedText = blockedText
+	self.blockedLink = blockedLink
 	self.sessionButton = sessionButton
 	self.levelsButton = levelsButton
 	self.selectAllButton = selectAll

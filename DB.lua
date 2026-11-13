@@ -755,10 +755,12 @@ function ns.DB:ApplyPendingSelf()
 	local pending = roster.pending
 	if pending == "toPrivate" then
 		if self:MigrateSelfToPrivate() then
+			self.pendingNotice = "toPrivate"
 			return "toPrivate"
 		end
 	elseif pending == "toGlobal" then
 		if self:MigrateSelfToGlobal() then
+			self.pendingNotice = "toGlobal"
 			return "toGlobal"
 		end
 	elseif pending == "purgePrivate" then
@@ -776,6 +778,7 @@ function ns.DB:ApplyPendingSelf()
 		if self.viewKey == guid then
 			self.char = fresh
 		end
+		self.pendingNotice = "purgePrivate"
 		return "purgePrivate"
 	end
 	return nil

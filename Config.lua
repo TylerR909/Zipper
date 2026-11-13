@@ -586,9 +586,27 @@ function ns.Config:CreateFrame()
 	sizeText:SetJustifyV("TOP")
 	sizeText:SetText(L["Saved journeys"])
 
+	local isoNote = pages.saved:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	isoNote:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -10)
+	isoNote:SetPoint("RIGHT", pages.saved, "RIGHT", -16, 0)
+	isoNote:SetJustifyH("LEFT")
+	isoNote:SetText(L["Uncheck Global to keep that character's journey in a per-character save. Other characters load less, but cannot replay it until you Globalize it again."])
+
+	local isoHeader = pages.saved:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	isoHeader:SetPoint("TOPLEFT", isoNote, "BOTTOMLEFT", 0, -12)
+	isoHeader:SetText(L["Global"])
+
+	local isoScroll = CreateFrame("ScrollFrame", "ZipperConfigIsolationScroll", pages.saved, "UIPanelScrollFrameTemplate")
+	isoScroll:SetPoint("TOPLEFT", isoHeader, "BOTTOMLEFT", 0, -6)
+	isoScroll:SetPoint("RIGHT", pages.saved, "RIGHT", -36, 0)
+	isoScroll:SetHeight(112)
+	local isoContent = CreateFrame("Frame", nil, isoScroll)
+	isoContent:SetSize(400, 16)
+	isoScroll:SetScrollChild(isoContent)
+
 	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", pages.saved, "UIPanelButtonTemplate")
 	purgeDrop:SetSize(280, 22)
-	purgeDrop:SetPoint("TOPLEFT", sizeText, "BOTTOMLEFT", 0, -16)
+	purgeDrop:SetPoint("TOPLEFT", isoScroll, "BOTTOMLEFT", 0, -16)
 	purgeDrop:SetText(L["Saved characters"])
 	purgeDrop:SetScript("OnClick", function()
 		ns.Config:TogglePurgeList()
@@ -677,6 +695,9 @@ function ns.Config:CreateFrame()
 	self.glanceSlider = glance
 	self.glanceText = glanceText
 	self.sizeText = sizeText
+	self.isoScroll = isoScroll
+	self.isoContent = isoContent
+	self.isoRows = {}
 	self.purgeDrop = purgeDrop
 	self.purgeList = purgeList
 	self.purgeRows = {}
@@ -713,6 +734,7 @@ function ns.Config:Refresh()
 		end
 	end
 	self:RefreshSize()
+	self:RefreshIsolationList()
 end
 
 local function FormatBytes(bytes)
@@ -737,6 +759,109 @@ function ns.Config:GrowthText()
 		return ""
 	end
 	return string.format(L["About %s per hour."], FormatBytes(perHour))
+end
+
+function ns.Config:IsolationTooltip(row)
+	if not row or not row.pending then
+		return nil
+	end
+	if row.pending == "purgePrivate" then
+		return L["You must log in to this character to finish deleting its Non-Global journey."]
+	end
+	if row.pending == "toGlobal" then
+		return L["You must log in to this character to migrate its data to Global."]
+	end
+	if row.pending == "toPrivate" then
+		return L["You must log in to this character to migrate its data to Non-Global."]
+	end
+	return L["You must log in to this character to migrate its data to Non-Global/Global."]
+end
+
+function ns.Config:RefreshIsolationList()
+	local content = self.isoContent
+	if not content or not ns.DB or not ns.DB.CharacterList then
+		return
+	end
+	local list = ns.DB:CharacterList()
+	self.isoRows = self.isoRows or {}
+	local width = (self.isoScroll and self.isoScroll:GetWidth()) or 400
+	if width < 200 then
+		width = 400
+	end
+	content:SetWidth(width)
+	for i = 1, #list do
+		local info = list[i]
+		local row = self.isoRows[i]
+		if not row then
+			row = CreateFrame("Frame", nil, content)
+			row:SetHeight(24)
+			row.box = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+			row.box:SetPoint("LEFT", 0, 0)
+			row.box:SetSize(24, 24)
+			row.box:SetScript("OnClick", function(box)
+				local key = box.charKey
+				if not key or not ns.DB.SetGlobal then
+					return
+				end
+				ns.DB:SetGlobal(key, box:GetChecked())
+				ns.Config:RefreshIsolationList()
+				ns.Config:RefreshPurgeList()
+				ns.Config:RefreshSize()
+				if ns.OnDataChanged then
+					ns.OnDataChanged()
+				end
+			end)
+			row.warn = row:CreateTexture(nil, "ARTWORK")
+			row.warn:SetSize(14, 14)
+			row.warn:SetPoint("LEFT", row.box, "RIGHT", 4, 0)
+			row.warn:SetTexture("Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew")
+			row.warn:Hide()
+			row.label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+			row.label:SetPoint("LEFT", row.warn, "RIGHT", 4, 0)
+			row.label:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+			row.label:SetJustifyH("LEFT")
+			row:SetScript("OnEnter", function(frame)
+				local tip = ns.Config:IsolationTooltip(frame.rowInfo)
+				if not tip then
+					return
+				end
+				GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+				GameTooltip:SetText(tip, nil, nil, nil, nil, true)
+				GameTooltip:Show()
+			end)
+			row:SetScript("OnLeave", function()
+				GameTooltip:Hide()
+			end)
+			self.isoRows[i] = row
+		end
+		row.rowInfo = info
+		row.box.charKey = info.key
+		row.box:SetChecked(info.scope ~= "private")
+		row.label:SetText(string.format("%s   %s", info.label, FormatBytes(info.bytes)))
+		local pendingOther = info.pending and info.key ~= ns.DB.playerKey
+		row.warn:SetShown(pendingOther and true or false)
+		row.label:ClearAllPoints()
+		if pendingOther then
+			row.label:SetPoint("LEFT", row.warn, "RIGHT", 4, 0)
+			row.label:SetTextColor(1, 0.55, 0.2)
+		else
+			row.label:SetPoint("LEFT", row.box, "RIGHT", 4, 0)
+			if info.current then
+				row.label:SetTextColor(1, 0.86, 0.45)
+			else
+				row.label:SetTextColor(0.9, 0.88, 0.78)
+			end
+		end
+		row.label:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 24))
+		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+		row:Show()
+	end
+	for i = #list + 1, #self.isoRows do
+		self.isoRows[i]:Hide()
+	end
+	content:SetHeight(math.max(16, #list * 24))
 end
 
 function ns.Config:PaintSize()
@@ -902,6 +1027,9 @@ function ns.Config:ConfirmPurge()
 		return
 	end
 	local label = ns.DB:JourneyLabel(journey)
+	local privateElsewhere = key ~= ns.DB.playerKey
+		and type(journey.sessions) ~= "table"
+		and (journey.scope == "private" or journey.pending == "toGlobal" or journey.pending == "purgePrivate")
 	if not StaticPopupDialogs.ZIPPER_PURGE then
 		StaticPopupDialogs.ZIPPER_PURGE = {
 			text = L["Delete %s?\n\nType gone forever to confirm."],
@@ -922,6 +1050,12 @@ function ns.Config:ConfirmPurge()
 				local accept = DialogAccept(dialog)
 				if accept then
 					accept:Disable()
+				end
+				if dialog.privateElsewhere and dialog.text then
+					dialog.text:SetText(string.format(
+						L["Delete %s?\n\nIts Non-Global journey is wiped the next time that character logs in.\n\nType gone forever to confirm."],
+						dialog.charLabel or ""
+					))
 				end
 			end,
 			EditBoxOnTextChanged = function(editBox)
@@ -946,12 +1080,37 @@ function ns.Config:ConfirmPurge()
 				if ns.DB:Purge(which) then
 					ns.Config.purgeKey = nil
 					ns.Config:RefreshSize()
+					ns.Config:RefreshIsolationList()
+					ns.Config:RefreshPurgeList()
 					ns:Print(string.format(L["%s is gone."], name))
 				end
 			end,
 		}
 	end
-	StaticPopup_Show("ZIPPER_PURGE", label, nil, key)
+	local dialog = StaticPopup_Show("ZIPPER_PURGE", label, nil, key)
+	if dialog then
+		dialog.privateElsewhere = privateElsewhere
+		dialog.charLabel = label
+		if privateElsewhere and dialog.text then
+			dialog.text:SetText(string.format(
+				L["Delete %s?\n\nIts Non-Global journey is wiped the next time that character logs in.\n\nType gone forever to confirm."],
+				label
+			))
+		end
+	end
+end
+
+function ns.Config:OpenSaved()
+	self.page = "saved"
+	self:CreateFrame()
+	self:ShowPage("saved")
+	if Settings and Settings.OpenToCategory and self.category then
+		Settings.OpenToCategory(self.category:GetID())
+	elseif InterfaceOptionsFrame_OpenToCategory then
+		InterfaceOptionsFrame_OpenToCategory(self.frame)
+		InterfaceOptionsFrame_OpenToCategory(self.frame)
+	end
+	self:Refresh()
 end
 
 function ns.Config:Toggle()
