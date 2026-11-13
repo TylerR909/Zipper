@@ -1052,6 +1052,21 @@ function ns.Config:TogglePurgeList()
 	menu:Show()
 end
 
+local function PurgeIsDeferred(key, journey)
+	if not key or type(journey) ~= "table" then
+		return false
+	end
+	if key == ns.DB.playerKey then
+		return false
+	end
+	if type(journey.sessions) == "table" then
+		return false
+	end
+	return journey.scope == "private"
+		or journey.pending == "toGlobal"
+		or journey.pending == "purgePrivate"
+end
+
 function ns.Config:ConfirmPurge()
 	if not StaticPopupDialogs or not StaticPopup_Show then
 		return
@@ -1062,9 +1077,6 @@ function ns.Config:ConfirmPurge()
 		return
 	end
 	local label = ns.DB:JourneyLabel(journey)
-	local privateElsewhere = key ~= ns.DB.playerKey
-		and type(journey.sessions) ~= "table"
-		and (journey.scope == "private" or journey.pending == "toGlobal" or journey.pending == "purgePrivate")
 	if not StaticPopupDialogs.ZIPPER_PURGE then
 		StaticPopupDialogs.ZIPPER_PURGE = {
 			text = L["Delete %s?\n\nType gone forever to confirm."],
@@ -1077,6 +1089,24 @@ function ns.Config:ConfirmPurge()
 			hideOnEscape = true,
 			preferredIndex = 3,
 			OnShow = function(dialog)
+				local which = dialog.data
+				local row = which and ZipperDB and ZipperDB.journeys and ZipperDB.journeys[which]
+				local name = ns.DB:JourneyLabel(row)
+				dialog.deferredPurge = PurgeIsDeferred(which, row)
+				dialog.charLabel = name
+				if dialog.text then
+					if dialog.deferredPurge then
+						dialog.text:SetText(string.format(
+							L["Delete %s?\n\nIts Non-Global journey is wiped the next time that character logs in.\n\nType gone forever to confirm."],
+							name
+						))
+					else
+						dialog.text:SetText(string.format(
+							L["Delete %s?\n\nType gone forever to confirm."],
+							name
+						))
+					end
+				end
 				local box = DialogEditBox(dialog)
 				if box then
 					box:SetText("")
@@ -1085,12 +1115,6 @@ function ns.Config:ConfirmPurge()
 				local accept = DialogAccept(dialog)
 				if accept then
 					accept:Disable()
-				end
-				if dialog.privateElsewhere and dialog.text then
-					dialog.text:SetText(string.format(
-						L["Delete %s?\n\nIts Non-Global journey is wiped the next time that character logs in.\n\nType gone forever to confirm."],
-						dialog.charLabel or ""
-					))
 				end
 			end,
 			EditBoxOnTextChanged = function(editBox)
@@ -1112,27 +1136,22 @@ function ns.Config:ConfirmPurge()
 				local which = data or ns.Config.purgeKey
 				local gone = which and ZipperDB and ZipperDB.journeys and ZipperDB.journeys[which]
 				local name = ns.DB:JourneyLabel(gone)
+				local deferred = dialog.deferredPurge
 				if ns.DB:Purge(which) then
 					ns.Config.purgeKey = nil
 					ns.Config:RefreshSize()
 					ns.Config:RefreshIsolationList()
 					ns.Config:RefreshPurgeList()
-					ns:Print(string.format(L["%s is gone."], name))
+					if deferred then
+						ns:Print(string.format(L["%s will be wiped the next time that character logs in."], name))
+					else
+						ns:Print(string.format(L["%s is gone."], name))
+					end
 				end
 			end,
 		}
 	end
-	local dialog = StaticPopup_Show("ZIPPER_PURGE", label, nil, key)
-	if dialog then
-		dialog.privateElsewhere = privateElsewhere
-		dialog.charLabel = label
-		if privateElsewhere and dialog.text then
-			dialog.text:SetText(string.format(
-				L["Delete %s?\n\nIts Non-Global journey is wiped the next time that character logs in.\n\nType gone forever to confirm."],
-				label
-			))
-		end
-	end
+	StaticPopup_Show("ZIPPER_PURGE", label, nil, key)
 end
 
 function ns.Config:OpenSaved()

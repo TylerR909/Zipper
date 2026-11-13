@@ -551,6 +551,47 @@ local function SyncStubFromBody(stub, body)
 	end
 end
 
+local function PeopleRefsFromWith(with)
+	local refs = {}
+	if type(with) ~= "table" then
+		return refs
+	end
+	for guid, spans in pairs(with) do
+		if type(spans) == "table" and #spans > 0 then
+			refs[guid] = true
+		end
+	end
+	return refs
+end
+
+local function SnapshotPeopleRefs(stub, body)
+	if type(stub) ~= "table" then
+		return
+	end
+	local refs = PeopleRefsFromWith(body and body.with)
+	if next(refs) then
+		stub.peopleRefs = refs
+	else
+		stub.peopleRefs = nil
+	end
+end
+
+local function StubHadPrivateData(roster)
+	if type(roster) ~= "table" then
+		return false
+	end
+	if roster.migrating or roster.pending then
+		return true
+	end
+	if type(roster.sessionCount) == "number" and roster.sessionCount > 0 then
+		return true
+	end
+	if type(roster.bytes) == "number" and roster.bytes > 0 then
+		return true
+	end
+	return false
+end
+
 function ns.DB:CopyLegacy(source, journey)
 	if type(source) ~= "table" then
 		return false
@@ -644,7 +685,8 @@ function ns.DB:RosterBytes(entry)
 	return 0
 end
 
--- Point CharDB at the live body table and put a new stub in the account roster.
+-- Dual-write first: destination gains the body while the source still holds it.
+-- The next login's RecoverMigrating strips or wipes the source once both files saved.
 -- Do not deep-copy: self.session must keep pointing at the same session object.
 function ns.DB:MigrateSelfToPrivate()
 	self:EnsureStore()
@@ -658,38 +700,47 @@ function ns.DB:MigrateSelfToPrivate()
 		body = roster
 	end
 	if not HasBody(body) then
+		body = CharBody()
+	end
+	if not HasBody(body) then
 		return false
 	end
 	local charDB = EnsureCharDB()
-	if charDB.journey == body and roster ~= body and not HasBody(roster) then
-		if type(roster) ~= "table" then
-			roster = NewStub(body, "private")
-			ZipperDB.journeys[guid] = roster
-		end
-		roster.scope = "private"
-		roster.pending = nil
-		roster.migrating = nil
-		SyncStubFromBody(roster, body)
-		charDB.imported = true
-		ClearLegacyCharKeys(charDB)
-		self.record = body
-		if self.viewKey == guid then
-			self.char = body
-		end
-		return true
-	end
-	if type(roster) ~= "table" then
-		roster = NewStub(body, "private")
-		ZipperDB.journeys[guid] = roster
-	end
-	roster.migrating = true
 	charDB.imported = true
 	ClearLegacyCharKeys(charDB)
+	-- Already CharDB-only: finish the stub and clear migrating.
+	if not HasBody(roster) or roster ~= body then
+		if CharBody() == body or charDB.journey == body then
+			local stub = (type(roster) == "table" and not HasBody(roster)) and roster or NewStub(body, "private")
+			stub.scope = "private"
+			stub.pending = nil
+			stub.migrating = nil
+			SyncStubFromBody(stub, body)
+			SnapshotPeopleRefs(stub, body)
+			ZipperDB.journeys[guid] = stub
+			charDB.journey = body
+			body.migrating = nil
+			self.record = body
+			if self.viewKey == guid then
+				self.char = body
+			end
+			return true
+		end
+	end
+	-- First step: CharDB points at the live body; account still owns that same table.
 	charDB.journey = body
-	local stub = NewStub(body, "private")
-	stub.migrating = nil
-	stub.pending = nil
-	ZipperDB.journeys[guid] = stub
+	body.scope = "private"
+	body.pending = nil
+	body.migrating = true
+	if type(roster) == "table" and roster == body then
+		roster.scope = "private"
+		roster.pending = nil
+		roster.migrating = true
+	else
+		ZipperDB.journeys[guid] = body
+		body.scope = "private"
+		body.migrating = true
+	end
 	self.record = body
 	if self.viewKey == guid then
 		self.char = body
@@ -719,8 +770,7 @@ function ns.DB:MigrateSelfToGlobal()
 		end
 		return false
 	end
-	if type(roster) == "table" then
-		roster.migrating = true
+	if type(roster) == "table" and not HasBody(roster) then
 		if type(roster.name) == "string" then
 			body.name = roster.name
 		end
@@ -731,14 +781,18 @@ function ns.DB:MigrateSelfToGlobal()
 			body.class = roster.class
 		end
 	end
+	-- First step: account owns the body; CharDB still points at it until next login.
 	body.scope = "global"
 	body.pending = nil
-	body.migrating = nil
+	body.migrating = true
 	body.sessionCount = nil
+	body.peopleRefs = nil
 	ZipperDB.journeys[guid] = body
-	charDB.journey = nil
 	charDB.imported = true
 	ClearLegacyCharKeys(charDB)
+	if charDB.journey ~= body then
+		charDB.journey = body
+	end
 	self.record = body
 	if self.viewKey == guid then
 		self.char = body
@@ -790,37 +844,68 @@ function ns.DB:RecoverMigrating()
 	if type(roster) ~= "table" or not roster.migrating then
 		return false
 	end
+	local charDB = EnsureCharDB()
 	local charBody = CharBody()
 	local accountBody = HasBody(roster) and roster or nil
+	-- Both files loaded a body: finish by keeping the destination and dropping the source.
 	if accountBody and charBody then
 		if ScopeOf(roster) == "private" or roster.pending == "toPrivate" then
-			local charDB = EnsureCharDB()
 			charDB.journey = charBody
+			ClearLegacyCharKeys(charDB)
 			local stub = NewStub(charBody, "private")
+			stub.migrating = nil
+			stub.pending = nil
+			SyncStubFromBody(stub, charBody)
+			SnapshotPeopleRefs(stub, charBody)
 			ZipperDB.journeys[guid] = stub
+			charBody.migrating = nil
 			self.record = charBody
 		else
-			local charDB = EnsureCharDB()
 			charDB.journey = nil
 			ClearLegacyCharKeys(charDB)
 			accountBody.scope = "global"
 			accountBody.pending = nil
 			accountBody.migrating = nil
+			accountBody.peopleRefs = nil
+			ZipperDB.journeys[guid] = accountBody
 			self.record = accountBody
+		end
+		if self.viewKey == guid then
+			self.char = self.record
 		end
 		return true
 	end
+	-- CharDB has the body; account is already a stub. Finish the stub and clear migrating.
 	if charBody and not accountBody then
-		return self:MigrateSelfToPrivate()
+		local stub = (type(roster) == "table" and not HasBody(roster)) and roster or NewStub(charBody, "private")
+		stub.scope = "private"
+		stub.pending = nil
+		stub.migrating = nil
+		SyncStubFromBody(stub, charBody)
+		SnapshotPeopleRefs(stub, charBody)
+		ZipperDB.journeys[guid] = stub
+		charDB.journey = charBody
+		charDB.imported = true
+		ClearLegacyCharKeys(charDB)
+		charBody.migrating = nil
+		self.record = charBody
+		if self.viewKey == guid then
+			self.char = charBody
+		end
+		return true
 	end
+	-- Account still has the only body. Retry dual-write toward the pending destination.
 	if accountBody and not charBody then
-		roster.migrating = nil
-		if roster.pending == "toPrivate" then
+		if roster.pending == "toPrivate" or ScopeOf(roster) == "private" then
 			return self:MigrateSelfToPrivate()
 		end
+		roster.migrating = nil
 		roster.scope = "global"
 		roster.pending = nil
 		self.record = accountBody
+		if self.viewKey == guid then
+			self.char = accountBody
+		end
 		return true
 	end
 	roster.migrating = nil
@@ -926,9 +1011,6 @@ function ns.DB:BindPlayer()
 				ClearLegacyCharKeys(charDB)
 			end
 		end
-		if not charDB.imported and not HasBody(charDB) and not (type(charDB.sessions) == "table" and #charDB.sessions > 0) then
-			charDB.imported = true
-		end
 	end
 
 	self:RecoverMigrating()
@@ -938,7 +1020,7 @@ function ns.DB:BindPlayer()
 	local body
 	if ScopeOf(roster) == "private" or roster.pending == "toGlobal" or roster.pending == "purgePrivate" then
 		body = CharBody()
-		if not body and HasBody(roster) and roster.pending == "toPrivate" then
+		if not body and HasBody(roster) and (roster.pending == "toPrivate" or roster.migrating) then
 			body = roster
 		end
 	elseif HasBody(roster) then
@@ -947,9 +1029,18 @@ function ns.DB:BindPlayer()
 		body = CharBody()
 	end
 
+	self.privateLoadFailed = nil
 	if not HasBody(body) then
 		if ScopeOf(roster) == "private" and not HasBody(roster) then
-			-- Private stub with no CharDB body yet: start a fresh private body.
+			if StubHadPrivateData(roster) then
+				-- CharDB did not load a journey that should exist. Do not mint empty.
+				self.record = nil
+				self.privateLoadFailed = true
+				self.viewKey = guid
+				self.char = nil
+				return true
+			end
+			-- Brand-new private character with no history yet.
 			body = self:NewJourney(name, realm)
 			body.class = roster.class
 			local db = EnsureCharDB()
@@ -970,6 +1061,7 @@ function ns.DB:BindPlayer()
 	else
 		EnsureBodyShape(body)
 		SyncStubFromBody(roster, body)
+		SnapshotPeopleRefs(roster, body)
 	end
 
 	self.record = body
@@ -1040,19 +1132,20 @@ function ns.DB:CharacterList()
 		if type(roster) == "table" then
 			local body = self:JourneyBody(key)
 			local sessions
-			if HasBody(roster) then
-				sessions = #roster.sessions
-			else
-				sessions = SessionCountOf(roster)
-			end
 			local bytes
 			if body then
+				sessions = #body.sessions
 				bytes = self:JourneyBytes(body)
 				if not HasBody(roster) then
 					roster.bytes = bytes
 					roster.sessionCount = sessions
+					SnapshotPeopleRefs(roster, body)
 				end
+			elseif HasBody(roster) then
+				sessions = #roster.sessions
+				bytes = self:JourneyBytes(roster)
 			else
+				sessions = SessionCountOf(roster)
 				bytes = self:RosterBytes(roster)
 			end
 			list[#list + 1] = {
@@ -1135,6 +1228,13 @@ function ns.DB:Flush()
 			stub.bytes = bytes
 			stub.sessionCount = SessionCountOf(record)
 			SyncStubFromBody(stub, record)
+			SnapshotPeopleRefs(stub, record)
+		end
+	elseif HasBody(record) and packed[record] then
+		local guid = self.playerKey
+		local roster = guid and ZipperDB.journeys[guid] or nil
+		if type(roster) == "table" then
+			SnapshotPeopleRefs(roster, record)
 		end
 	end
 end
@@ -2782,6 +2882,17 @@ function ns.DB:PruneIdleCompany(closedOnly)
 			DropIdleMarkers(self, journey, starts)
 		end
 	end
+	-- Private bodies are not in the account map for other characters. Keep a
+	-- guid set on the stub so their logout does not wipe ZipperDB.people.
+	for key, roster in pairs(journeys) do
+		if type(roster) == "table" and not HasBody(roster) then
+			if key == self.playerKey and HasBody(self.record) then
+				SnapshotPeopleRefs(roster, self.record)
+			end
+		elseif type(roster) == "table" and HasBody(roster) then
+			SnapshotPeopleRefs(roster, roster)
+		end
+	end
 	local people = ZipperDB.people
 	if type(people) ~= "table" then
 		return
@@ -2793,6 +2904,14 @@ function ns.DB:PruneIdleCompany(closedOnly)
 			if type(with) == "table" and type(with[guid]) == "table" and #with[guid] > 0 then
 				used = true
 				break
+			end
+		end
+		if not used then
+			for _, roster in pairs(journeys) do
+				if type(roster) == "table" and type(roster.peopleRefs) == "table" and roster.peopleRefs[guid] then
+					used = true
+					break
+				end
 			end
 		end
 		if not used then

@@ -2247,6 +2247,15 @@ function ns.Replay:ShowBlocked(key, label, pending)
 	self.blockedKey = key
 	self.blockedLabel = label
 	self.blockedPending = pending
+	self.playing = false
+	self.sessions = {}
+	self.t0, self.t1, self.playhead = nil, nil, nil
+	if self.playButton then
+		self.playButton:SetText(L["Play"])
+	end
+	if self.ClearOverlay then
+		self:ClearOverlay()
+	end
 	if self.charPicker then
 		self.charPicker:Hide()
 	end
@@ -2257,7 +2266,12 @@ function ns.Replay:ShowBlocked(key, label, pending)
 		self.scroll:Hide()
 	end
 	if self.blockedText then
-		if pending == "toGlobal" then
+		if pending == "purgePrivate" then
+			self.blockedText:SetText(string.format(
+				L["%s's Non-Global journey is marked for delete. Log in as them once to finish wiping it, or open Saved data."],
+				label
+			))
+		elseif pending == "toGlobal" then
 			self.blockedText:SetText(string.format(
 				L["%s's journey is not on this character yet. Log in as them once to finish moving it to Global, or open Saved data to change your mind."],
 				label
@@ -3290,6 +3304,9 @@ function ns.Replay:RestorePlayhead()
 end
 
 function ns.Replay:ReloadView()
+	if self.blockedKey then
+		return
+	end
 	local followTail = (not self.playing) and self.playhead and self.t1 and math.abs(self.playhead - self.t1) < 1
 	local sessions, index = ns.DB:SelectSessions(self.mode, self.index, self.sessionHi)
 	self.sessions = sessions
@@ -3512,6 +3529,12 @@ function ns.Replay:Redraw()
 end
 
 function ns.Replay:OnDataChanged()
+	if self.blockedKey then
+		if self.RefreshCharacters then
+			self:RefreshCharacters()
+		end
+		return
+	end
 	if not self.route then
 		self.dirty = true
 		return
@@ -3804,8 +3827,12 @@ function ns.Replay:RefreshLevelList()
 	for i = #groups + 1, #self.rows do
 		self.rows[i]:Hide()
 	end
-	if self.charButton and ns.DB.char then
-		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+	if self.charButton then
+		if self.blockedKey and self.blockedLabel then
+			self.charButton:SetText(self.blockedLabel)
+		elseif ns.DB.char then
+			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+		end
 	end
 	content:SetHeight(math.max(22, #groups * 22))
 end
@@ -3846,8 +3873,12 @@ function ns.Replay:RefreshList()
 		return
 	end
 	local sessions = ns.DB:Sessions()
-	if self.charButton and ns.DB.char then
-		self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+	if self.charButton then
+		if self.blockedKey and self.blockedLabel then
+			self.charButton:SetText(self.blockedLabel)
+		elseif ns.DB.char then
+			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
+		end
 	end
 	local width = content:GetWidth()
 	if width < 40 then

@@ -19,20 +19,24 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		ns.DB:BindPlayer()
 		local migrated = ns.DB.pendingNotice
 		ns.DB.pendingNotice = nil
-		if migrated == "toPrivate" then
+		if ns.DB.privateLoadFailed then
+			ns:Print(L["This character's Non-Global journey did not load. Recording stays off until the per-character save is available."])
+		elseif migrated == "toPrivate" then
 			ns:Print(string.format(L["Moved %s to a Non-Global save."], ns.DB:JourneyLabel(ns.DB.record)))
 		elseif migrated == "toGlobal" then
 			ns:Print(string.format(L["Moved %s back to the Global save."], ns.DB:JourneyLabel(ns.DB.record)))
 		elseif migrated == "purgePrivate" then
 			ns:Print(string.format(L["Finished deleting %s's Non-Global journey."], ns.DB:JourneyLabel(ns.DB.record)))
 		end
-		if ns.Config:SkipQuiet() and ns.DB:DropQuietTail() > 0 then
+		if ns.DB.record and ns.Config:SkipQuiet() and ns.DB:DropQuietTail() > 0 then
 			ns:Print(L["Skipped a quiet stop from the last login."])
 		end
-		local _, continued = ns.DB:Open(ns.DB:Now(), false)
-		ns.GPS:Start(continued)
-		ns.Social:Start()
-		ns:Print(L["recording. /zipper opens the map replay."])
+		if ns.DB.record then
+			local _, continued = ns.DB:Open(ns.DB:Now(), false)
+			ns.GPS:Start(continued)
+			ns.Social:Start()
+			ns:Print(L["recording. /zipper opens the map replay."])
+		end
 		ns.Config:StartReminder()
 		ns.Config:StartSizePoll()
 	elseif event == "PLAYER_LOGOUT" then
