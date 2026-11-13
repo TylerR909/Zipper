@@ -592,17 +592,22 @@ function ns.Config:CreateFrame()
 	isoNote:SetJustifyH("LEFT")
 	isoNote:SetText(L["Pick Global or Non-Global for each character. Non-Global keeps that journey in a per-character save so other characters load less, but they cannot replay it until you make it Global again."])
 
-	-- Column widths match RefreshIsolationList: name | Global | Non-Global
-	local ISO_GLOBAL_W, ISO_PRIVATE_W = 70, 90
+	-- Column widths match RefreshIsolationList: name | size | Global | Non-Global
+	local ISO_SIZE_W, ISO_GLOBAL_W, ISO_PRIVATE_W = 72, 70, 90
 	local isoHeader = CreateFrame("Frame", nil, pages.saved)
 	isoHeader:SetPoint("TOPLEFT", isoNote, "BOTTOMLEFT", 0, -12)
 	isoHeader:SetPoint("RIGHT", pages.saved, "RIGHT", -36, 0)
 	isoHeader:SetHeight(16)
 	local isoNameHead = isoHeader:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	isoNameHead:SetPoint("LEFT", 0, 0)
-	isoNameHead:SetPoint("RIGHT", isoHeader, "RIGHT", -(ISO_GLOBAL_W + ISO_PRIVATE_W), 0)
+	isoNameHead:SetPoint("RIGHT", isoHeader, "RIGHT", -(ISO_SIZE_W + ISO_GLOBAL_W + ISO_PRIVATE_W), 0)
 	isoNameHead:SetJustifyH("LEFT")
 	isoNameHead:SetText(L["Character"])
+	local isoSizeHead = isoHeader:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	isoSizeHead:SetPoint("RIGHT", isoHeader, "RIGHT", -(ISO_GLOBAL_W + ISO_PRIVATE_W), 0)
+	isoSizeHead:SetWidth(ISO_SIZE_W)
+	isoSizeHead:SetJustifyH("RIGHT")
+	isoSizeHead:SetText(L["Size"])
 	local isoGlobalHead = isoHeader:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	isoGlobalHead:SetPoint("RIGHT", isoHeader, "RIGHT", -ISO_PRIVATE_W, 0)
 	isoGlobalHead:SetWidth(ISO_GLOBAL_W)
@@ -621,6 +626,7 @@ function ns.Config:CreateFrame()
 	local isoContent = CreateFrame("Frame", nil, isoScroll)
 	isoContent:SetSize(400, 16)
 	isoScroll:SetScrollChild(isoContent)
+	self.isoSizeW = ISO_SIZE_W
 	self.isoGlobalW = ISO_GLOBAL_W
 	self.isoPrivateW = ISO_PRIVATE_W
 
@@ -822,13 +828,15 @@ function ns.Config:RefreshIsolationList()
 	if width < 200 then
 		width = 400
 	end
+	local sizeW = self.isoSizeW or 72
 	local globalW = self.isoGlobalW or 70
 	local privateW = self.isoPrivateW or 90
+	local rightCols = sizeW + globalW + privateW
 	content:SetWidth(width)
 	for i = 1, #list do
 		local info = list[i]
 		local row = self.isoRows[i]
-		if not row or not row.global then
+		if not row or not row.global or not row.size then
 			row = CreateFrame("Frame", nil, content)
 			row:SetHeight(24)
 			row.warn = row:CreateTexture(nil, "ARTWORK")
@@ -838,6 +846,16 @@ function ns.Config:RefreshIsolationList()
 			row.warn:Hide()
 			row.label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 			row.label:SetJustifyH("LEFT")
+			row.label:SetWordWrap(false)
+			if row.label.SetNonSpaceWrap then
+				row.label:SetNonSpaceWrap(false)
+			end
+			row.size = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+			row.size:SetJustifyH("RIGHT")
+			row.size:SetWordWrap(false)
+			if row.size.SetNonSpaceWrap then
+				row.size:SetNonSpaceWrap(false)
+			end
 			row.private = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
 			row.private:SetSize(24, 24)
 			row.private:SetScript("OnClick", function(box)
@@ -850,12 +868,19 @@ function ns.Config:RefreshIsolationList()
 			end)
 			row:SetScript("OnEnter", function(frame)
 				local tip = ns.Config:IsolationTooltip(frame.rowInfo)
-				if not tip then
+				if tip then
+					GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+					GameTooltip:SetText(tip, nil, nil, nil, nil, true)
+					GameTooltip:Show()
 					return
 				end
-				GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
-				GameTooltip:SetText(tip, nil, nil, nil, nil, true)
-				GameTooltip:Show()
+				local label = frame.label
+				local truncated = label and label.IsTruncated and label:IsTruncated()
+				if truncated and frame.rowInfo then
+					GameTooltip:SetOwner(frame, "ANCHOR_RIGHT")
+					GameTooltip:SetText(frame.rowInfo.label)
+					GameTooltip:Show()
+				end
 			end)
 			row:SetScript("OnLeave", function()
 				GameTooltip:Hide()
@@ -868,22 +893,29 @@ function ns.Config:RefreshIsolationList()
 		local isGlobal = info.scope ~= "private"
 		row.global:SetChecked(isGlobal)
 		row.private:SetChecked(not isGlobal)
-		row.label:SetText(string.format("%s   %s", info.label, FormatBytes(info.bytes)))
+		row.label:SetText(info.label)
+		row.size:SetText(FormatBytes(info.bytes))
 		local pendingOther = info.pending and info.key ~= ns.DB.playerKey
 		row.warn:SetShown(pendingOther and true or false)
 		row.label:ClearAllPoints()
 		if pendingOther then
 			row.label:SetPoint("LEFT", row.warn, "RIGHT", 4, 0)
 			row.label:SetTextColor(1, 0.55, 0.2)
+			row.size:SetTextColor(1, 0.55, 0.2)
 		else
 			row.label:SetPoint("LEFT", 0, 0)
 			if info.current then
 				row.label:SetTextColor(1, 0.86, 0.45)
+				row.size:SetTextColor(1, 0.86, 0.45)
 			else
 				row.label:SetTextColor(0.9, 0.88, 0.78)
+				row.size:SetTextColor(0.9, 0.88, 0.78)
 			end
 		end
-		row.label:SetPoint("RIGHT", row, "RIGHT", -(globalW + privateW), 0)
+		row.label:SetPoint("RIGHT", row, "RIGHT", -rightCols - 4, 0)
+		row.size:ClearAllPoints()
+		row.size:SetPoint("RIGHT", row, "RIGHT", -(globalW + privateW), 0)
+		row.size:SetWidth(sizeW)
 		row.private:ClearAllPoints()
 		row.private:SetPoint("CENTER", row, "RIGHT", -(privateW / 2), 0)
 		row.global:ClearAllPoints()
