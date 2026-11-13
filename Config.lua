@@ -619,20 +619,15 @@ function ns.Config:CreateFrame()
 	isoPrivateHead:SetJustifyH("CENTER")
 	isoPrivateHead:SetText(L["Non-Global"])
 
-	local isoScroll = CreateFrame("ScrollFrame", "ZipperConfigIsolationScroll", pages.saved, "UIPanelScrollFrameTemplate")
-	isoScroll:SetPoint("TOPLEFT", isoHeader, "BOTTOMLEFT", 0, -4)
-	isoScroll:SetPoint("RIGHT", pages.saved, "RIGHT", -36, 0)
-	isoScroll:SetHeight(112)
-	local isoContent = CreateFrame("Frame", nil, isoScroll)
-	isoContent:SetSize(400, 16)
-	isoScroll:SetScrollChild(isoContent)
-	self.isoSizeW = ISO_SIZE_W
-	self.isoGlobalW = ISO_GLOBAL_W
-	self.isoPrivateW = ISO_PRIVATE_W
+	-- Purge / quiet controls sit on a bottom footer so the character list can stretch.
+	local savedFooter = CreateFrame("Frame", nil, pages.saved)
+	savedFooter:SetPoint("BOTTOMLEFT", 16, 12)
+	savedFooter:SetPoint("BOTTOMRIGHT", -16, 12)
+	savedFooter:SetHeight(168)
 
-	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", pages.saved, "UIPanelButtonTemplate")
+	local purgeDrop = CreateFrame("Button", "ZipperConfigCharDrop", savedFooter, "UIPanelButtonTemplate")
 	purgeDrop:SetSize(280, 22)
-	purgeDrop:SetPoint("TOPLEFT", isoScroll, "BOTTOMLEFT", 0, -16)
+	purgeDrop:SetPoint("TOPLEFT", 0, 0)
 	purgeDrop:SetText(L["Saved characters"])
 	purgeDrop:SetScript("OnClick", function()
 		ns.Config:TogglePurgeList()
@@ -653,7 +648,7 @@ function ns.Config:CreateFrame()
 	purgeList:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
 	purgeList:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.9)
 
-	local purge = CreateFrame("Button", "ZipperConfigPurge", pages.saved, "UIPanelButtonTemplate")
+	local purge = CreateFrame("Button", "ZipperConfigPurge", savedFooter, "UIPanelButtonTemplate")
 	purge:SetSize(80, 22)
 	purge:SetPoint("LEFT", purgeDrop, "RIGHT", 8, 0)
 	purge:SetText(L["Delete"])
@@ -661,21 +656,21 @@ function ns.Config:CreateFrame()
 		ns.Config:ConfirmPurge()
 	end)
 
-	local quiet = AddCheck(pages.saved, "ZipperConfigSkipQuiet", L["Skip quiet stops"])
-	quiet:SetPoint("TOPLEFT", purgeDrop, "BOTTOMLEFT", -4, -16)
+	local quiet = AddCheck(savedFooter, "ZipperConfigSkipQuiet", L["Skip quiet stops"])
+	quiet:SetPoint("TOPLEFT", purgeDrop, "BOTTOMLEFT", -4, -14)
 	quiet:SetScript("OnClick", function(self)
 		ns.Config:SetSkipQuiet(self:GetChecked())
 	end)
 
-	local quietNote = pages.saved:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	local quietNote = savedFooter:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	quietNote:SetPoint("TOPLEFT", quiet, "BOTTOMLEFT", 28, 2)
-	quietNote:SetPoint("RIGHT", pages.saved, "RIGHT", -16, 0)
+	quietNote:SetPoint("RIGHT", savedFooter, "RIGHT", 0, 0)
 	quietNote:SetJustifyH("LEFT")
 	quietNote:SetText(L["The next login drops a stop where you never turned in a quest, fought, died, or walked 250 yards from where you arrived. Checking mail or the auction house does not keep it."])
 
-	local dropQuiet = CreateFrame("Button", "ZipperConfigDropQuiet", pages.saved, "UIPanelButtonTemplate")
+	local dropQuiet = CreateFrame("Button", "ZipperConfigDropQuiet", savedFooter, "UIPanelButtonTemplate")
 	dropQuiet:SetSize(160, 22)
-	dropQuiet:SetPoint("TOPLEFT", quietNote, "BOTTOMLEFT", -28, -12)
+	dropQuiet:SetPoint("BOTTOMLEFT", 0, 0)
 	dropQuiet:SetText(L["Drop quiet stops"])
 	dropQuiet:SetScript("OnClick", function()
 		local count = ns.DB:DropQuietSessions()
@@ -691,6 +686,17 @@ function ns.Config:CreateFrame()
 		end
 		ns.Config:RefreshSize()
 	end)
+
+	local isoScroll = CreateFrame("ScrollFrame", "ZipperConfigIsolationScroll", pages.saved, "UIPanelScrollFrameTemplate")
+	isoScroll:SetPoint("TOPLEFT", isoHeader, "BOTTOMLEFT", 0, -4)
+	isoScroll:SetPoint("BOTTOMRIGHT", savedFooter, "TOPRIGHT", -20, 10)
+	local isoContent = CreateFrame("Frame", nil, isoScroll)
+	isoContent:SetSize(400, 16)
+	isoScroll:SetScrollChild(isoContent)
+	self.isoSizeW = ISO_SIZE_W
+	self.isoGlobalW = ISO_GLOBAL_W
+	self.isoPrivateW = ISO_PRIVATE_W
+	self.savedFooter = savedFooter
 
 	self.pages = pages
 	self.navButtons = navButtons
