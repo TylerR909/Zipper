@@ -2165,18 +2165,18 @@ function ns.Replay:RefreshStats(sessions)
 		local row = self.statRows[i]
 		if not row then
 			row = CreateFrame("Frame", nil, content)
-			row:SetHeight(16)
+			row:SetHeight(18)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 4, 0)
+			row.label:SetPoint("LEFT", 8, 0)
 			row.label:SetJustifyH("LEFT")
 			row.value = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.value:SetPoint("RIGHT", -4, 0)
+			row.value:SetPoint("RIGHT", -8, 0)
 			row.value:SetJustifyH("RIGHT")
-			row.label:SetPoint("RIGHT", row.value, "LEFT", -8, 0)
+			row.label:SetPoint("RIGHT", row.value, "LEFT", -10, 0)
 			self.statRows[i] = row
 		end
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 16))
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 18))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 		if info.header then
 			row.label:SetText(info.header)
@@ -2197,7 +2197,7 @@ function ns.Replay:RefreshStats(sessions)
 	for i = #rows + 1, #self.statRows do
 		self.statRows[i]:Hide()
 	end
-	content:SetHeight(math.max(16, #rows * 16))
+	content:SetHeight(math.max(18, #rows * 18))
 end
 
 function ns.Replay:UpdateRecap(sessions)
@@ -2310,10 +2310,10 @@ function ns.Replay:RefreshCharacters()
 		local row = self.charRows[i]
 		if not row then
 			row = CreateFrame("Button", nil, picker)
-			row:SetHeight(20)
+			row:SetHeight(22)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 8, 0)
-			row.label:SetPoint("RIGHT", -6, 0)
+			row.label:SetPoint("LEFT", 10, 0)
+			row.label:SetPoint("RIGHT", -8, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
 				local info = button.rowInfo
@@ -2335,6 +2335,7 @@ function ns.Replay:RefreshCharacters()
 			end)
 			self.charRows[i] = row
 		end
+		row:SetHeight(22)
 		row.charKey = list[i].key
 		row.rowInfo = list[i]
 		local mark = list[i].current and "  · recording" or ""
@@ -2352,14 +2353,14 @@ function ns.Replay:RefreshCharacters()
 			row.label:SetTextColor(0.9, 0.88, 0.78)
 		end
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", picker, "TOPLEFT", 0, -((i - 1) * 20))
+		row:SetPoint("TOPLEFT", picker, "TOPLEFT", 0, -((i - 1) * 22))
 		row:SetPoint("RIGHT", picker, "RIGHT", 0, 0)
 		row:Show()
 	end
 	for i = #list + 1, #self.charRows do
 		self.charRows[i]:Hide()
 	end
-	picker:SetHeight(math.max(22, #list * 20 + 4))
+	picker:SetHeight(math.max(24, #list * 22 + 6))
 end
 
 function ns.Replay:ScopeCaption()
@@ -3785,13 +3786,13 @@ function ns.Replay:RefreshLevelList()
 		local row = self.rows[i]
 		if not row then
 			row = CreateFrame("Button", nil, content)
-			row:SetHeight(22)
+			row:SetHeight(24)
 			row.bar = row:CreateTexture(nil, "BACKGROUND")
 			row.bar:SetAllPoints()
 			row.bar:SetColorTexture(0.85, 0.68, 0.28, 0.16)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 8, 0)
-			row.label:SetPoint("RIGHT", -6, 0)
+			row.label:SetPoint("LEFT", 10, 0)
+			row.label:SetPoint("RIGHT", -8, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
 				local shift = IsShiftKeyDown and IsShiftKeyDown()
@@ -3808,6 +3809,7 @@ function ns.Replay:RefreshLevelList()
 			end)
 			self.rows[i] = row
 		end
+		row:SetHeight(24)
 		row.sessionIndex = nil
 		row.level = group.lv
 		row.levelTop = group.lvTo or group.lv
@@ -3820,7 +3822,7 @@ function ns.Replay:RefreshLevelList()
 			row.label:SetTextColor(0.82, 0.80, 0.74)
 		end
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 22))
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 24))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 		row:Show()
 	end
@@ -3834,7 +3836,7 @@ function ns.Replay:RefreshLevelList()
 			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
 		end
 	end
-	content:SetHeight(math.max(22, #groups * 22))
+	content:SetHeight(math.max(24, #groups * 24))
 end
 
 function ns.Replay:LevelPlace(group)
@@ -3890,13 +3892,13 @@ function ns.Replay:RefreshList()
 		local row = self.rows[i]
 		if not row then
 			row = CreateFrame("Button", nil, content)
-			row:SetHeight(22)
+			row:SetHeight(24)
 			row.bar = row:CreateTexture(nil, "BACKGROUND")
 			row.bar:SetAllPoints()
 			row.bar:SetColorTexture(0.85, 0.68, 0.28, 0.16)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 8, 0)
-			row.label:SetPoint("RIGHT", -6, 0)
+			row.label:SetPoint("LEFT", 10, 0)
+			row.label:SetPoint("RIGHT", -8, 0)
 			row.label:SetJustifyH("LEFT")
 			row:SetScript("OnClick", function(button)
 				local shift = IsShiftKeyDown and IsShiftKeyDown()
@@ -3913,6 +3915,7 @@ function ns.Replay:RefreshList()
 			end)
 			self.rows[i] = row
 		end
+		row:SetHeight(24)
 		row.sessionIndex = index
 		row.level = nil
 		local duration = (session.seen or session.s) - session.s
@@ -3937,14 +3940,14 @@ function ns.Replay:RefreshList()
 			row.label:SetTextColor(0.82, 0.80, 0.74)
 		end
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 22))
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 24))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 		row:Show()
 	end
 	for i = #sessions + 1, #self.rows do
 		self.rows[i]:Hide()
 	end
-	content:SetHeight(math.max(22, #sessions * 22))
+	content:SetHeight(math.max(24, #sessions * 24))
 end
 
 function ns.Replay:TogglePlay()
@@ -4215,11 +4218,12 @@ function ns.Replay:Layout(width, height)
 	if not inset or not width or not height or width < 1 or height < 1 then
 		return
 	end
-	local listTop = 118
-	local gap = 12
-	local controls = 186
-	local after = 14
-	local bottom = 12
+	local listTop = 132
+	local gap = 14
+	local controls = 196
+	local after = 16
+	local bottom = 14
+	local side = 16
 	local leftover = height - (listTop + gap + controls + after + bottom)
 	local listH = math.floor(leftover * 0.42)
 	if listH < 64 then
@@ -4236,8 +4240,8 @@ function ns.Replay:Layout(width, height)
 	local frame = self.frame
 	if self.chapterStrip then
 		self.chapterStrip:ClearAllPoints()
-		self.chapterStrip:SetPoint("TOPLEFT", 14, y + 2)
-		self.chapterStrip:SetPoint("TOPRIGHT", -14, y + 2)
+		self.chapterStrip:SetPoint("TOPLEFT", side, y + 2)
+		self.chapterStrip:SetPoint("TOPRIGHT", -side, y + 2)
 		self.chapterStrip:SetHeight(36)
 	end
 	if self.chapterStart then
@@ -4248,7 +4252,7 @@ function ns.Replay:Layout(width, height)
 	if self.chapterStart then
 		self.chapterPrev:SetPoint("LEFT", self.chapterStart, "RIGHT", 2, 0)
 	else
-		self.chapterPrev:SetPoint("TOPLEFT", 14, y)
+		self.chapterPrev:SetPoint("TOPLEFT", side, y)
 	end
 	if self.chapterEnd then
 		self.chapterEnd:ClearAllPoints()
@@ -4258,35 +4262,37 @@ function ns.Replay:Layout(width, height)
 	if self.chapterEnd then
 		self.chapterNext:SetPoint("RIGHT", self.chapterEnd, "LEFT", -2, 0)
 	else
-		self.chapterNext:SetPoint("TOPRIGHT", -14, y)
+		self.chapterNext:SetPoint("TOPRIGHT", -side, y)
 	end
 	self.scrub:ClearAllPoints()
-	self.scrub:SetPoint("TOPLEFT", 16, y - 44)
-	self.scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	self.scrub:SetPoint("TOPLEFT", side + 2, y - 46)
+	self.scrub:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	self.timeText:ClearAllPoints()
-	self.timeText:SetPoint("TOPLEFT", 16, y - 68)
-	self.timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	self.timeText:SetPoint("TOPLEFT", side + 2, y - 70)
+	self.timeText:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
+	local jumpWidth, jumpGap = 72, 8
 	for i = 1, #self.jumpButtons do
 		self.jumpButtons[i]:ClearAllPoints()
-		self.jumpButtons[i]:SetPoint("TOPLEFT", 14 + ((i - 1) * 78), y - 90)
+		self.jumpButtons[i]:SetPoint("TOPLEFT", side + ((i - 1) * (jumpWidth + jumpGap)), y - 94)
 	end
 	self.playButton:ClearAllPoints()
-	self.playButton:SetPoint("TOPLEFT", 14, y - 120)
+	self.playButton:SetPoint("TOPLEFT", side, y - 124)
+	local speedWidth, speedGap = 46, 6
 	for i = 1, #self.speedButtons do
 		self.speedButtons[i]:ClearAllPoints()
-		self.speedButtons[i]:SetPoint("TOPLEFT", 76 + ((i - 1) * 50), y - 120)
+		self.speedButtons[i]:SetPoint("TOPLEFT", side + 64 + ((i - 1) * (speedWidth + speedGap)), y - 124)
 	end
 	self.trailLabel:ClearAllPoints()
-	self.trailLabel:SetPoint("TOPLEFT", 16, y - 150)
+	self.trailLabel:SetPoint("TOPLEFT", side + 2, y - 156)
 	self.trailValue:ClearAllPoints()
-	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, y - 150)
+	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(side + 2), y - 156)
 	self.trailSlider:ClearAllPoints()
-	self.trailSlider:SetPoint("TOPLEFT", 16, y - 168)
-	self.trailSlider:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	self.trailSlider:SetPoint("TOPLEFT", side + 2, y - 176)
+	self.trailSlider:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	self.statInset:ClearAllPoints()
-	self.statInset:SetPoint("TOPLEFT", 14, y - controls - after)
-	self.statInset:SetPoint("BOTTOMRIGHT", -14, bottom)
-	local contentWidth = width - 58
+	self.statInset:SetPoint("TOPLEFT", side, y - controls - after)
+	self.statInset:SetPoint("BOTTOMRIGHT", -side, bottom)
+	local contentWidth = width - 66
 	if contentWidth < 200 then
 		contentWidth = 200
 	end
@@ -4304,16 +4310,16 @@ function ns.Replay:CreateFrame()
 	end
 	local frame = CreateFrame("Frame", "ZipperReplayFrame", UIParent, "BackdropTemplate")
 	frame:Hide()
-	frame:SetSize(336, 736)
+	frame:SetSize(348, 736)
 	frame:SetFrameStrata("DIALOG")
 	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
 	frame:SetResizable(true)
 	if frame.SetResizeBounds then
-		frame:SetResizeBounds(336, 470, 440, 760)
+		frame:SetResizeBounds(348, 490, 460, 780)
 	else
-		frame:SetMinResize(336, 470)
-		frame:SetMaxResize(440, 760)
+		frame:SetMinResize(348, 490)
+		frame:SetMaxResize(460, 780)
 	end
 	frame:EnableMouse(true)
 	frame:RegisterForDrag("LeftButton")
@@ -4321,7 +4327,7 @@ function ns.Replay:CreateFrame()
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
 		edgeSize = 2,
-		insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		insets = { left = 3, right = 3, top = 3, bottom = 3 },
 	})
 	frame:SetBackdropColor(0.06, 0.06, 0.07, 0.98)
 	frame:SetBackdropBorderColor(0.78, 0.62, 0.28, 1)
@@ -4355,7 +4361,7 @@ function ns.Replay:CreateFrame()
 
 	local function MakeButton(parent, text, width)
 		local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
-		button:SetSize(width, 22)
+		button:SetSize(width, 24)
 		button:SetBackdrop({
 			bgFile = "Interface\\Buttons\\WHITE8X8",
 			edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -4380,15 +4386,15 @@ function ns.Replay:CreateFrame()
 
 	local header = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
 	header:SetColorTexture(0.12, 0.10, 0.08, 1)
-	header:SetPoint("TOPLEFT", 2, -2)
-	header:SetPoint("TOPRIGHT", -2, -2)
-	header:SetHeight(46)
+	header:SetPoint("TOPLEFT", 3, -3)
+	header:SetPoint("TOPRIGHT", -3, -3)
+	header:SetHeight(56)
 
 	local headerSheen = frame:CreateTexture(nil, "BACKGROUND", nil, 2)
 	headerSheen:SetColorTexture(1, 0.86, 0.45, 0.07)
 	headerSheen:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
 	headerSheen:SetPoint("TOPRIGHT", header, "TOPRIGHT", 0, 0)
-	headerSheen:SetHeight(16)
+	headerSheen:SetHeight(18)
 
 	local rule = frame:CreateTexture(nil, "BORDER")
 	rule:SetColorTexture(0.85, 0.68, 0.28, 0.95)
@@ -4397,14 +4403,17 @@ function ns.Replay:CreateFrame()
 	rule:SetHeight(2)
 
 	local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 16, -8)
+	title:SetPoint("TOPLEFT", 18, -10)
+	title:SetPoint("RIGHT", frame, "RIGHT", -110, 0)
+	title:SetJustifyH("LEFT")
+	title:SetWordWrap(false)
 	title:SetTextColor(1, 0.86, 0.45)
 	title:SetText(L["Zipper"])
 
 	local charButton = CreateFrame("Button", nil, frame, "BackdropTemplate")
-	charButton:SetPoint("TOPLEFT", 12, -26)
-	charButton:SetPoint("RIGHT", frame, "RIGHT", -12, 0)
-	charButton:SetHeight(20)
+	charButton:SetPoint("TOPLEFT", 16, -32)
+	charButton:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	charButton:SetHeight(22)
 	charButton:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -4414,12 +4423,12 @@ function ns.Replay:CreateFrame()
 	charButton:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
 	local arrow = charButton:CreateTexture(nil, "OVERLAY")
 	arrow:SetSize(16, 16)
-	arrow:SetPoint("RIGHT", -4, 0)
+	arrow:SetPoint("RIGHT", -6, 0)
 	arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
 	charButton.arrow = arrow
 	local charLabel = charButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	charLabel:SetPoint("LEFT", 8, 0)
-	charLabel:SetPoint("RIGHT", arrow, "LEFT", -4, 0)
+	charLabel:SetPoint("LEFT", 10, 0)
+	charLabel:SetPoint("RIGHT", arrow, "LEFT", -6, 0)
 	charLabel:SetJustifyH("LEFT")
 	charLabel:SetWordWrap(false)
 	charLabel:SetText(L["Character"])
@@ -4440,14 +4449,14 @@ function ns.Replay:CreateFrame()
 		end
 	end)
 	charButton:SetScript("OnMouseDown", function(self)
-		self.arrow:SetPoint("RIGHT", -3, -1)
+		self.arrow:SetPoint("RIGHT", -5, -1)
 	end)
 	charButton:SetScript("OnMouseUp", function(self)
-		self.arrow:SetPoint("RIGHT", -4, 0)
+		self.arrow:SetPoint("RIGHT", -6, 0)
 	end)
 
 	local charPicker = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	charPicker:SetPoint("TOPLEFT", charButton, "BOTTOMLEFT", 0, -2)
+	charPicker:SetPoint("TOPLEFT", charButton, "BOTTOMLEFT", 0, -4)
 	charPicker:SetPoint("RIGHT", charButton, "RIGHT", 0, 0)
 	charPicker:SetFrameStrata("DIALOG")
 	charPicker:SetFrameLevel(400)
@@ -4468,12 +4477,12 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-	close:SetPoint("TOPRIGHT", 2, 2)
+	close:SetPoint("TOPRIGHT", -2, -2)
 
 	local grip = CreateFrame("Button", nil, frame)
 	grip:SetSize(16, 16)
 	grip:SetFrameLevel(frame:GetFrameLevel() + 20)
-	grip:SetPoint("BOTTOMRIGHT", -2, 2)
+	grip:SetPoint("BOTTOMRIGHT", -4, 4)
 	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
@@ -4497,19 +4506,19 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local options = MakeButton(frame, L["Options"], 64)
-	options:SetPoint("RIGHT", close, "LEFT", 4, -2)
+	options:SetPoint("RIGHT", close, "LEFT", 2, 0)
 	options:SetScript("OnClick", function()
 		ns.Config:Toggle()
 	end)
 
 	local sessionButton = MakeButton(frame, L["Sessions"], 96)
-	sessionButton:SetPoint("TOPLEFT", 14, -56)
+	sessionButton:SetPoint("TOPLEFT", 16, -68)
 	sessionButton:SetScript("OnClick", function()
 		ns.Replay:ShowSessions()
 	end)
 
 	local levelsButton = MakeButton(frame, L["Levels"], 88)
-	levelsButton:SetPoint("LEFT", sessionButton, "RIGHT", 6, 0)
+	levelsButton:SetPoint("LEFT", sessionButton, "RIGHT", 8, 0)
 	levelsButton:SetScript("OnClick", function()
 		ns.Replay:RememberPlayhead()
 		ns.Replay.levelLo = nil
@@ -4518,21 +4527,21 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local selectAll = MakeButton(frame, L["Select all"], 104)
-	selectAll:SetPoint("TOPRIGHT", -14, -56)
+	selectAll:SetPoint("TOPRIGHT", -16, -68)
 	selectAll:SetScript("OnClick", function()
 		ns.Replay:SelectAll()
 	end)
 
 	local scope = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	scope:SetPoint("TOPLEFT", 16, -84)
-	scope:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	scope:SetPoint("TOPLEFT", 18, -100)
+	scope:SetPoint("RIGHT", frame, "RIGHT", -18, 0)
 	scope:SetJustifyH("LEFT")
 	scope:SetWordWrap(true)
 	scope:SetText(L["The recording in progress."])
 
 	local inset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	inset:SetPoint("TOPLEFT", 14, -118)
-	inset:SetPoint("RIGHT", frame, "RIGHT", -14, 0)
+	inset:SetPoint("TOPLEFT", 16, -132)
+	inset:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	inset:SetHeight(168)
 	inset:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -4543,15 +4552,15 @@ function ns.Replay:CreateFrame()
 	inset:SetBackdropBorderColor(0.35, 0.30, 0.16, 0.85)
 
 	local scroll = CreateFrame("ScrollFrame", nil, inset, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", 6, -4)
-	scroll:SetPoint("BOTTOMRIGHT", -24, 4)
+	scroll:SetPoint("TOPLEFT", 8, -6)
+	scroll:SetPoint("BOTTOMRIGHT", -26, 6)
 	local content = CreateFrame("Frame", nil, scroll)
-	content:SetSize(260, 22)
+	content:SetSize(260, 24)
 	scroll:SetScrollChild(content)
 
 	local blockedText = inset:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	blockedText:SetPoint("TOPLEFT", 12, -14)
-	blockedText:SetPoint("RIGHT", inset, "RIGHT", -12, 0)
+	blockedText:SetPoint("TOPLEFT", 14, -16)
+	blockedText:SetPoint("RIGHT", inset, "RIGHT", -14, 0)
 	blockedText:SetJustifyH("LEFT")
 	blockedText:SetJustifyV("TOP")
 	blockedText:SetWordWrap(true)
@@ -4583,7 +4592,7 @@ function ns.Replay:CreateFrame()
 	blockedLink:Hide()
 
 	local play = MakeButton(frame, L["Play"], 56)
-	play:SetPoint("TOPLEFT", 14, -418)
+	play:SetPoint("TOPLEFT", 16, -418)
 	play:SetScript("OnClick", function()
 		ns.Replay:TogglePlay()
 	end)
@@ -4595,12 +4604,12 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local speedButtons = {}
-	local speedWidth, speedGap = 46, 4
+	local speedWidth, speedGap = 46, 6
 	for i = 1, #SPEEDS do
 		local rate = SPEEDS[i]
 		local speed = MakeButton(frame, rate .. "x", speedWidth)
 		speed.speed = rate
-		speed:SetPoint("TOPLEFT", 76 + ((i - 1) * (speedWidth + speedGap)), -418)
+		speed:SetPoint("TOPLEFT", 80 + ((i - 1) * (speedWidth + speedGap)), -418)
 		speed:SetScript("OnClick", function(button)
 			ns.Replay:CancelSpeedTooltip(button)
 			ns.Replay:SetSpeed(button.speed)
@@ -4620,18 +4629,18 @@ function ns.Replay:CreateFrame()
 	end
 
 	local trailLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	trailLabel:SetPoint("TOPLEFT", 16, -448)
+	trailLabel:SetPoint("TOPLEFT", 18, -450)
 	trailLabel:SetText(L["Trail"])
 	trailLabel:SetTextColor(0.85, 0.82, 0.70)
 
 	local trailValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -448)
+	trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -18, -450)
 	trailValue:SetTextColor(1, 0.86, 0.45)
 	trailValue:SetText(L["Full"])
 
 	local trail = CreateFrame("Slider", "ZipperReplayTrail", frame, "UISliderTemplate")
-	trail:SetPoint("TOPLEFT", 16, -466)
-	trail:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	trail:SetPoint("TOPLEFT", 18, -470)
+	trail:SetPoint("RIGHT", frame, "RIGHT", -18, 0)
 	trail:SetHeight(16)
 	trail:SetMinMaxValues(1, #ns.Replay.TRAIL_STOPS)
 	trail:SetValueStep(1)
@@ -4663,10 +4672,10 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local jumpButtons = {}
-	local jumpWidth, jumpGap = 72, 6
+	local jumpWidth, jumpGap = 72, 8
 	for i = 1, 4 do
 		local jump = MakeButton(frame, "+0", jumpWidth)
-		jump:SetPoint("TOPLEFT", 14 + ((i - 1) * (jumpWidth + jumpGap)), -388)
+		jump:SetPoint("TOPLEFT", 16 + ((i - 1) * (jumpWidth + jumpGap)), -388)
 		jump:SetScript("OnClick", function(button)
 			ns.Replay:Jump(button.jumpSeconds or 0)
 		end)
@@ -4718,8 +4727,8 @@ function ns.Replay:CreateFrame()
 	end
 
 	local chapterStrip = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	chapterStrip:SetPoint("TOPLEFT", 14, -296)
-	chapterStrip:SetPoint("RIGHT", frame, "RIGHT", -14, 0)
+	chapterStrip:SetPoint("TOPLEFT", 16, -296)
+	chapterStrip:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	chapterStrip:SetHeight(36)
 	chapterStrip:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -4730,44 +4739,44 @@ function ns.Replay:CreateFrame()
 	chapterStrip:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.9)
 
 	local chapterStart = MakeNavGlyph(chapterStrip, "«", 40)
-	chapterStart:SetPoint("LEFT", 2, 0)
+	chapterStart:SetPoint("LEFT", 4, 0)
 	chapterStart.navTip = L["Jump to start"]
 	chapterStart:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(false)
 	end)
 
 	local chapterPrev = MakeNavGlyph(chapterStrip, "‹", 40)
-	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 0, 0)
+	chapterPrev:SetPoint("LEFT", chapterStart, "RIGHT", 2, 0)
 	chapterPrev.navTip = L["Previous chapter"]
 	chapterPrev:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(-1)
 	end)
 
 	local chapterEnd = MakeNavGlyph(chapterStrip, "»", 40)
-	chapterEnd:SetPoint("RIGHT", -2, 0)
+	chapterEnd:SetPoint("RIGHT", -4, 0)
 	chapterEnd.navTip = L["Jump to end"]
 	chapterEnd:SetScript("OnClick", function()
 		ns.Replay:SeekToEdge(true)
 	end)
 
 	local chapterNext = MakeNavGlyph(chapterStrip, "›", 40)
-	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", 0, 0)
+	chapterNext:SetPoint("RIGHT", chapterEnd, "LEFT", -2, 0)
 	chapterNext.navTip = L["Next chapter"]
 	chapterNext:SetScript("OnClick", function()
 		ns.Replay:SkipChapter(1)
 	end)
 
 	local chapterText = chapterStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	chapterText:SetPoint("LEFT", chapterPrev, "RIGHT", 6, 0)
-	chapterText:SetPoint("RIGHT", chapterNext, "LEFT", -6, 0)
+	chapterText:SetPoint("LEFT", chapterPrev, "RIGHT", 8, 0)
+	chapterText:SetPoint("RIGHT", chapterNext, "LEFT", -8, 0)
 	chapterText:SetJustifyH("CENTER")
 	chapterText:SetWordWrap(false)
 	chapterText:SetTextColor(0.93, 0.90, 0.78)
 	chapterText:SetText(L["No chapters yet"])
 
 	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
-	scrub:SetPoint("TOPLEFT", 16, -342)
-	scrub:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	scrub:SetPoint("TOPLEFT", 18, -344)
+	scrub:SetPoint("RIGHT", frame, "RIGHT", -18, 0)
 	scrub:SetHeight(16)
 	scrub:SetMinMaxValues(0, 1)
 	-- A nine-hour session needs a much finer step than one tenth of a percent.
@@ -4792,14 +4801,14 @@ function ns.Replay:CreateFrame()
 	end)
 
 	local timeText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	timeText:SetPoint("TOPLEFT", 16, -366)
-	timeText:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+	timeText:SetPoint("TOPLEFT", 18, -368)
+	timeText:SetPoint("RIGHT", frame, "RIGHT", -18, 0)
 	timeText:SetJustifyH("LEFT")
 	timeText:SetTextColor(0.85, 0.82, 0.70)
 
 	local statInset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	statInset:SetPoint("TOPLEFT", 14, -500)
-	statInset:SetPoint("BOTTOMRIGHT", -14, 12)
+	statInset:SetPoint("TOPLEFT", 16, -500)
+	statInset:SetPoint("BOTTOMRIGHT", -16, 14)
 	statInset:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -4809,10 +4818,10 @@ function ns.Replay:CreateFrame()
 	statInset:SetBackdropBorderColor(0.35, 0.30, 0.16, 0.85)
 
 	local statScroll = CreateFrame("ScrollFrame", "ZipperReplayStats", statInset, "UIPanelScrollFrameTemplate")
-	statScroll:SetPoint("TOPLEFT", 4, -4)
-	statScroll:SetPoint("BOTTOMRIGHT", -22, 4)
+	statScroll:SetPoint("TOPLEFT", 8, -6)
+	statScroll:SetPoint("BOTTOMRIGHT", -26, 6)
 	local statContent = CreateFrame("Frame", nil, statScroll)
-	statContent:SetSize(260, 16)
+	statContent:SetSize(260, 18)
 	statScroll:SetScrollChild(statContent)
 
 	self.listInset = inset
@@ -4862,17 +4871,17 @@ function ns.Replay:CreateFrame()
 	else
 		frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 40)
 	end
-	local width = window and tonumber(window.w) or 336
+	local width = window and tonumber(window.w) or 348
 	local height = window and tonumber(window.h) or 736
-	if not width or width < 336 then
-		width = 336
-	elseif width > 440 then
-		width = 440
+	if not width or width < 348 then
+		width = 348
+	elseif width > 460 then
+		width = 460
 	end
-	if not height or height < 470 then
-		height = 470
-	elseif height > 760 then
-		height = 760
+	if not height or height < 490 then
+		height = 490
+	elseif height > 780 then
+		height = 780
 	end
 	frame:SetSize(width, height)
 	self:Layout(width, height)
@@ -5051,19 +5060,19 @@ function ns.Replay:EnsureMapLegend()
 	frame:Hide()
 
 	local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	title:SetPoint("TOPLEFT", 10, -8)
+	title:SetPoint("TOPLEFT", 12, -10)
 	title:SetText(L["Zipper"])
 	title:SetTextColor(1, 0.82, 0)
 
 	local entries = self:LegendEntries()
 	local rows = {}
-	local y = -28
+	local y = -32
 	local contentWidth = 196
 	for i = 1, #entries do
 		local entry = entries[i]
 		local row = CreateFrame("Frame", nil, frame)
-		row:SetSize(contentWidth, 16)
-		row:SetPoint("TOPLEFT", 10, y)
+		row:SetSize(contentWidth, 18)
+		row:SetPoint("TOPLEFT", 12, y)
 		local size = entry.size or 8
 		local swatchHost = CreateFrame("Frame", nil, row)
 		swatchHost:SetSize(size, size)
@@ -5086,22 +5095,22 @@ function ns.Replay:EnsureMapLegend()
 			swatch:SetVertexColor(r, g, b, 1)
 		end
 		local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-		label:SetPoint("LEFT", swatchHost, "RIGHT", 8, 0)
+		label:SetPoint("LEFT", swatchHost, "RIGHT", 10, 0)
 		label:SetPoint("RIGHT", row, "RIGHT", 0, 0)
 		label:SetJustifyH("LEFT")
 		label:SetText(entry.label)
 		rows[i] = row
-		y = y - 16
+		y = y - 18
 	end
 
-	y = y - 6
+	y = y - 8
 	local rule = frame:CreateTexture(nil, "ARTWORK")
 	rule:SetColorTexture(0.62, 0.50, 0.22, 0.55)
 	rule:SetHeight(1)
-	rule:SetPoint("TOPLEFT", 10, y)
-	rule:SetPoint("TOPRIGHT", -10, y)
+	rule:SetPoint("TOPLEFT", 12, y)
+	rule:SetPoint("TOPRIGHT", -12, y)
 
-	y = y - 8
+	y = y - 10
 	local hints = {
 		L["Left click: show or hide the route."],
 		L["Right click: open the replay and show the route."],
@@ -5109,7 +5118,7 @@ function ns.Replay:EnsureMapLegend()
 	}
 	for i = 1, #hints do
 		local hint = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-		hint:SetPoint("TOPLEFT", 10, y)
+		hint:SetPoint("TOPLEFT", 12, y)
 		hint:SetWidth(contentWidth)
 		hint:SetJustifyH("LEFT")
 		hint:SetJustifyV("TOP")
@@ -5122,10 +5131,10 @@ function ns.Replay:EnsureMapLegend()
 			height = 12
 		end
 		hint:SetHeight(height)
-		y = y - (height + 4)
+		y = y - (height + 6)
 	end
 
-	frame:SetSize(contentWidth + 20, -y + 10)
+	frame:SetSize(contentWidth + 24, -y + 12)
 	frame:SetScript("OnEnter", function()
 		ns.Replay.legendWanted = true
 	end)
@@ -5197,13 +5206,11 @@ function ns.Replay:CreateMapButton()
 	if self.mapButton or not WorldMapFrame then
 		return
 	end
-	-- RareScanner's corner buttons are Krowi_WorldMapButtonsN. That library owns
-	-- the column. Anchoring under "whoever is lowest" fights OneForAll, because
-	-- both keep moving under each other until the anchors form a circle.
-	local lib = LibStub and LibStub("Krowi_WorldMapButtons-1.4", true)
-	if not lib then
-		return
-	end
+	-- Zipper embeds Krowi_WorldMapButtons-1.4. That library owns the corner
+	-- column (shared with RareScanner/Questie when present). Anchoring under
+	-- "whoever is lowest" fights OneForAll, because both keep moving under
+	-- each other until the anchors form a circle.
+	local lib = LibStub("Krowi_WorldMapButtons-1.4")
 	local button = lib:Add(nil, "Button")
 	self:StyleMapButton(button)
 	button:Show()
