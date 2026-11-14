@@ -1193,9 +1193,16 @@ function ns.GPS:OnEvent(event, ...)
 			local stored = ns.DB:NoteLevelUp(level)
 			self:Mark(Kind.LEVEL, level)
 			if stored then
-				local text = ns.DB:LevelRecapText(level)
-				if text then
-					ns:Print(text)
+				local function announce()
+					local text = ns.DB:LevelRecapText(level)
+					if text then
+						ns:Print(text)
+					end
+				end
+				if C_Timer and C_Timer.After then
+					C_Timer.After(1, announce)
+				else
+					announce()
 				end
 			end
 		end
