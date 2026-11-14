@@ -3057,7 +3057,8 @@ function ns.Replay:LayoutPips()
 			pip:SetParent(self.frame)
 			pip:SetFrameLevel(level)
 			pip:ClearAllPoints()
-			pip:SetPoint("BOTTOM", scrub, "TOPLEFT", fraction * width, 1)
+			-- Sit in the lane under the chapter strip, a few px above the track.
+			pip:SetPoint("BOTTOM", scrub, "TOPLEFT", fraction * width, 4)
 			pip:Show()
 			shown = i
 		end
@@ -3172,13 +3173,13 @@ function ns.Replay:SeekFraction(fraction, immediate)
 	else
 		self.playhead = self:TimeAtPlayed(total * fraction)
 	end
+	local gap = self:PieceGapSkipTo(self.playhead)
+	if gap and gap > self.playhead then
+		self.playhead = gap
+	end
 	local indoors = self:InstanceSkipTo(self.playhead)
 	if indoors and indoors > self.playhead then
 		self.playhead = indoors
-	end
-	local gap = self:LevelGapSkipTo(self.playhead)
-	if gap and gap > self.playhead then
-		self.playhead = gap
 	end
 	self:UpdateDot()
 	self:UpdateReadout()
@@ -3222,24 +3223,25 @@ function ns.Replay:SessionsForLevel(lo, hi)
 	return picked
 end
 
-function ns.Replay:LevelGapSkipTo(at)
-	if self.mode ~= "level" or not at or not self.levelLo or not self.t1 then
+-- Playhead advances in wall time; the scrubber clock only counts PlayPieces.
+-- Jump logout gaps (and level-span gaps) so multi-session Select all does not
+-- freeze the numerator while playing stays true through an overnight break.
+function ns.Replay:PieceGapSkipTo(at)
+	if not at or not self.t1 then
 		return nil
 	end
-	local hi = self.levelHi or self.levelLo
-	local spans = ns.DB:LevelSpans(ns.DB.char)
+	local pieces = self:PlayPieces()
+	if #pieces == 0 then
+		return nil
+	end
 	local nextStart
-	for i = 1, #spans do
-		local span = spans[i]
-		local top = span.lvTo or span.lv
-		if top >= self.levelLo and span.lv <= hi then
-			local stop = ns.DB:SpanStop(span, ns.DB.char) or span.t0
-			if at >= span.t0 and at <= stop then
-				return nil
-			end
-			if span.t0 > at and (not nextStart or span.t0 < nextStart) then
-				nextStart = span.t0
-			end
+	for i = 1, #pieces do
+		local piece = pieces[i]
+		if at >= piece.t0 and at <= piece.t1 then
+			return nil
+		end
+		if piece.t0 > at and (not nextStart or piece.t0 < nextStart) then
+			nextStart = piece.t0
 		end
 	end
 	if not nextStart or nextStart > self.t1 then
@@ -4088,13 +4090,13 @@ function ns.Replay:OnUpdate(_, elapsed)
 	end
 	if self.playing and self.t0 then
 		self.playhead = self.playhead + (elapsed * self.speed)
+		local gap = self:PieceGapSkipTo(self.playhead)
+		if gap and gap > self.playhead then
+			self.playhead = gap
+		end
 		local indoors = self:InstanceSkipTo(self.playhead)
 		if indoors and indoors > self.playhead then
 			self.playhead = indoors
-		end
-		local gap = self:LevelGapSkipTo(self.playhead)
-		if gap and gap > self.playhead then
-			self.playhead = gap
 		end
 		local reachedEnd = false
 		if self.playhead >= self.t1 then
@@ -4220,7 +4222,9 @@ function ns.Replay:Layout(width, height)
 	end
 	local listTop = 132
 	local gap = 14
-	local controls = 196
+	-- Chapter strip is 40px; scrub sits far enough below that 12px chapter
+	-- pips have a clear lane between the strip bottom and the track.
+	local controls = 220
 	local after = 16
 	local bottom = 14
 	local side = 16
@@ -4242,7 +4246,7 @@ function ns.Replay:Layout(width, height)
 		self.chapterStrip:ClearAllPoints()
 		self.chapterStrip:SetPoint("TOPLEFT", side, y + 2)
 		self.chapterStrip:SetPoint("TOPRIGHT", -side, y + 2)
-		self.chapterStrip:SetHeight(36)
+		self.chapterStrip:SetHeight(40)
 	end
 	if self.chapterStart then
 		self.chapterStart:ClearAllPoints()
@@ -4265,29 +4269,29 @@ function ns.Replay:Layout(width, height)
 		self.chapterNext:SetPoint("TOPRIGHT", -side, y)
 	end
 	self.scrub:ClearAllPoints()
-	self.scrub:SetPoint("TOPLEFT", side + 2, y - 46)
+	self.scrub:SetPoint("TOPLEFT", side + 2, y - 68)
 	self.scrub:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	self.timeText:ClearAllPoints()
-	self.timeText:SetPoint("TOPLEFT", side + 2, y - 70)
+	self.timeText:SetPoint("TOPLEFT", side + 2, y - 92)
 	self.timeText:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	local jumpWidth, jumpGap = 72, 8
 	for i = 1, #self.jumpButtons do
 		self.jumpButtons[i]:ClearAllPoints()
-		self.jumpButtons[i]:SetPoint("TOPLEFT", side + ((i - 1) * (jumpWidth + jumpGap)), y - 94)
+		self.jumpButtons[i]:SetPoint("TOPLEFT", side + ((i - 1) * (jumpWidth + jumpGap)), y - 116)
 	end
 	self.playButton:ClearAllPoints()
-	self.playButton:SetPoint("TOPLEFT", side, y - 124)
+	self.playButton:SetPoint("TOPLEFT", side, y - 146)
 	local speedWidth, speedGap = 46, 6
 	for i = 1, #self.speedButtons do
 		self.speedButtons[i]:ClearAllPoints()
-		self.speedButtons[i]:SetPoint("TOPLEFT", side + 64 + ((i - 1) * (speedWidth + speedGap)), y - 124)
+		self.speedButtons[i]:SetPoint("TOPLEFT", side + 64 + ((i - 1) * (speedWidth + speedGap)), y - 146)
 	end
 	self.trailLabel:ClearAllPoints()
-	self.trailLabel:SetPoint("TOPLEFT", side + 2, y - 156)
+	self.trailLabel:SetPoint("TOPLEFT", side + 2, y - 178)
 	self.trailValue:ClearAllPoints()
-	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(side + 2), y - 156)
+	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(side + 2), y - 178)
 	self.trailSlider:ClearAllPoints()
-	self.trailSlider:SetPoint("TOPLEFT", side + 2, y - 176)
+	self.trailSlider:SetPoint("TOPLEFT", side + 2, y - 198)
 	self.trailSlider:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	self.statInset:ClearAllPoints()
 	self.statInset:SetPoint("TOPLEFT", side, y - controls - after)
@@ -4302,6 +4306,7 @@ function ns.Replay:Layout(width, height)
 	if self.statContent then
 		self.statContent:SetWidth(contentWidth)
 	end
+	self:LayoutPips()
 end
 
 function ns.Replay:CreateFrame()
@@ -4316,10 +4321,10 @@ function ns.Replay:CreateFrame()
 	frame:SetMovable(true)
 	frame:SetResizable(true)
 	if frame.SetResizeBounds then
-		frame:SetResizeBounds(348, 490, 460, 780)
+		frame:SetResizeBounds(348, 520, 460, 800)
 	else
-		frame:SetMinResize(348, 490)
-		frame:SetMaxResize(460, 780)
+		frame:SetMinResize(348, 520)
+		frame:SetMaxResize(460, 800)
 	end
 	frame:EnableMouse(true)
 	frame:RegisterForDrag("LeftButton")
@@ -4689,16 +4694,15 @@ function ns.Replay:CreateFrame()
 	end
 
 	-- Typographic arrows sit on the gold strip with no extra button chrome.
-	-- Sized to read as large as the old 36px < / > MakeButtons.
 	local function MakeNavGlyph(parent, glyph, width)
 		local button = CreateFrame("Button", nil, parent)
-		button:SetSize(width or 40, 36)
+		button:SetSize(width or 40, 40)
 		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		label:SetPoint("CENTER", 0, 1)
 		local face, _, flags = label:GetFont()
 		if face then
-			label:SetFont(face, 30, flags)
+			label:SetFont(face, 28, flags)
 		end
 		label:SetText(glyph)
 		label:SetTextColor(0.93, 0.90, 0.78)
@@ -4729,7 +4733,7 @@ function ns.Replay:CreateFrame()
 	local chapterStrip = CreateFrame("Frame", nil, frame, "BackdropTemplate")
 	chapterStrip:SetPoint("TOPLEFT", 16, -296)
 	chapterStrip:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
-	chapterStrip:SetHeight(36)
+	chapterStrip:SetHeight(40)
 	chapterStrip:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -4775,7 +4779,7 @@ function ns.Replay:CreateFrame()
 	chapterText:SetText(L["No chapters yet"])
 
 	local scrub = CreateFrame("Slider", "ZipperReplayScrub", frame, "UISliderTemplate")
-	scrub:SetPoint("TOPLEFT", 18, -344)
+	scrub:SetPoint("TOPLEFT", 18, -366)
 	scrub:SetPoint("RIGHT", frame, "RIGHT", -18, 0)
 	scrub:SetHeight(16)
 	scrub:SetMinMaxValues(0, 1)
@@ -4878,10 +4882,10 @@ function ns.Replay:CreateFrame()
 	elseif width > 460 then
 		width = 460
 	end
-	if not height or height < 490 then
-		height = 490
-	elseif height > 780 then
-		height = 780
+	if not height or height < 520 then
+		height = 520
+	elseif height > 800 then
+		height = 800
 	end
 	frame:SetSize(width, height)
 	self:Layout(width, height)
