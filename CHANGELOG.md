@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
 - Moving a journey to Non-Global or back to Global recovers across a half-finished login, so an interrupted migrate does not strand the route.
 - Private party names stay readable after other characters log out.
 - The locked replay view no longer redraws the previous character's trail.
