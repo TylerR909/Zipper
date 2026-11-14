@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.3-beta
+
+### Added
+
+- Milestone Summaries (on by default) print a range recap in chat at level 6, 10, and every 10 levels after that.
+- The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
+
+### Changed
+
+- The replay mode button says All instead of Select all.
+- The vanilla replay panel has more padding, a closed fill-to-border seam, and a clear lane under the chapter strip for scrubber pips.
+- The level-up chat recap waits one second so the ding can finish first.
+- The route draws above zone exploration overlays, so fogged outdoor maps no longer hide the path.
+
+### Fixed
+
+- Settings checkboxes load from saved data the first time you open Zipper options.
+- Multi-session replay (All) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
+- Standing still no longer freezes the open session clock or stops replay at the last footstep; the recording end and playhead keep moving with live time after a hearth or AFK.
+
 ## 0.1.2-beta
 
 ### Added
@@ -14,12 +34,9 @@
 
 ### Fixed
 
-- The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
 - Moving a journey to Non-Global or back to Global recovers across a half-finished login, so an interrupted migrate does not strand the route.
 - Private party names stay readable after other characters log out.
 - The locked replay view no longer redraws the previous character's trail.
-- Multi-session replay (All) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
-- Standing still no longer freezes the open session clock or stops replay at the last footstep; the recording end and playhead keep moving with live time after a hearth or AFK.
 
 ## 0.1.1-beta
 
