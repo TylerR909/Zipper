@@ -37,7 +37,20 @@ function base:Canvas()
 end
 
 function base:OverlayLevel(canvas)
-	return (canvas:GetFrameLevel() or 1) + 5
+	-- Zone maps paint explored terrain on MapExplorationPin (pin stack starts
+	-- near 2000). City maps often have little or no exploration art, so a
+	-- canvas+5 path looked fine in Stormwind and disappeared under Elwynn.
+	-- Sit just above those pins; MapUtilsShim raises further for city terrain.
+	local level = (canvas:GetFrameLevel() or 1) + 5
+	if WorldMapFrame and WorldMapFrame.EnumeratePinsByTemplate then
+		for pin in WorldMapFrame:EnumeratePinsByTemplate("MapExplorationPinTemplate") do
+			local pinLevel = pin:GetFrameLevel()
+			if pinLevel and pinLevel + 1 > level then
+				level = pinLevel + 1
+			end
+		end
+	end
+	return level
 end
 
 function base:Zoom()

@@ -19,15 +19,16 @@ function shim:Active()
 end
 
 function shim:OverlayLevel(canvas)
-	-- Stitched art uses FRAME_LEVEL_OFFSET 5 on the canvas child, with zone,
-	-- city, and terrain a few levels above that. SyncBlizzardArt can raise
-	-- MinimapLayer above MapExplorationPin (pin stack starts near 2000), then
-	-- city.terrain and underground city detail a few levels above that. When
-	-- city detail takes over it hides those pins but leaves the raised art in
-	-- place, so a fixed +25 and a shown-only pin check both fall short. Match
-	-- MapUtils: read exploration pin levels whether shown or not, and stay
-	-- above city detail (pin + 4). MapUtils POI pins sit higher still.
-	local level = (canvas:GetFrameLevel() or 1) + 25
+	-- ns.Map.base already clears MapExplorationPin. MapUtils SyncBlizzardArt can
+	-- still raise MinimapLayer / city.terrain to pin + 4 after it hides those
+	-- pins, and stitched One Map art sits around canvas + 5..10. Keep a canvas
+	-- + 25 floor and stay above city detail (pin + 5). MapUtils POI pins sit
+	-- higher still.
+	local level = ns.Map.base.OverlayLevel(self, canvas)
+	local floor = (canvas:GetFrameLevel() or 1) + 25
+	if floor > level then
+		level = floor
+	end
 	if WorldMapFrame and WorldMapFrame.EnumeratePinsByTemplate then
 		for pin in WorldMapFrame:EnumeratePinsByTemplate("MapExplorationPinTemplate") do
 			local pinLevel = pin:GetFrameLevel()
