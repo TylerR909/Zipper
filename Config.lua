@@ -742,15 +742,23 @@ function ns.Config:CreateFrame()
 	self.navButtons = navButtons
 	self:ShowPage("general")
 
-	canvas:SetScript("OnShow", function()
+	local function Paint()
 		ns.Config:ShowPage(ns.Config.page or "general")
 		ns.Config:Refresh()
-	end)
+	end
+
+	-- New frames start shown. Settings reparents an already-shown canvas without
+	-- firing OnShow, so checkboxes kept blank defaults until something else
+	-- refreshed them. Hide so the first display fires OnShow; OnRefresh covers
+	-- every later open (Forever Quest Tint / Better Vendor Price pattern).
+	canvas:Hide()
+	canvas:SetScript("OnShow", Paint)
 	canvas:SetScript("OnHide", function()
 		if ns.Config.purgeList then
 			ns.Config.purgeList:Hide()
 		end
 	end)
+	canvas.OnRefresh = Paint
 
 	local category
 	if Settings and Settings.RegisterCanvasLayoutCategory then
@@ -1283,6 +1291,7 @@ function ns.Config:Toggle()
 		InterfaceOptionsFrame_OpenToCategory(self.frame)
 		InterfaceOptionsFrame_OpenToCategory(self.frame)
 	end
+	self:Refresh()
 end
 
 ns.Config:CreateFrame()
