@@ -18,7 +18,8 @@
 - Moving a journey to Non-Global or back to Global recovers across a half-finished login, so an interrupted migrate does not strand the route.
 - Private party names stay readable after other characters log out.
 - The locked replay view no longer redraws the previous character's trail.
-- Multi-session replay (Select all) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
+- Multi-session replay (All) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
+- Standing still no longer freezes the open session clock or stops replay at the last footstep; the recording end and playhead keep moving with live time after a hearth or AFK.
 
 ## 0.1.1-beta
 

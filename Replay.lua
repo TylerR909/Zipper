@@ -95,6 +95,23 @@ local function Bounds(sessions)
 			end
 		end
 	end
+	-- Open recording: keep t1 at Now so idle time after the last GPS sample
+	-- (AFK at the inn) stays inside the scrubber and playhead window.
+	local current = ns.DB.session
+	if current then
+		for s = 1, #sessions do
+			if sessions[s] == current then
+				local stop = ns.DB:SessionStop(current)
+				if stop and (not t1 or stop > t1) then
+					t1 = stop
+				end
+				if not t0 and type(current.s) == "number" then
+					t0 = current.s
+				end
+				break
+			end
+		end
+	end
 	return t0, t1, points
 end
 
@@ -1374,13 +1391,13 @@ function ns.Replay:CollectStats(sessions)
 	local scale = ns.COORD_SCALE
 	for s = 1, #sessions do
 		local session = sessions[s]
-		local endT = session.seen or session.s
+		local endT = ns.DB:SessionStop(session) or session.s
 		if self.mode == "level" and self.t1 and self.t1 < endT then
 			endT = self.t1
 		end
 		local clip = self.mode == "level" and self.levelLo and self.t0 and self.t1
 		if not clip then
-			local fullEnd = session.seen or session.s
+			local fullEnd = ns.DB:SessionStop(session) or session.s
 			if fullEnd > session.s then
 				recorded = recorded + (fullEnd - session.s)
 			end
@@ -2412,7 +2429,7 @@ function ns.Replay:ScopeCaption()
 	local session = ns.DB:Current()
 	local elapsed = 0
 	if session then
-		elapsed = (session.seen or session.s) - session.s
+		elapsed = (ns.DB:SessionStop(session) or session.s) - session.s
 	end
 	return string.format(L["The recording in progress, including reloads a few minutes apart. %s so far."], FormatClock(elapsed))
 end
@@ -2459,10 +2476,7 @@ function ns.Replay:PlayPieces()
 		for i = 1, #sessions do
 			local session = sessions[i]
 			if type(session) == "table" and type(session.s) == "number" then
-				local stop = session.seen or session.s
-				if session == ns.DB.session then
-					stop = ns.DB:Now()
-				end
+				local stop = ns.DB:SessionStop(session) or session.s
 				if stop > session.s then
 					pieces[#pieces + 1] = { t0 = session.s, t1 = stop }
 				end
@@ -2703,7 +2717,7 @@ function ns.Replay:InstanceSpans(sessions)
 	for s = 1, #(sessions or {}) do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
-		local endT = session.seen or session.s
+		local endT = ns.DB:SessionStop(session) or session.s
 		for i = 1, #(track.ek or {}) do
 			local kind = track.ek[i]
 			local t = session.s + (track.et[i] or 0)
@@ -3205,7 +3219,7 @@ function ns.Replay:SessionsForLevel(lo, hi)
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local startAt = session.s
-		local stopAt = session.seen or session.s
+		local stopAt = ns.DB:SessionStop(session) or session.s
 		if startAt and stopAt then
 			for i = 1, #spans do
 				local span = spans[i]
@@ -3920,7 +3934,7 @@ function ns.Replay:RefreshList()
 		row:SetHeight(24)
 		row.sessionIndex = index
 		row.level = nil
-		local duration = (session.seen or session.s) - session.s
+		local duration = (ns.DB:SessionStop(session) or session.s) - session.s
 		local lo = self.sessionLo
 		local hi = self.sessionHi or lo
 		local selected = false
@@ -4078,17 +4092,39 @@ function ns.Replay:SetSpeed(speed)
 	self:StyleSpeedButtons()
 end
 
+-- Grow t1 with the open recording so play does not stop at the last GPS sample
+-- while you stand still after a hearth.
+function ns.Replay:ExtendLiveT1()
+	if not self.sessions then
+		return
+	end
+	if self.mode == "level" and self.levelLo then
+		local _, levelStop = ns.DB:LevelBounds(ns.DB.char, self.levelLo, self.levelHi)
+		if levelStop and (not self.t1 or levelStop > self.t1) then
+			self.t1 = levelStop
+		end
+		return
+	end
+	local _, t1 = Bounds(self.sessions)
+	if t1 and (not self.t1 or t1 > self.t1) then
+		self.t1 = t1
+	end
+end
+
 function ns.Replay:OnUpdate(_, elapsed)
 	if GetTime() - (self.readoutAt or 0) >= 0.5 then
 		self.readoutAt = GetTime()
+		self:ExtendLiveT1()
 		self:UpdateRecap()
 		self:RefreshList()
+		self:UpdateReadout()
 	end
 	if self.dirty and (GetTime() - (self.lastRedraw or 0)) >= 0.5 then
 		self:ReloadView()
 		self:Redraw()
 	end
 	if self.playing and self.t0 then
+		self:ExtendLiveT1()
 		self.playhead = self.playhead + (elapsed * self.speed)
 		local gap = self:PieceGapSkipTo(self.playhead)
 		if gap and gap > self.playhead then
@@ -4099,7 +4135,7 @@ function ns.Replay:OnUpdate(_, elapsed)
 			self.playhead = indoors
 		end
 		local reachedEnd = false
-		if self.playhead >= self.t1 then
+		if self.t1 and self.playhead >= self.t1 then
 			self.playhead = self.t1
 			self.playing = false
 			self.playButton:SetText(L["Play"])

@@ -1258,6 +1258,18 @@ function ns.DB:Current()
 	return self.session
 end
 
+-- End of a session's played window. The open recording uses Now so standing
+-- still (no new GPS samples) still advances the replay clock and list duration.
+function ns.DB:SessionStop(session)
+	if not session then
+		return nil
+	end
+	if session == self.session then
+		return self:Now()
+	end
+	return session.seen or session.s
+end
+
 function ns.DB:Sessions()
 	return self.char and self.char.sessions or {}
 end

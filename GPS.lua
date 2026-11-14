@@ -1144,7 +1144,11 @@ function ns.GPS:Tick()
 	if self.moving or self.onTaxi then
 		self:SampleClock()
 	else
-		self:ConsiderSample(JUMP_YARDS, false)
+		-- Standing still skips AddSample; keep seen moving so the open session
+		-- duration and replay end bound do not freeze at the last footstep.
+		if not self:ConsiderSample(JUMP_YARDS, false) then
+			ns.DB:Touch(ns.DB:Now())
+		end
 	end
 end
 
