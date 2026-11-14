@@ -134,6 +134,9 @@ function ns.Config:Get()
 	if cfg.ghostRed == nil then
 		cfg.ghostRed = false
 	end
+	if cfg.milestoneSummaries == nil then
+		cfg.milestoneSummaries = true
+	end
 	if cfg.skipQuiet == nil then
 		cfg.skipQuiet = true
 	end
@@ -266,6 +269,10 @@ function ns.Config:GhostRed()
 	return self:Get().ghostRed and true or false
 end
 
+function ns.Config:MilestoneSummaries()
+	return self:Get().milestoneSummaries and true or false
+end
+
 function ns.Config:SkipQuiet()
 	return self:Get().skipQuiet and true or false
 end
@@ -279,6 +286,10 @@ function ns.Config:SetGhostRed(on)
 	if ns.Replay and ns.Replay.route then
 		ns.Replay:Redraw()
 	end
+end
+
+function ns.Config:SetMilestoneSummaries(on)
+	self:Get().milestoneSummaries = on and true or false
 end
 
 function ns.Config:SetShowMarkers(on)
@@ -551,7 +562,13 @@ function ns.Config:CreateFrame()
 		ns.Config:SetGhostRed(self:GetChecked())
 	end)
 
-	local boxes = { remind = remind, showMarkers = markers, ghostRed = ghostRed }
+	local milestones = AddCheck(general, "ZipperConfigMilestones", L["Milestone Summaries"])
+	milestones:SetPoint("TOPLEFT", 12, -260)
+	milestones:SetScript("OnClick", function(self)
+		ns.Config:SetMilestoneSummaries(self:GetChecked())
+	end)
+
+	local boxes = { remind = remind, showMarkers = markers, ghostRed = ghostRed, milestoneSummaries = milestones }
 	local roadNote = PageNote(pages.road, L["Unchecking a type stops new records of it. Saved history stays."])
 	for i = 1, #ROAD do
 		local entry = ROAD[i]
@@ -798,6 +815,9 @@ function ns.Config:Refresh()
 	self.boxes.showMarkers:SetChecked(self:ShowMarkers())
 	if self.boxes.ghostRed then
 		self.boxes.ghostRed:SetChecked(self:GhostRed())
+	end
+	if self.boxes.milestoneSummaries then
+		self.boxes.milestoneSummaries:SetChecked(self:MilestoneSummaries())
 	end
 	if self.boxes.skipQuiet then
 		self.boxes.skipQuiet:SetChecked(self:SkipQuiet())

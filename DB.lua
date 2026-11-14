@@ -1733,6 +1733,45 @@ local function CountFacts(db, journey, spans)
 	return kills, quests, deaths
 end
 
+-- Closed spans wholly inside [lo, hi]. A jump that sticks out past hi is skipped.
+function ns.DB:RangeRecapText(lo, hi)
+	local journey = self.record
+	if type(journey) ~= "table" or type(lo) ~= "number" or type(hi) ~= "number" then
+		return nil
+	end
+	if lo < 1 or hi < lo then
+		return nil
+	end
+	local spans = self:LevelSpans(journey)
+	local matched = {}
+	local seconds = 0
+	local t0, t1
+	for i = 1, #spans do
+		local span = spans[i]
+		local top = span.lvTo or span.lv
+		if span.lv >= lo and top <= hi and type(span.t1) == "number" then
+			matched[#matched + 1] = span
+			local dur = span.t1 - span.t0
+			if dur > 0 then
+				seconds = seconds + dur
+			end
+			if not t0 or span.t0 < t0 then
+				t0 = span.t0
+			end
+			if not t1 or span.t1 > t1 then
+				t1 = span.t1
+			end
+		end
+	end
+	local kills, quests, deaths = CountFacts(self, journey, matched)
+	if seconds < 1 and kills == 0 and quests == 0 and deaths == 0 then
+		return nil
+	end
+	local fromName = t0 and MapName(self:MapAt(journey, t0)) or nil
+	local toName = t1 and MapName(self:MapAt(journey, t1)) or nil
+	return RecapLine(lo, hi, seconds, kills, quests, deaths, fromName, toName)
+end
+
 function ns.DB:LevelRecapText(newLevel, now)
 	local journey = self.record
 	if type(journey) ~= "table" or type(newLevel) ~= "number" then
@@ -1821,6 +1860,34 @@ function ns.DB:ExactLevelRecap(level)
 	local fromName = t0 and MapName(self:MapAt(journey, t0)) or nil
 	local toName = t1 and MapName(self:MapAt(journey, t1)) or nil
 	return RecapLine(level, level, seconds, kills, quests, deaths, fromName, toName)
+end
+
+-- Extra chat lines after a ding. Starter band at 6; every 10 levels a decade
+-- plus a total. At 10 the decade is 1–10 and is also the total, so one line.
+function ns.DB:MilestoneSummaryTexts(newLevel)
+	local lines = {}
+	if type(newLevel) ~= "number" or newLevel < 1 or newLevel ~= math.floor(newLevel) then
+		return lines
+	end
+	local function add(lo, hi)
+		local text = self:RangeRecapText(lo, hi)
+		if text then
+			lines[#lines + 1] = text
+		end
+	end
+	if newLevel == 6 then
+		add(1, 6)
+		return lines
+	end
+	if newLevel == 10 then
+		add(1, 10)
+		return lines
+	end
+	if newLevel > 10 and newLevel % 10 == 0 then
+		add(newLevel - 10, newLevel - 1)
+		add(1, newLevel - 1)
+	end
+	return lines
 end
 
 function ns.DB:DingCommand(level, playerLevel, maxLevel)

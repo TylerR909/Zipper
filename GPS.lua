@@ -1198,6 +1198,12 @@ function ns.GPS:OnEvent(event, ...)
 					if text then
 						ns:Print(text)
 					end
+					if ns.Config and ns.Config:MilestoneSummaries() then
+						local milestones = ns.DB:MilestoneSummaryTexts(level)
+						for i = 1, #milestones do
+							ns:Print(milestones[i])
+						end
+					end
 				end
 				if C_Timer and C_Timer.After then
 					C_Timer.After(1, announce)
