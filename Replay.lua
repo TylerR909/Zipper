@@ -4531,7 +4531,7 @@ function ns.Replay:CreateFrame()
 		ns.Replay:SetMode("level", nil, true)
 	end)
 
-	local selectAll = MakeButton(frame, L["Select all"], 104)
+	local selectAll = MakeButton(frame, L["All"], 48)
 	selectAll:SetPoint("TOPRIGHT", -16, -68)
 	selectAll:SetScript("OnClick", function()
 		ns.Replay:SelectAll()
