@@ -4332,7 +4332,8 @@ function ns.Replay:CreateFrame()
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8",
 		edgeSize = 2,
-		insets = { left = 3, right = 3, top = 3, bottom = 3 },
+		-- Match edgeSize so the fill meets the border with no seam.
+		insets = { left = 2, right = 2, top = 2, bottom = 2 },
 	})
 	frame:SetBackdropColor(0.06, 0.06, 0.07, 0.98)
 	frame:SetBackdropBorderColor(0.78, 0.62, 0.28, 1)
@@ -4391,8 +4392,8 @@ function ns.Replay:CreateFrame()
 
 	local header = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
 	header:SetColorTexture(0.12, 0.10, 0.08, 1)
-	header:SetPoint("TOPLEFT", 3, -3)
-	header:SetPoint("TOPRIGHT", -3, -3)
+	header:SetPoint("TOPLEFT", 2, -2)
+	header:SetPoint("TOPRIGHT", -2, -2)
 	header:SetHeight(56)
 
 	local headerSheen = frame:CreateTexture(nil, "BACKGROUND", nil, 2)
