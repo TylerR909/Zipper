@@ -16,7 +16,7 @@
 
 ### Fixed
 
-- Level routes in the replay list no longer wrap a trailing word back under the level number. A route that does not fit drops onto its own line in that row.
+- Level routes in the replay list stay on one line. A route that does not fit is clipped at the edge of the list instead of wrapping onto the next row.
 - Settings checkboxes load from saved data the first time you open Zipper options.
 - Multi-session replay (All) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
 - Standing still no longer freezes the open session clock or stops replay at the last footstep; the recording end and playhead keep moving with live time after a hearth or AFK.

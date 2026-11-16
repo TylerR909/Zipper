@@ -3793,13 +3793,6 @@ end
 function ns.Replay:RefreshLevelList()
 	local content = self.listContent
 	local groups = self:LevelGroups()
-	local width = content:GetWidth()
-	if width < 40 then
-		width = 250
-	end
-	-- Label is inset 10 left and 8 right. Measure against that, not the row.
-	local limit = width - 18
-	local y = 0
 	for i = 1, #groups do
 		local group = groups[i]
 		local row = self.rows[i]
@@ -3810,9 +3803,8 @@ function ns.Replay:RefreshLevelList()
 			row.bar:SetAllPoints()
 			row.bar:SetColorTexture(0.85, 0.68, 0.28, 0.16)
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 10, 0)
-			row.label:SetPoint("RIGHT", -8, 0)
 			row.label:SetJustifyH("LEFT")
+			row.label:SetJustifyV("MIDDLE")
 			row:SetScript("OnClick", function(button)
 				local shift = IsShiftKeyDown and IsShiftKeyDown()
 				if shift and issecretvalue and issecretvalue(shift) then
@@ -3828,43 +3820,20 @@ function ns.Replay:RefreshLevelList()
 			end)
 			self.rows[i] = row
 		end
+		row:SetHeight(24)
 		row.sessionIndex = nil
 		row.level = group.lv
 		row.levelTop = group.lvTo or group.lv
 		local selected = self.levelLo and row.levelTop >= self.levelLo and row.level <= (self.levelHi or self.levelLo)
-		local text, head, place = self:LevelRowLabel(group)
-		local natural = row.label:GetUnboundedStringWidthForText(text)
-		-- Soft wrap used to send the last word ("City", "Forest") back to the
-		-- left edge, on top of the next level. Keep a fitting route on one
-		-- line. Otherwise the whole route drops to a second line in this row.
-		local split = place and natural > limit
+		-- One line. A long route clips at the row edge instead of wrapping
+		-- a leftover word back under the level number.
 		row.label:ClearAllPoints()
+		row.label:SetPoint("LEFT", 10, 0)
+		row.label:SetPoint("RIGHT", -8, 0)
 		row.label:SetJustifyH("LEFT")
-		row.label:SetIndentedWordWrap(false)
-		row:SetWidth(width)
-		local h = 24
-		if split then
-			-- Width before the anchors so a not-yet-placed row cannot measure
-			-- as one character per line and blow the list open.
-			row.label:SetWidth(limit)
-			row.label:SetWordWrap(true)
-			row.label:SetJustifyV("TOP")
-			row.label:SetText(head .. "|n" .. place)
-			local textH = row.label:GetStringHeight() or 0
-			if textH < 10 or textH > 64 then
-				textH = 28
-			end
-			h = math.max(36, math.ceil(textH + 8))
-			row.label:SetPoint("TOPLEFT", 10, -4)
-			row.label:SetPoint("TOPRIGHT", -8, -4)
-		else
-			row.label:SetPoint("LEFT", 10, 0)
-			row.label:SetPoint("RIGHT", -8, 0)
-			row.label:SetJustifyV("MIDDLE")
-			row.label:SetWordWrap(false)
-			row.label:SetText(text)
-		end
-		row:SetHeight(h)
+		row.label:SetJustifyV("MIDDLE")
+		row.label:SetWordWrap(false)
+		row.label:SetText(self:LevelRowLabel(group))
 		row.bar:SetShown(selected)
 		if selected then
 			row.label:SetTextColor(1, 0.86, 0.45)
@@ -3872,10 +3841,9 @@ function ns.Replay:RefreshLevelList()
 			row.label:SetTextColor(0.82, 0.80, 0.74)
 		end
 		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
+		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 24))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 		row:Show()
-		y = y + h
 	end
 	for i = #groups + 1, #self.rows do
 		self.rows[i]:Hide()
@@ -3887,7 +3855,7 @@ function ns.Replay:RefreshLevelList()
 			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
 		end
 	end
-	content:SetHeight(math.max(24, y))
+	content:SetHeight(math.max(24, #groups * 24))
 end
 
 function ns.Replay:LevelPlace(group)
@@ -3907,17 +3875,13 @@ function ns.Replay:LevelPlace(group)
 	return fromName or toName
 end
 
-function ns.Replay:LevelRowHead(group)
-	return string.format("%s    %s", self:LevelName(group), FormatClock(group.seconds or 0))
-end
-
 function ns.Replay:LevelRowLabel(group)
-	local head = self:LevelRowHead(group)
+	local text = string.format("%s    %s", self:LevelName(group), FormatClock(group.seconds or 0))
 	local place = self:LevelPlace(group)
-	if not place then
-		return head, head, nil
+	if place then
+		text = text .. "    " .. place
 	end
-	return head .. "    " .. place, head, place
+	return text
 end
 
 function ns.Replay:RefreshList()
@@ -4389,11 +4353,6 @@ function ns.Replay:Layout(width, height)
 		self.statContent:SetWidth(contentWidth)
 	end
 	self:LayoutPips()
-	-- Level rows decide their height from this width. Rebuild on resize so a
-	-- leftover place-name does not stay wrapped until the next half-second tick.
-	if self.mode == "level" and self.rows then
-		self:RefreshList()
-	end
 end
 
 function ns.Replay:CreateFrame()
