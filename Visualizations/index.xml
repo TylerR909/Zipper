@@ -1,0 +1,13 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+	<Script file="Displays.lua"/>
+	<Script file="Where.lua"/>
+	<Script file="Travel.lua"/>
+	<Script file="Places.lua"/>
+	<Script file="Levels.lua"/>
+	<Script file="Grouped.lua"/>
+	<Script file="Share.lua"/>
+	<Script file="Pyramid.lua"/>
+	<Script file="Elites.lua"/>
+	<Script file="Zones.lua"/>
+	<Script file="Pauses.lua"/>
+</Ui>

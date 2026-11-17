@@ -2138,25 +2138,16 @@ function ns.Replay:StatsKey(sessions)
 		self.t0 or "",
 		self.t1 or ""
 	)
-	if self.mode == "level" then
-		parts[#parts + 1] = "lv" .. math.floor(ns.DB:Now() / 5)
-	end
 	local with = ns.DB.char and ns.DB.char.with
-	local spans, open = 0, 0
+	local spans = 0
 	if type(with) == "table" then
 		for _, list in pairs(with) do
 			if type(list) == "table" then
 				spans = spans + #list
-				if #list % 2 == 1 then
-					open = open + 1
-				end
 			end
 		end
 	end
 	parts[#parts + 1] = "c" .. spans
-	if open > 0 then
-		parts[#parts + 1] = "o" .. math.floor(ns.DB:Now() / 5)
-	end
 	return table.concat(parts, ":")
 end
 
@@ -2218,7 +2209,15 @@ function ns.Replay:RefreshStats(sessions)
 end
 
 function ns.Replay:UpdateRecap(sessions)
+	if self.pane == "charts" and ns.Viz and ns.Viz.Refresh then
+		ns.Viz:Refresh(sessions)
+		return
+	end
 	self:RefreshStats(sessions)
+end
+
+function ns.Replay:SetPane(pane)
+	self:SetExpanded(pane == "charts")
 end
 
 function ns.Replay:ToggleCharacters()
@@ -3019,7 +3018,7 @@ function ns.Replay:AcquirePip(index)
 	if pip then
 		return pip
 	end
-	pip = CreateFrame("Button", nil, self.frame)
+	pip = CreateFrame("Button", nil, self.chrome or self.frame)
 	pip:SetSize(12, 12)
 	pip.mark = pip:CreateTexture(nil, "OVERLAY")
 	pip.mark:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -3068,7 +3067,7 @@ function ns.Replay:LayoutPips()
 			local pip = self:AcquirePip(i)
 			pip.when = chapter.t
 			pip.title = chapter.name
-			pip:SetParent(self.frame)
+			pip:SetParent(self.chrome or self.frame)
 			pip:SetFrameLevel(level)
 			pip:ClearAllPoints()
 			-- Sit in the lane under the chapter strip, a few px above the track.
@@ -4250,8 +4249,21 @@ function ns.Replay:SaveWindow()
 	if not frame then
 		return
 	end
-	local point, _, _, x, y = frame:GetPoint(1)
 	ZipperDB = ZipperDB or {}
+	-- The wide chart window is a temporary opening of the tall panel. Persist
+	-- the tall rect so a reload comes back to playback, not a stretched replay.
+	if self.expanded and self.collapsedWindow then
+		local saved = self.collapsedWindow
+		ZipperDB.window = {
+			point = saved.point,
+			x = saved.x,
+			y = saved.y,
+			w = saved.w,
+			h = saved.h,
+		}
+		return
+	end
+	local point, _, _, x, y = frame:GetPoint(1)
 	ZipperDB.window = {
 		point = point,
 		x = x,
@@ -4259,6 +4271,302 @@ function ns.Replay:SaveWindow()
 		w = frame:GetWidth(),
 		h = frame:GetHeight(),
 	}
+end
+
+-- The open list keeps the tall panel's width up to this. Wider than the
+-- session text is empty space beside the chart.
+local CHART_COLUMN_MAX = 320
+
+function ns.Replay:ApplyResizeBounds()
+	local frame = self.frame
+	if not frame then
+		return
+	end
+	local minW, maxW = 348, 460
+	if self.expanded then
+		local col = self.columnW or 348
+		minW = col + 440
+		maxW = col + 900
+		if maxW < minW then
+			maxW = minW
+		end
+	end
+	if frame.SetResizeBounds then
+		frame:SetResizeBounds(minW, 520, maxW, 800)
+	elseif frame.SetMinResize then
+		frame:SetMinResize(minW, 520)
+		frame:SetMaxResize(maxW, 800)
+	end
+end
+
+function ns.Replay:MoveForWidth(width, height)
+	local frame = self.frame
+	local left = frame:GetLeft()
+	local top = frame:GetTop()
+	if not left or not top then
+		frame:SetSize(width, height)
+		return
+	end
+	local screenW = UIParent and UIParent:GetWidth() or 0
+	local screenH = UIParent and UIParent:GetHeight() or 0
+	local margin = 12
+	if screenW > 0 and left + width > screenW - margin then
+		left = screenW - margin - width
+	end
+	if left < margin then
+		left = margin
+	end
+	if screenH > 0 and top > screenH - margin then
+		top = screenH - margin
+	end
+	if top - height < margin then
+		top = height + margin
+	end
+	frame:ClearAllPoints()
+	frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+	frame:SetSize(width, height)
+end
+
+function ns.Replay:SetExpanded(open)
+	open = open and true or false
+	if open == (self.expanded and true or false) then
+		return
+	end
+	local frame = self.frame
+	if not frame then
+		self.expanded = open
+		self.pane = open and "charts" or "replay"
+		return
+	end
+	if open then
+		local point, _, _, x, y = frame:GetPoint(1)
+		self.collapsedWindow = {
+			point = point,
+			x = x,
+			y = y,
+			w = frame:GetWidth(),
+			h = frame:GetHeight(),
+		}
+		local col = frame:GetWidth() or 348
+		if col < 348 then
+			col = 348
+		elseif col > 460 then
+			col = 460
+		end
+		if col > CHART_COLUMN_MAX then
+			col = CHART_COLUMN_MAX
+		end
+		self.columnW = col
+		self.expanded = true
+		self.pane = "charts"
+		self.playing = false
+		if self.playButton then
+			self.playButton:SetText(L["Play"])
+		end
+		self:ApplyResizeBounds()
+		self:ShowChrome(false)
+		local height = frame:GetHeight()
+		if not height or height < 520 then
+			height = 520
+		end
+		self:MoveForWidth(col + 620, height)
+	else
+		local saved = self.collapsedWindow
+		self.expanded = false
+		self.pane = "replay"
+		if saved and saved.point then
+			frame:ClearAllPoints()
+			frame:SetPoint(saved.point, UIParent, saved.point, saved.x or 0, saved.y or 0)
+			frame:SetSize(saved.w or self.columnW or 348, saved.h or 736)
+		else
+			frame:SetWidth(self.columnW or 348)
+		end
+		self:ApplyResizeBounds()
+		self:ShowChrome(true)
+	end
+	self:UpdateRecap(self.sessions)
+end
+
+function ns.Replay:PlaceChartsButton()
+	local button = self.chartsButton
+	local frame = self.frame
+	if not button or not frame then
+		return
+	end
+	button:ClearAllPoints()
+	button:SetSize(72, 24)
+	button:SetText(L["Charts"])
+	button:SetFrameLevel(frame:GetFrameLevel() + 18)
+	if self.optionsButton then
+		button:SetPoint("RIGHT", self.optionsButton, "LEFT", -4, 0)
+	end
+	local font = button:GetFontString()
+	if font then
+		if self.expanded then
+			font:SetTextColor(1, 0.86, 0.45)
+		else
+			font:SetTextColor(0.93, 0.90, 0.78)
+		end
+	end
+	button:Show()
+end
+
+function ns.Replay:PlaceCollapseButton(column)
+	local button = self.collapseButton
+	local frame = self.frame
+	if not button or not frame then
+		return
+	end
+	if not self.expanded then
+		button:Hide()
+		return
+	end
+	button:ClearAllPoints()
+	button:SetFrameLevel(frame:GetFrameLevel() + 18)
+	button:SetSize(22, 64)
+	button:SetText("<")
+	local height = frame:GetHeight() or 700
+	button:SetPoint("LEFT", frame, "TOPLEFT", (column or self.columnW or CHART_COLUMN_MAX) - 11, -math.floor(height / 2))
+	button:Show()
+end
+
+function ns.Replay:AnchorSelector(column, expanded, listH, width)
+	local frame = self.frame
+	if not frame then
+		return
+	end
+	if not expanded then
+		if self.header then
+			self.header:ClearAllPoints()
+			self.header:SetPoint("TOPLEFT", 2, -2)
+			self.header:SetPoint("TOPRIGHT", -2, -2)
+			self.header:SetHeight(56)
+		end
+		if self.titleText then
+			self.titleText:ClearAllPoints()
+			self.titleText:SetPoint("TOPLEFT", 18, -10)
+			self.titleText:SetPoint("RIGHT", frame, "RIGHT", -196, 0)
+		end
+		if self.charButton then
+			self.charButton:ClearAllPoints()
+			self.charButton:SetPoint("TOPLEFT", 16, -32)
+			self.charButton:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+			self.charButton:SetHeight(22)
+		end
+		if self.closeButton then
+			self.closeButton:ClearAllPoints()
+			self.closeButton:SetPoint("TOPRIGHT", -2, -2)
+		end
+		if self.selectAllButton then
+			self.selectAllButton:ClearAllPoints()
+			self.selectAllButton:SetPoint("TOPRIGHT", -16, -68)
+		end
+		if self.scopeText then
+			self.scopeText:ClearAllPoints()
+			self.scopeText:SetPoint("TOPLEFT", 18, -100)
+			self.scopeText:SetPoint("RIGHT", frame, "RIGHT", -18, 0)
+		end
+		if self.listInset then
+			self.listInset:ClearAllPoints()
+			self.listInset:SetPoint("TOPLEFT", 16, -132)
+			self.listInset:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
+		end
+		return
+	end
+	-- Same vertical anchors as the tall panel. Shift only the right edge back
+	-- by however much wider the chart pane made the window.
+	local extra = (width or frame:GetWidth() or column) - column
+	if extra < 0 then
+		extra = 0
+	end
+	if self.header then
+		self.header:ClearAllPoints()
+		self.header:SetPoint("TOPLEFT", 2, -2)
+		self.header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(extra + 2), -2)
+		self.header:SetHeight(56)
+	end
+	if self.titleText then
+		self.titleText:ClearAllPoints()
+		self.titleText:SetPoint("TOPLEFT", 18, -10)
+		self.titleText:SetPoint("RIGHT", frame, "RIGHT", -(extra + 196), 0)
+	end
+	if self.charButton then
+		self.charButton:ClearAllPoints()
+		self.charButton:SetPoint("TOPLEFT", 16, -32)
+		self.charButton:SetPoint("RIGHT", frame, "RIGHT", -(extra + 16), 0)
+		self.charButton:SetHeight(22)
+	end
+	if self.closeButton then
+		self.closeButton:ClearAllPoints()
+		self.closeButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(extra + 2), -2)
+	end
+	if self.selectAllButton then
+		self.selectAllButton:ClearAllPoints()
+		self.selectAllButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(extra + 16), -68)
+	end
+	if self.scopeText then
+		self.scopeText:ClearAllPoints()
+		self.scopeText:SetPoint("TOPLEFT", 18, -100)
+		self.scopeText:SetPoint("RIGHT", frame, "RIGHT", -(extra + 18), 0)
+	end
+	if self.listInset then
+		self.listInset:ClearAllPoints()
+		self.listInset:SetPoint("TOPLEFT", 16, -132)
+		self.listInset:SetPoint("BOTTOMRIGHT", frame, "TOPLEFT", column - 16, -(132 + (listH or 64)))
+	end
+end
+
+-- Playback widgets live on self.chrome. Hiding that frame hides the chapter
+-- ticks too, including ones LayoutPips shows again after a selection change.
+-- Their anchors stay on the panel. A hidden parent does not draw or click.
+function ns.Replay:OwnChrome()
+	local chrome = self.chrome
+	if not chrome then
+		return
+	end
+	local owned = {
+		self.chapterStrip,
+		self.scrub,
+		self.timeText,
+		self.playButton,
+		self.trailLabel,
+		self.trailValue,
+		self.trailSlider,
+		self.statInset,
+	}
+	if self.jumpButtons then
+		for i = 1, #self.jumpButtons do
+			owned[#owned + 1] = self.jumpButtons[i]
+		end
+	end
+	if self.speedButtons then
+		for i = 1, #self.speedButtons do
+			owned[#owned + 1] = self.speedButtons[i]
+		end
+	end
+	if self.pips then
+		for i = 1, #self.pips do
+			owned[#owned + 1] = self.pips[i]
+		end
+	end
+	for i = 1, #owned do
+		local widget = owned[i]
+		if widget and widget.SetParent and widget:GetParent() ~= chrome then
+			widget:SetParent(chrome)
+		end
+	end
+end
+
+function ns.Replay:ShowChrome(show)
+	local chrome = self.chrome
+	if not chrome then
+		return
+	end
+	if show then
+		chrome:Show()
+	else
+		chrome:Hide()
+	end
 end
 
 function ns.Replay:Layout(width, height)
@@ -4270,28 +4578,74 @@ function ns.Replay:Layout(width, height)
 	local gap = 14
 	-- Chapter strip is 40px; scrub sits far enough below that 12px chapter
 	-- pips have a clear lane between the strip bottom and the track.
-	local controls = 220
-	local after = 16
+	local charts = self.expanded and ns.Viz and ns.Viz.pane
+	local controls = charts and 0 or 220
+	local after = charts and 0 or 16
 	local bottom = 14
 	local side = 16
+	local column = width
+	if charts then
+		column = self.columnW or CHART_COLUMN_MAX
+		if column > CHART_COLUMN_MAX then
+			column = CHART_COLUMN_MAX
+		elseif column < 280 then
+			column = 280
+		end
+	end
 	local leftover = height - (listTop + gap + controls + after + bottom)
-	local listH = math.floor(leftover * 0.42)
+	local listH
+	if charts then
+		listH = height - listTop - bottom
+	else
+		listH = math.floor(leftover * 0.42)
+	end
 	if listH < 64 then
 		listH = 64
 	end
-	if leftover - listH < 48 then
-		listH = leftover - 48
+	-- Charts use the whole column under the header. The old floor was for a
+	-- drawing tucked under a short list, and it would chop this list back.
+	if not charts then
+		if leftover - listH < 48 then
+			listH = leftover - 48
+		end
+		if listH < 48 then
+			listH = 48
+		end
 	end
-	if listH < 48 then
-		listH = 48
-	end
-	inset:SetHeight(listH)
-	local y = -(listTop + listH + gap)
 	local frame = self.frame
+	self:AnchorSelector(column, charts and true or false, listH, width)
+	if not charts then
+		inset:SetHeight(listH)
+	end
+	local y = -(listTop + listH + gap)
+	local body = y
+	local contentWidth = column - 66
+	if contentWidth < 200 then
+		contentWidth = 200
+	end
+	if self.listContent then
+		self.listContent:SetWidth(contentWidth)
+	end
+	if self.statContent then
+		self.statContent:SetWidth(contentWidth)
+	end
+	if charts then
+		self:ShowChrome(false)
+		self:PlaceChartsButton()
+		self:PlaceCollapseButton(column)
+		ns.Viz:PlaceBox(column + 8, 12, side, bottom)
+		return
+	end
+	if ns.Viz and ns.Viz.HidePane then
+		ns.Viz:HidePane()
+	end
+	self:PlaceChartsButton()
+	self:PlaceCollapseButton(column)
+	self:ShowChrome(true)
 	if self.chapterStrip then
 		self.chapterStrip:ClearAllPoints()
-		self.chapterStrip:SetPoint("TOPLEFT", side, y + 2)
-		self.chapterStrip:SetPoint("TOPRIGHT", -side, y + 2)
+		self.chapterStrip:SetPoint("TOPLEFT", side, body + 2)
+		self.chapterStrip:SetPoint("TOPRIGHT", -side, body + 2)
 		self.chapterStrip:SetHeight(40)
 	end
 	if self.chapterStart then
@@ -4302,7 +4656,7 @@ function ns.Replay:Layout(width, height)
 	if self.chapterStart then
 		self.chapterPrev:SetPoint("LEFT", self.chapterStart, "RIGHT", 2, 0)
 	else
-		self.chapterPrev:SetPoint("TOPLEFT", side, y)
+		self.chapterPrev:SetPoint("TOPLEFT", side, body)
 	end
 	if self.chapterEnd then
 		self.chapterEnd:ClearAllPoints()
@@ -4312,46 +4666,36 @@ function ns.Replay:Layout(width, height)
 	if self.chapterEnd then
 		self.chapterNext:SetPoint("RIGHT", self.chapterEnd, "LEFT", -2, 0)
 	else
-		self.chapterNext:SetPoint("TOPRIGHT", -side, y)
+		self.chapterNext:SetPoint("TOPRIGHT", -side, body)
 	end
 	self.scrub:ClearAllPoints()
-	self.scrub:SetPoint("TOPLEFT", side + 2, y - 68)
+	self.scrub:SetPoint("TOPLEFT", side + 2, body - 68)
 	self.scrub:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	self.timeText:ClearAllPoints()
-	self.timeText:SetPoint("TOPLEFT", side + 2, y - 92)
+	self.timeText:SetPoint("TOPLEFT", side + 2, body - 92)
 	self.timeText:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	local jumpWidth, jumpGap = 72, 8
 	for i = 1, #self.jumpButtons do
 		self.jumpButtons[i]:ClearAllPoints()
-		self.jumpButtons[i]:SetPoint("TOPLEFT", side + ((i - 1) * (jumpWidth + jumpGap)), y - 116)
+		self.jumpButtons[i]:SetPoint("TOPLEFT", side + ((i - 1) * (jumpWidth + jumpGap)), body - 116)
 	end
 	self.playButton:ClearAllPoints()
-	self.playButton:SetPoint("TOPLEFT", side, y - 146)
+	self.playButton:SetPoint("TOPLEFT", side, body - 146)
 	local speedWidth, speedGap = 46, 6
 	for i = 1, #self.speedButtons do
 		self.speedButtons[i]:ClearAllPoints()
-		self.speedButtons[i]:SetPoint("TOPLEFT", side + 64 + ((i - 1) * (speedWidth + speedGap)), y - 146)
+		self.speedButtons[i]:SetPoint("TOPLEFT", side + 64 + ((i - 1) * (speedWidth + speedGap)), body - 146)
 	end
 	self.trailLabel:ClearAllPoints()
-	self.trailLabel:SetPoint("TOPLEFT", side + 2, y - 178)
+	self.trailLabel:SetPoint("TOPLEFT", side + 2, body - 178)
 	self.trailValue:ClearAllPoints()
-	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(side + 2), y - 178)
+	self.trailValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(side + 2), body - 178)
 	self.trailSlider:ClearAllPoints()
-	self.trailSlider:SetPoint("TOPLEFT", side + 2, y - 198)
+	self.trailSlider:SetPoint("TOPLEFT", side + 2, body - 198)
 	self.trailSlider:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
 	self.statInset:ClearAllPoints()
-	self.statInset:SetPoint("TOPLEFT", side, y - controls - after)
+	self.statInset:SetPoint("TOPLEFT", side, body - controls - after)
 	self.statInset:SetPoint("BOTTOMRIGHT", -side, bottom)
-	local contentWidth = width - 66
-	if contentWidth < 200 then
-		contentWidth = 200
-	end
-	if self.listContent then
-		self.listContent:SetWidth(contentWidth)
-	end
-	if self.statContent then
-		self.statContent:SetWidth(contentWidth)
-	end
 	self:LayoutPips()
 end
 
@@ -4387,6 +4731,9 @@ function ns.Replay:CreateFrame()
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
 		ns.Replay:SaveWindow()
+		if ns.Viz and ns.Viz.PlaceTabs then
+			ns.Viz:PlaceTabs()
+		end
 	end)
 	frame:SetScript("OnSizeChanged", function(self, width, height)
 		ns.Replay:Layout(width, height)
@@ -4561,6 +4908,76 @@ function ns.Replay:CreateFrame()
 	options:SetPoint("RIGHT", close, "LEFT", 2, 0)
 	options:SetScript("OnClick", function()
 		ns.Config:Toggle()
+	end)
+
+	local chartsButton = MakeButton(frame, L["Charts"], 72)
+	chartsButton:SetPoint("RIGHT", options, "LEFT", -4, 0)
+	chartsButton:SetFrameLevel(frame:GetFrameLevel() + 18)
+	chartsButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	local chartsFont = chartsButton:GetFontString()
+	if chartsFont then
+		chartsFont:SetWordWrap(false)
+		chartsFont:SetTextColor(0.93, 0.90, 0.78)
+	end
+	chartsButton:SetScript("OnClick", function()
+		ns.Replay:SetExpanded(not ns.Replay.expanded)
+	end)
+	chartsButton:SetScript("OnEnter", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 0.9, 0.6)
+		end
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		if ns.Replay.expanded then
+			GameTooltip:SetText(L["Back to playback."])
+		else
+			GameTooltip:SetText(L["Open charts for this selection."])
+		end
+		GameTooltip:Show()
+	end)
+	chartsButton:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			if ns.Replay.expanded then
+				font:SetTextColor(1, 0.86, 0.45)
+			else
+				font:SetTextColor(0.93, 0.90, 0.78)
+			end
+		end
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+
+	local collapseButton = MakeButton(frame, "<", 22)
+	collapseButton:SetFrameLevel(frame:GetFrameLevel() + 18)
+	collapseButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	collapseButton:Hide()
+	local collapseFont = collapseButton:GetFontString()
+	if collapseFont then
+		collapseFont:SetWordWrap(false)
+		collapseFont:SetTextColor(0.93, 0.90, 0.78)
+	end
+	collapseButton:SetScript("OnClick", function()
+		ns.Replay:SetExpanded(false)
+	end)
+	collapseButton:SetScript("OnEnter", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(1, 0.9, 0.6)
+		end
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(L["Back to playback."])
+		GameTooltip:Show()
+	end)
+	collapseButton:SetScript("OnLeave", function(self)
+		local font = self:GetFontString()
+		if font then
+			font:SetTextColor(0.93, 0.90, 0.78)
+		end
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
 	end)
 
 	local sessionButton = MakeButton(frame, L["Sessions"], 96)
@@ -4877,10 +5294,13 @@ function ns.Replay:CreateFrame()
 
 	self.listInset = inset
 	self.frame = frame
+	self.header = header
 	self.scopeText = scope
 	self.titleText = title
 	self.closeButton = close
 	self.optionsButton = options
+	self.chartsButton = chartsButton
+	self.collapseButton = collapseButton
 	self.charButton = charButton
 	self.charPicker = charPicker
 	self.charRows = {}
@@ -4911,9 +5331,21 @@ function ns.Replay:CreateFrame()
 	self.statScroll = statScroll
 	self.statContent = statContent
 	self.statRows = {}
+	-- Under the list. Chart mode hides this whole frame, so a chapter tick
+	-- cannot be shown back onto the chart by a later layout pass.
+	local chrome = CreateFrame("Frame", nil, frame)
+	chrome:SetAllPoints(frame)
+	chrome:EnableMouse(false)
+	chrome:SetFrameLevel(frame:GetFrameLevel() + 1)
+	self.chrome = chrome
+	self:OwnChrome()
 	-- The route can already have drawn into these pools. Replacing the tables
 	-- leaves the old textures on the map, stuck to the first view.
 	self:EnsurePools()
+
+	if ns.Viz and ns.Viz.Attach then
+		ns.Viz:Attach(self)
+	end
 
 	local window = ZipperDB and ZipperDB.window
 	frame:ClearAllPoints()
@@ -5287,7 +5719,7 @@ function ns.Replay:ApplySkin()
 		if self.closeButton then
 			paint(skin.CloseButton, self.closeButton)
 		end
-		local buttons = { self.sessionButton, self.selectAllButton, self.playButton, self.optionsButton }
+		local buttons = { self.sessionButton, self.selectAllButton, self.playButton, self.optionsButton, self.chartsButton }
 		if self.speedButtons then
 			for j = 1, #self.speedButtons do
 				buttons[#buttons + 1] = self.speedButtons[j]
@@ -5353,6 +5785,10 @@ function ns.Replay:ApplySkin()
 	if self.sessionButton then
 		self:StyleModeButtons()
 	end
+	if ns.Viz and ns.Viz.StyleTabs then
+		ns.Viz:StyleTabs()
+	end
+	self:OwnChrome()
 end
 
 function ns.Replay:RegisterSkin()

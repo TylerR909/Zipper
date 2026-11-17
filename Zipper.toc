@@ -21,4 +21,6 @@ Social.lua
 Map.lua
 MapUtilsShim.lua
 Replay.lua
+Viz.lua
+Visualizations/index.xml
 Zipper.lua

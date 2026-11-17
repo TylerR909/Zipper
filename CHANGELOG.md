@@ -4,11 +4,17 @@
 
 ### Added
 
+- Charts, in the replay header, opens the window to the right. The session or level list fills the left side, the chart names sit beside the drawing, and closing Charts puts the playback controls back under the list. Shift-click a range and the chart covers that selection. Where time went is a pie of open world, dungeons, raids, and the other places you spent time. The other charts show how you moved, kills and turn-ins by place and by level, and pauses.
+- Three more charts use that same selection. Grouped and solo splits kills per level. Elites and rares splits them again, and a rare elite is counted with the elites. Zones shows the time there, then the kills and turn-ins.
+- Each level and Kills and turn-ins draw the two counts as separate bars, so a handful of turn-ins can fill its own scale. Group share fills one bar per level and splits it between grouped and solo. Solo and grouped puts solo on the left and grouped on the right, on one scale.
+- Pauses can switch between the bars and a pie of those same times. A chart with more than one drawing shows that choice under its note.
+- Where time went can stay a pie, or split that time by level as stacked bars or a share bar. How you moved can be bars or a pie. Elites and rares can show each level's share. Kills and turn-ins stays the grouped bars.
 - Milestone Summaries (on by default) print a range recap in chat at level 6, 10, and every 10 levels after that.
 - The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
 
 ### Changed
 
+- Chart notes under the title are shorter. Where time went, Kills and turn-ins, Each level, and Zones leave that line blank.
 - The replay mode button says All instead of Select all.
 - The vanilla replay panel has more padding, a closed fill-to-border seam, and a clear lane under the chapter strip for scrubber pips.
 - The level-up chat recap waits one second so the ding can finish first.
@@ -16,6 +22,13 @@
 
 ### Fixed
 
+- Chapter ticks stay on the playback layer, so changing the selection cannot draw them on top of a chart.
+- Kills and turn-ins show the real counts for the selection. Where time went calls idle out as its own slice.
+- A level played in more than one session stays inside that level. The pie clock matches the rows.
+- Where time went keeps one total when several places share a level, and names those places on a legend.
+- Elites and rares, and Grouped and solo, size each bar against the busiest row in the selection. A level of about 140 is no longer drawn on a scale of 1,000.
+- Charts stays in the header while the chart window is open. The session list on the left stops widening once the text fits.
+- Replay charts keep each bar on its row. Where time went is one pie for the whole selection and names the places that had no time. Travel, kills, turn-ins, levels, and pauses are labeled rows.
 - Level routes in the replay list stay on one line. A route that does not fit is clipped at the edge of the list instead of wrapping onto the next row.
 - Settings checkboxes load from saved data the first time you open Zipper options.
 - Multi-session replay (All) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
