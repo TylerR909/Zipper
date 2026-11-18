@@ -760,6 +760,11 @@ function ns.Config:CreateFrame()
 	self:ShowPage("general")
 
 	local function Paint()
+		-- OnRefresh runs for every canvas when the Options panel opens, even
+		-- canvases that stay hidden. Skip until this page is the one on screen.
+		if not canvas:IsShown() then
+			return
+		end
 		ns.Config:ShowPage(ns.Config.page or "general")
 		ns.Config:Refresh()
 	end
@@ -835,8 +840,30 @@ function ns.Config:Refresh()
 			self.glanceText:SetText(self:GlanceLabel(cfg.glanceTrail))
 		end
 	end
-	self:RefreshSize()
-	self:RefreshIsolationList()
+	-- Sizing walks every open session. Let the Options panel draw, then fill
+	-- the saved-data page in on the next frame.
+	if self.frame and self.frame:IsShown() then
+		self:QueueSavedRefresh()
+	end
+end
+
+function ns.Config:QueueSavedRefresh()
+	if self.savedRefreshQueued then
+		return
+	end
+	self.savedRefreshQueued = true
+	local function run()
+		ns.Config.savedRefreshQueued = false
+		if ns.Config.frame and ns.Config.frame:IsShown() then
+			ns.Config:RefreshSize()
+			ns.Config:RefreshIsolationList()
+		end
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0, run)
+	else
+		run()
+	end
 end
 
 local function FormatBytes(bytes)

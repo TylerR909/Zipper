@@ -1284,8 +1284,10 @@ function ns.DB:Track(session)
 	end
 	local track = host.tracks[session.id]
 	if type(track) == "string" then
+		local packedBytes = #track
 		track = self:UnpackTrack(track)
 		host.tracks[session.id] = track
+		self:RememberTrackBytes(track, packedBytes)
 	elseif type(track) ~= "table" then
 		track = EmptyTrack()
 		host.tracks[session.id] = track
@@ -3864,6 +3866,44 @@ function ns.DB:EstimateBytes(value)
 	return #table.concat(out)
 end
 
+-- Fitted to packed Z3. Used so a settings refresh can size a live track
+-- without encoding it. Exact again on logout, when Flush packs first.
+local POINT_BYTES = 5.802
+local EVENT_BYTES = 14
+
+function ns.DB:RememberTrackBytes(track, packedBytes)
+	if type(track) ~= "table" or type(packedBytes) ~= "number" then
+		return
+	end
+	if not self.trackBytes then
+		self.trackBytes = setmetatable({}, { __mode = "k" })
+	end
+	self.trackBytes[track] = {
+		bytes = packedBytes,
+		points = #(track.t or {}),
+		events = #(track.ek or {}),
+	}
+end
+
+local function EstimateUnpackedTrack(track)
+	local points = #(track.t or {})
+	local events = #(track.ek or {})
+	local remembered = ns.DB.trackBytes and ns.DB.trackBytes[track]
+	local bytes
+	if type(remembered) == "table" and type(remembered.bytes) == "number" then
+		bytes = remembered.bytes
+			+ (points - (remembered.points or 0)) * POINT_BYTES
+			+ (events - (remembered.events or 0)) * EVENT_BYTES
+	else
+		bytes = points * POINT_BYTES + events * EVENT_BYTES
+	end
+	bytes = math.floor(bytes + 0.5)
+	if bytes < 0 then
+		bytes = 0
+	end
+	return bytes
+end
+
 function ns.DB:MeasureJourney(journey)
 	if type(journey) ~= "table" or type(journey.tracks) ~= "table" then
 		return 0
@@ -3874,10 +3914,7 @@ function ns.DB:MeasureJourney(journey)
 		if type(track) == "string" then
 			bytes = bytes + #track
 		elseif type(track) == "table" then
-			local ok, packed = pcall(self.PackTrack, self, track)
-			if ok and type(packed) == "string" then
-				bytes = bytes + #packed
-			end
+			bytes = bytes + EstimateUnpackedTrack(track)
 		end
 	end
 	return bytes
