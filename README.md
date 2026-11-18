@@ -24,6 +24,7 @@ Where you walked — the trail across zones, on foot, mounted, flying, or as a g
 - Time, quests, kills, and dungeons are counted for the character who was in the group. Someone you never did anything with stays off the list.
 - A dungeon or raid with the party counts after a boss dies there. Walking in and out does not, and leaving and coming back into the same run does not add another.
 - About 250 yards counts. So does the same dungeon. Hover a player, or the route itself, and Zipper shows who was with you.
+- `/zip search heart` lists characters you have played with whose name matches. A single letter is too short, and chat shows at most 8.
 
 ## Small on disk
 
@@ -38,6 +39,7 @@ About **7 KB per hour** of play. If 1–60 takes you about 10 days of game-time,
 /zip status
 /zip ding
 /zip ding 28
+/zip search heart
 ```
 
 Recording starts when you log in with Zipper enabled. Logout or `/reload` writes the journey.

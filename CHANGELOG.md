@@ -11,6 +11,7 @@
 - Where time went can stay a pie, or split that time by level as stacked bars or a share bar. How you moved can be bars or a pie. Elites and rares can show each level's share. Kills and turn-ins stays the grouped bars.
 - Milestone Summaries (on by default) print a range recap in chat at level 6, 10, and every 10 levels after that.
 - The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
+- `/zip search heart` lists characters you have played with. A single letter is too short, and chat shows at most 8.
 
 ### Changed
 

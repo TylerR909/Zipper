@@ -3445,6 +3445,276 @@ function ns.DB:CompanyByGuid(journey, guid)
 	return self.companyByGuid[guid]
 end
 
+-- Chat lookup of people you have actually played with. One letter matches too
+-- much of an account roster, and the list stops so a short query stays readable.
+ns.DB.SEARCH_MIN = 2
+ns.DB.SEARCH_LIMIT = 8
+
+local function SearchLetters(text)
+	local count, i = 0, 1
+	local size = #text
+	while i <= size do
+		count = count + 1
+		local byte = text:byte(i)
+		if byte < 128 then
+			i = i + 1
+		elseif byte < 224 then
+			i = i + 2
+		elseif byte < 240 then
+			i = i + 3
+		else
+			i = i + 4
+		end
+	end
+	return count
+end
+
+local function SearchRank(name, query)
+	local lower = name:lower()
+	local at = string.find(lower, query, 1, true)
+	if not at then
+		return nil
+	end
+	local rank = 2
+	if at == 1 then
+		rank = 0
+	else
+		local prev = lower:byte(at - 1)
+		-- A space or hyphen starts the next word, as in "Dracy Heartsong".
+		if prev == 32 or prev == 45 then
+			rank = 1
+		end
+	end
+	return rank, at, lower
+end
+
+local function SearchSpanSeconds(spans, liveEnd)
+	local seconds = 0
+	if type(spans) ~= "table" then
+		return 0
+	end
+	for i = 1, #spans, 2 do
+		local startAt = spans[i]
+		local stopAt = spans[i + 1]
+		if type(stopAt) ~= "number" then
+			stopAt = liveEnd
+		end
+		if type(startAt) == "number" and type(stopAt) == "number" and stopAt > startAt then
+			seconds = seconds + (stopAt - startAt)
+		end
+	end
+	return seconds
+end
+
+local function SearchHosts(self)
+	local hosts = {}
+	local function add(key, journey)
+		if type(key) ~= "string" or type(journey) ~= "table" then
+			return
+		end
+		local host = hosts[key]
+		if not host then
+			host = { key = key }
+			hosts[key] = host
+			hosts[#hosts + 1] = host
+		end
+		if HasBody(journey) then
+			host.body = journey
+		else
+			host.stub = journey
+		end
+	end
+	local journeys = ZipperDB and ZipperDB.journeys
+	if type(journeys) == "table" then
+		for key, journey in pairs(journeys) do
+			add(key, journey)
+		end
+	end
+	if type(self.playerKey) == "string" and HasBody(self.record) then
+		add(self.playerKey, self.record)
+	end
+	return hosts
+end
+
+local function SearchCompanions(self, guid)
+	local list = {}
+	local hosts = SearchHosts(self)
+	for i = 1, #hosts do
+		local host = hosts[i]
+		if host.key ~= guid then
+			local body = host.body
+			local seconds = 0
+			local linked = false
+			if body and type(body.with) == "table" then
+				local spans = body.with[guid]
+				if type(spans) == "table" and #spans > 0 then
+					linked = true
+					seconds = SearchSpanSeconds(spans, CompanyLiveEnd(self, body))
+				end
+			end
+			if not linked then
+				local refs = host.stub and host.stub.peopleRefs
+				if type(refs) ~= "table" and body then
+					refs = body.peopleRefs
+				end
+				if type(refs) == "table" and refs[guid] then
+					linked = true
+				end
+			end
+			if linked then
+				local source = body or host.stub
+				list[#list + 1] = {
+					name = self:JourneyLabel(source),
+					seconds = seconds,
+				}
+			end
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.seconds ~= b.seconds then
+			return a.seconds > b.seconds
+		end
+		return a.name < b.name
+	end)
+	return list
+end
+
+local function SearchWith(list)
+	if #list == 0 then
+		return nil
+	end
+	local extra = 0
+	local shown = #list
+	if shown > 3 then
+		extra = shown - 3
+		shown = 3
+	end
+	local timed, quiet = {}, {}
+	for i = 1, shown do
+		local item = list[i]
+		if item.seconds >= 1 then
+			timed[#timed + 1] = string.format(L["%s with %s"], PlayedWords(item.seconds), item.name)
+		else
+			quiet[#quiet + 1] = item.name
+		end
+	end
+	local parts = {}
+	if #timed > 0 then
+		parts[#parts + 1] = table.concat(timed, ", ")
+	end
+	if #quiet > 0 then
+		parts[#parts + 1] = string.format(L["With %s"], table.concat(quiet, ", "))
+	end
+	local text = table.concat(parts, ". ")
+	if extra > 0 and text ~= "" then
+		text = text .. ", " .. string.format(L["and %d more"], extra)
+	end
+	return text
+end
+
+local function SearchMet(row)
+	local metName = type(row.bn) == "string" and row.bn ~= "" and row.bn or nil
+	if not metName and type(row.by) == "string" and ZipperDB and type(ZipperDB.journeys) == "table" then
+		local other = ZipperDB.journeys[row.by]
+		if type(other) == "table" then
+			metName = ns.DB:JourneyLabel(other)
+		end
+	end
+	local where = MapName(row.map)
+	local level = tonumber(row.lv) or 0
+	if metName and where then
+		return string.format(L["First met in %s on %s"], where, metName)
+	end
+	if metName then
+		return string.format(L["First met on %s"], metName)
+	end
+	if where and level > 0 then
+		return string.format(L["First met in %s at level %d"], where, level)
+	end
+	if where then
+		return string.format(L["First met in %s"], where)
+	end
+	return nil
+end
+
+function ns.DB:SearchPeople(query)
+	if type(query) ~= "string" or (issecretvalue and issecretvalue(query)) then
+		return "short", {}, 0
+	end
+	query = string.lower(query:match("^%s*(.-)%s*$") or "")
+	if SearchLetters(query) < self.SEARCH_MIN then
+		return "short", {}, 0
+	end
+	local people = ZipperDB and ZipperDB.people
+	if type(people) ~= "table" then
+		return "none", {}, 0
+	end
+	local hits = {}
+	for guid, row in pairs(people) do
+		local name = type(row) == "table" and row.n or nil
+		if type(guid) == "string" and type(name) == "string" and name ~= "" and not (issecretvalue and issecretvalue(name)) then
+			local rank, at, lower = SearchRank(name, query)
+			if rank then
+				hits[#hits + 1] = {
+					guid = guid,
+					name = name,
+					row = row,
+					rank = rank,
+					at = at,
+					lower = lower,
+				}
+			end
+		end
+	end
+	table.sort(hits, function(a, b)
+		if a.rank ~= b.rank then
+			return a.rank < b.rank
+		end
+		if a.at ~= b.at then
+			return a.at < b.at
+		end
+		if a.lower ~= b.lower then
+			return a.lower < b.lower
+		end
+		return a.guid < b.guid
+	end)
+	local total = #hits
+	local limit = self.SEARCH_LIMIT
+	if total > limit then
+		for i = total, limit + 1, -1 do
+			hits[i] = nil
+		end
+	end
+	local rows = {}
+	for i = 1, #hits do
+		local hit = hits[i]
+		local row = hit.row
+		local classFile = type(row.c) == "string" and row.c ~= "" and row.c or nil
+		local className = classFile and ns.ClassLabel and ns.ClassLabel(classFile) or nil
+		if type(className) ~= "string" or className == "" then
+			className = nil
+		end
+		local detail = SearchWith(SearchCompanions(self, hit.guid)) or SearchMet(row)
+		local text = hit.name
+		if className then
+			text = text .. ", " .. className
+		end
+		if detail and detail ~= "" then
+			text = text .. ". " .. detail
+		end
+		text = text .. "."
+		rows[#rows + 1] = {
+			name = hit.name,
+			classFile = classFile,
+			text = text,
+		}
+	end
+	if #rows == 0 then
+		return "none", rows, 0
+	end
+	return "ok", rows, total
+end
+
 function ns.DB:Stats()
 	local sessions = self:Sessions()
 	local points, events = 0, 0

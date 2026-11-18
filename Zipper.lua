@@ -55,27 +55,46 @@ function ns:Print(...)
 	print("|cff33ddffZipper|r:", ...)
 end
 
+local function ClassColorName(name, classFile)
+	local color = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+	if type(color) ~= "table" then
+		return name
+	end
+	local r, g, b = color.r, color.g, color.b
+	if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then
+		return name
+	end
+	if issecretvalue and (issecretvalue(r) or issecretvalue(g) or issecretvalue(b)) then
+		return name
+	end
+	return string.format("|cff%02x%02x%02x%s|r", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5), name)
+end
+
 SLASH_ZIPPER1 = "/zipper"
 SLASH_ZIPPER2 = "/zip"
 SlashCmdList.ZIPPER = function(msg)
-	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
-	if msg == "" then
+	local raw = (msg or ""):match("^%s*(.-)%s*$") or ""
+	local head, tail = raw:match("^(%S+)%s*(.-)%s*$")
+	head = head and head:lower() or ""
+	tail = tail or ""
+	if raw == "" then
 		ns.Replay:Toggle()
 		return
 	end
-	if msg == "help" then
+	if head == "help" and tail == "" then
 		ns:Print(L["/zipper — open the map, the route, and the replay"])
 		ns:Print(L["/zipper config — reminder and what gets recorded"])
 		ns:Print(L["/zipper status — sessions and the current recap"])
 		ns:Print(L["/zipper ding — the level you just finished, or /zipper ding 28"])
+		ns:Print(L["/zipper search name — characters you have played with"])
 		return
 	end
-	if msg == "config" or msg == "options" or msg == "settings" then
+	if (head == "config" or head == "options" or head == "settings") and tail == "" then
 		ns.Config:Toggle()
 		return
 	end
-	if msg == "ding" or msg:match("^ding%s") then
-		local rest = msg:match("^ding%s*(.-)%s*$") or ""
+	if head == "ding" then
+		local rest = tail:lower()
 		local level
 		if rest ~= "" then
 			if not rest:match("^%d+$") then
@@ -95,12 +114,32 @@ SlashCmdList.ZIPPER = function(msg)
 		ns:Print(ns.DB:DingCommand(level, playerLevel, maxLevel))
 		return
 	end
-	if msg == "status" then
+	if head == "status" and tail == "" then
 		local sessions, points, events = ns.DB:Stats()
 		ns:Print(string.format(L["%d sessions, %d points, %d events."], sessions, points, events))
 		local current = ns.DB:Current()
 		if current then
 			ns:Print(ns.DB:RecapText({ current }))
+		end
+		return
+	end
+	if head == "search" then
+		local code, rows, total = ns.DB:SearchPeople(tail)
+		if code == "short" then
+			ns:Print(L["Type at least 2 letters. Try /zip search heart."])
+			return
+		end
+		if code ~= "ok" then
+			ns:Print(string.format(L["No one matching \"%s\"."], tail))
+			return
+		end
+		for i = 1, #rows do
+			local row = rows[i]
+			local colored = ClassColorName(row.name, row.classFile)
+			ns:Print(colored .. row.text:sub(#row.name + 1))
+		end
+		if total > #rows then
+			ns:Print(string.format(L["Showing %d of %d. Try a longer name."], #rows, total))
 		end
 		return
 	end
