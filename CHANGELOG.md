@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.3-beta
+## 0.1.4-beta
 
 ### Added
 
@@ -9,17 +9,11 @@
 - Each level and Kills and turn-ins draw the two counts as separate bars, so a handful of turn-ins can fill its own scale. Group share fills one bar per level and splits it between grouped and solo. Solo and grouped puts solo on the left and grouped on the right, on one scale.
 - Pauses can switch between the bars and a pie of those same times. A chart with more than one drawing shows that choice under its note.
 - Where time went can stay a pie, or split that time by level as stacked bars or a share bar. How you moved can be bars or a pie. Elites and rares can show each level's share. Kills and turn-ins stays the grouped bars.
-- Milestone Summaries (on by default) print a range recap in chat at level 6, 10, and every 10 levels after that.
-- The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
 - `/zip search heart` lists characters you have played with. A single letter is too short, and chat shows at most 8.
 
 ### Changed
 
 - Chart notes under the title are shorter. Where time went, Kills and turn-ins, Each level, and Zones leave that line blank.
-- The replay mode button says All instead of Select all.
-- The vanilla replay panel has more padding, a closed fill-to-border seam, and a clear lane under the chapter strip for scrubber pips.
-- The level-up chat recap waits one second so the ding can finish first.
-- The route draws above zone exploration overlays, so fogged outdoor maps no longer hide the path.
 
 ### Fixed
 
@@ -31,6 +25,24 @@
 - Charts stays in the header while the chart window is open. The session list on the left stops widening once the text fits.
 - Replay charts keep each bar on its row. Where time went is one pie for the whole selection and names the places that had no time. Travel, kills, turn-ins, levels, and pauses are labeled rows.
 - Level routes in the replay list stay on one line. A route that does not fit is clipped at the edge of the list instead of wrapping onto the next row.
+- Opening Zipper options no longer pauses to re-pack the journey while it measures how big each character's save is.
+
+## 0.1.3-beta
+
+### Added
+
+- Milestone Summaries (on by default) print a range recap in chat at level 6, 10, and every 10 levels after that.
+- The world-map Zipper button appears with Zipper alone; Krowi_WorldMapButtons-1.4 is embedded so the button no longer needs Questie or RareScanner.
+
+### Changed
+
+- The replay mode button says All instead of Select all.
+- The vanilla replay panel has more padding, a closed fill-to-border seam, and a clear lane under the chapter strip for scrubber pips.
+- The level-up chat recap waits one second so the ding can finish first.
+- The route draws above zone exploration overlays, so fogged outdoor maps no longer hide the path.
+
+### Fixed
+
 - Settings checkboxes load from saved data the first time you open Zipper options.
 - Multi-session replay (All) skips logout gaps between sessions, so the playhead no longer freezes at a chapter while Pause stays lit and only the total time keeps ticking.
 - Standing still no longer freezes the open session clock or stops replay at the last footstep; the recording end and playhead keep moving with live time after a hearth or AFK.
