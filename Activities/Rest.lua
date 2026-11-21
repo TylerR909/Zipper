@@ -1,7 +1,6 @@
 local _, ns = ...
 
 local Kind = ns.Kind
-local CAMPFIRE_AURA = 1283391
 local REST_SECONDS = 60
 -- Sleeping-bag cast arms a short window; Well-Rested alone must not keep it open.
 local SLEEP_ARM_SECONDS = 180
@@ -15,51 +14,9 @@ local Rest = {
 }
 
 function Rest:Read(gps)
-	local camp, sleep, earned = false, false, false
-	if gps:AuraIndexSecret(1) then
+	local camp, sleep, earned = gps:ReadBuffSignals()
+	if camp == nil then
 		return nil
-	end
-	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID and gps:PlayerAura(CAMPFIRE_AURA) then
-		camp = true
-	end
-	if not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
-		return camp, sleep, earned
-	end
-	for i = 1, 40 do
-		if gps:AuraIndexSecret(i) then
-			return nil
-		end
-		local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-		if not aura then
-			break
-		end
-		if issecretvalue and issecretvalue(aura) then
-			return nil
-		end
-		local name = aura.name
-		local spellID = aura.spellId
-		if issecretvalue and issecretvalue(name) then
-			name = nil
-		end
-		if not gps:PlainNumber(spellID) then
-			spellID = nil
-		end
-		local which, ready = ns.RestSignal(name, spellID)
-		if which == "sleep" then
-			-- Well-Rested is ready=true only. A future non-ready sleep aura would
-			-- mean real proximity; do not treat lingering earned rest as in-bag.
-			if ready then
-				earned = true
-			else
-				sleep = true
-			end
-		elseif which == "camp" then
-			if ready then
-				earned = true
-			else
-				camp = true
-			end
-		end
 	end
 	return camp, sleep, earned
 end
@@ -194,8 +151,8 @@ end
 
 function Rest:OnEvent(gps, event, ...)
 	if event == "UNIT_AURA" then
-		local unit = ...
-		if unit == "player" and not (issecretvalue and issecretvalue(unit)) then
+		local unit, updateInfo = ...
+		if unit == "player" and not (issecretvalue and issecretvalue(unit)) and gps:AuraChanged(updateInfo) then
 			self:Watch(gps)
 		end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then

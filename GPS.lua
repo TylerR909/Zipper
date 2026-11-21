@@ -119,12 +119,110 @@ function ns.GPS:AuraIndexSecret(index)
 	return self.inCombat and true or false
 end
 
+local CAMPFIRE_AURA = 1283391
+
+local PLAYER_UNIT_EVENTS = {
+	UNIT_AURA = true,
+	UNIT_SPELLCAST_START = true,
+	UNIT_SPELLCAST_STOP = true,
+	UNIT_SPELLCAST_FAILED = true,
+	UNIT_SPELLCAST_INTERRUPTED = true,
+	UNIT_SPELLCAST_SUCCEEDED = true,
+	UNIT_SPELLCAST_CHANNEL_START = true,
+	UNIT_SPELLCAST_CHANNEL_STOP = true,
+}
+
 function ns.GPS:PlayerAura(spellID)
 	local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
 	if not aura or (issecretvalue and issecretvalue(aura)) then
 		return nil
 	end
 	return aura
+end
+
+-- Skip duration/stack-only aura ticks; Rest and Meal only react to added,
+-- removed, or full-update aura changes.
+function ns.GPS:AuraChanged(updateInfo)
+	if type(updateInfo) ~= "table" or (issecretvalue and issecretvalue(updateInfo)) then
+		return true
+	end
+	local full = PlainBool(updateInfo.isFullUpdate)
+	if full == nil or full then
+		return true
+	end
+	local added = updateInfo.addedAuras
+	if added ~= nil then
+		if (issecretvalue and issecretvalue(added)) or type(added) ~= "table" or #added > 0 then
+			return true
+		end
+	end
+	local removed = updateInfo.removedAuraInstanceIDs
+	if removed ~= nil then
+		if (issecretvalue and issecretvalue(removed)) or type(removed) ~= "table" or #removed > 0 then
+			return true
+		end
+	end
+	return false
+end
+
+-- Single buff pass shared by Rest and Meal during a UNIT_AURA dispatch.
+function ns.GPS:ReadBuffSignals()
+	local cached = self.auraScan
+	if cached then
+		return cached[1], cached[2], cached[3], cached[4]
+	end
+	local camp, sleep, earned, meal = false, false, false, false
+	if self:AuraIndexSecret(1) then
+		return nil
+	end
+	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID and self:PlayerAura(CAMPFIRE_AURA) then
+		camp = true
+	end
+	if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
+		for i = 1, 40 do
+			if self:AuraIndexSecret(i) then
+				return nil
+			end
+			local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
+			if not aura then
+				break
+			end
+			if issecretvalue and issecretvalue(aura) then
+				return nil
+			end
+			local name = aura.name
+			local spellID = aura.spellId
+			if issecretvalue and issecretvalue(name) then
+				name = nil
+			end
+			if not IsPlainNumber(spellID) then
+				spellID = nil
+			end
+			local which, ready = ns.RestSignal(name, spellID)
+			if which == "sleep" then
+				-- Well-Rested is ready=true only. A future non-ready sleep aura would
+				-- mean real proximity; do not treat lingering earned rest as in-bag.
+				if ready then
+					earned = true
+				else
+					sleep = true
+				end
+			elseif which == "camp" then
+				if ready then
+					earned = true
+				else
+					camp = true
+				end
+			end
+			if not meal and ns.MealSignal(name) then
+				meal = true
+			end
+		end
+	end
+	if self.auraScanArmed then
+		self.auraScan = { camp, sleep, earned, meal }
+	end
+	return camp, sleep, earned, meal
 end
 
 -- Activities/index.xml registers stateful standing-still detectors here.
@@ -269,6 +367,22 @@ function ns.GPS:ReadPosition()
 		return nil
 	end
 	return mapID, x, y
+end
+
+function ns.GPS:StillPlanted(minYards)
+	if not self.lastMap or not IsPlainNumber(self.lastWorldX) or not IsPlainNumber(self.lastWorldY) or self.lastInstance == nil then
+		return false
+	end
+	if not UnitPosition then
+		return false
+	end
+	local px, py, _, instance = UnitPosition("player")
+	if not IsPlainNumber(px) or not IsPlainNumber(py) or (issecretvalue and issecretvalue(instance)) or instance ~= self.lastInstance then
+		return false
+	end
+	local dx = px - self.lastWorldX
+	local dy = py - self.lastWorldY
+	return (dx * dx + dy * dy) < (minYards * minYards)
 end
 
 function ns.GPS:FarEnough(mapID, x, y, minYards)
@@ -790,7 +904,11 @@ function ns.GPS:EnsureEvents()
 	local function add(ev)
 		if not registered[ev] then
 			registered[ev] = true
-			frame:RegisterEvent(ev)
+			if PLAYER_UNIT_EVENTS[ev] and frame.RegisterUnitEvent then
+				frame:RegisterUnitEvent(ev, "player")
+			else
+				frame:RegisterEvent(ev)
+			end
 		end
 	end
 	add("PLAYER_STARTED_MOVING")
@@ -849,7 +967,7 @@ function ns.GPS:Tick()
 	else
 		-- Standing still skips AddSample; keep seen moving so the open session
 		-- duration and replay end bound do not freeze at the last footstep.
-		if not self:ConsiderSample(JUMP_YARDS, false) then
+		if self:StillPlanted(JUMP_YARDS) or not self:ConsiderSample(JUMP_YARDS, false) then
 			ns.DB:Touch(ns.DB:Now())
 		end
 	end
@@ -955,6 +1073,14 @@ function ns.GPS:OnEvent(event, ...)
 		self:OnBossKill(encounterID)
 	elseif event == "PLAYER_CONTROL_LOST" or event == "PLAYER_CONTROL_GAINED" then
 		self:SyncTaxi()
+	end
+	if event == "UNIT_AURA" then
+		self.auraScanArmed = true
+		self.auraScan = nil
+		self:DispatchActivityEvent(event, ...)
+		self.auraScanArmed = nil
+		self.auraScan = nil
+		return
 	end
 	self:DispatchActivityEvent(event, ...)
 end
