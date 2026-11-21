@@ -139,6 +139,17 @@ function ns.DB:Migrate(db)
 end
 
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_ENC = {}
+local B64_DEC = {}
+local BYTE_CHAR = {}
+for i = 1, 64 do
+	local ch = B64:sub(i, i)
+	B64_ENC[i - 1] = ch
+	B64_DEC[ch:byte(1)] = i - 1
+end
+for i = 0, 255 do
+	BYTE_CHAR[i] = string.char(i)
+end
 
 local function PushVar(buf, n)
 	n = math.floor(n or 0)
@@ -157,7 +168,8 @@ end
 
 local function ReadVar(bytes, index)
 	local value, shift = 0, 0
-	while index <= #bytes do
+	local len = #bytes
+	while index <= len do
 		local byte = bytes:byte(index)
 		index = index + 1
 		value = value + (byte % 128) * (2 ^ shift)
@@ -170,6 +182,23 @@ local function ReadVar(bytes, index)
 		end
 	end
 	return value, index
+end
+
+local function SkipVar(bytes, index)
+	local len = #bytes
+	local steps = 0
+	while index <= len do
+		local byte = bytes:byte(index)
+		index = index + 1
+		if byte < 128 then
+			return index
+		end
+		steps = steps + 1
+		if steps > 4 then
+			break
+		end
+	end
+	return index
 end
 
 local function Zig(n)
@@ -189,6 +218,7 @@ end
 
 local function Encode64(raw)
 	local out = {}
+	local outN = 0
 	local length = #raw
 	local i = 1
 	while i <= length do
@@ -196,17 +226,21 @@ local function Encode64(raw)
 		local b = raw:byte(i + 1) or 0
 		local c = raw:byte(i + 2) or 0
 		local chunk = a * 65536 + b * 256 + c
-		out[#out + 1] = B64:sub(math.floor(chunk / 262144) % 64 + 1, math.floor(chunk / 262144) % 64 + 1)
-		out[#out + 1] = B64:sub(math.floor(chunk / 4096) % 64 + 1, math.floor(chunk / 4096) % 64 + 1)
+		outN = outN + 1
+		out[outN] = B64_ENC[math.floor(chunk / 262144) % 64]
+		outN = outN + 1
+		out[outN] = B64_ENC[math.floor(chunk / 4096) % 64]
+		outN = outN + 1
 		if i + 1 <= length then
-			out[#out + 1] = B64:sub(math.floor(chunk / 64) % 64 + 1, math.floor(chunk / 64) % 64 + 1)
+			out[outN] = B64_ENC[math.floor(chunk / 64) % 64]
 		else
-			out[#out + 1] = "="
+			out[outN] = "="
 		end
+		outN = outN + 1
 		if i + 2 <= length then
-			out[#out + 1] = B64:sub(chunk % 64 + 1, chunk % 64 + 1)
+			out[outN] = B64_ENC[chunk % 64]
 		else
-			out[#out + 1] = "="
+			out[outN] = "="
 		end
 		i = i + 3
 	end
@@ -214,31 +248,68 @@ local function Encode64(raw)
 end
 
 local function Decode64(text)
-	local map = {}
-	for i = 1, #B64 do
-		map[B64:sub(i, i)] = i - 1
+	text = text or ""
+	if text:find("%s") then
+		text = text:gsub("%s", "")
 	end
 	local out = {}
-	text = (text or ""):gsub("%s", "")
+	local outN = 0
+	local len = #text
 	local i = 1
-	while i <= #text do
-		local a = map[text:sub(i, i)] or 0
-		local b = map[text:sub(i + 1, i + 1)] or 0
-		local c = text:sub(i + 2, i + 2)
-		local d = text:sub(i + 3, i + 3)
-		local cc = c == "=" and 0 or (map[c] or 0)
-		local dd = d == "=" and 0 or (map[d] or 0)
+	while i <= len do
+		local b1, b2, b3, b4 = text:byte(i, i + 3)
+		local a = b1 and B64_DEC[b1] or 0
+		local b = b2 and B64_DEC[b2] or 0
+		local cc = (b3 and b3 ~= 61) and (B64_DEC[b3] or 0) or 0
+		local dd = (b4 and b4 ~= 61) and (B64_DEC[b4] or 0) or 0
 		local chunk = a * 262144 + b * 4096 + cc * 64 + dd
-		out[#out + 1] = string.char(math.floor(chunk / 65536) % 256)
-		if c ~= "=" then
-			out[#out + 1] = string.char(math.floor(chunk / 256) % 256)
+		outN = outN + 1
+		out[outN] = BYTE_CHAR[math.floor(chunk / 65536) % 256]
+		if b3 and b3 ~= 61 then
+			outN = outN + 1
+			out[outN] = BYTE_CHAR[math.floor(chunk / 256) % 256]
 		end
-		if d ~= "=" then
-			out[#out + 1] = string.char(chunk % 256)
+		if b4 and b4 ~= 61 then
+			outN = outN + 1
+			out[outN] = BYTE_CHAR[chunk % 256]
 		end
 		i = i + 4
 	end
 	return table.concat(out)
+end
+
+local function SkipRuns(bytes, index, count)
+	local filled = 0
+	local ended = false
+	while filled < count do
+		local run
+		run, index = ReadVar(bytes, index)
+		if not run or run <= 0 then
+			ended = true
+			break
+		end
+		index = SkipVar(bytes, index)
+		filled = filled + run
+	end
+	if not ended then
+		index = SkipVar(bytes, index)
+	end
+	return index
+end
+
+local function DecodeHeader(packed)
+	if type(packed) ~= "string" or packed:sub(1, 3) ~= "Z3:" then
+		return nil, nil
+	end
+	local bytes = Decode64(packed:sub(4, 19))
+	if bytes:byte(1) ~= 90 or bytes:byte(2) ~= 51 then
+		return 0, 0
+	end
+	local index = 3
+	local count, events
+	count, index = ReadVar(bytes, index)
+	events, index = ReadVar(bytes, index)
+	return count or 0, events or 0
 end
 
 local function PackRuns(buf, values, count, nilCode)
@@ -341,7 +412,7 @@ function ns.DB:PackTrack(track)
 	end
 	local raw = {}
 	for i = 1, #buf do
-		raw[i] = string.char(buf[i])
+		raw[i] = BYTE_CHAR[buf[i]]
 	end
 	return "Z3:" .. Encode64(table.concat(raw))
 end
@@ -1192,6 +1263,14 @@ function ns.DB:HostFor(session)
 	if owns(self.char) then
 		return self.char
 	end
+	local journeys = ZipperDB and ZipperDB.journeys
+	if type(journeys) == "table" then
+		for _, journey in pairs(journeys) do
+			if journey ~= self.record and journey ~= self.char and owns(journey) then
+				return journey
+			end
+		end
+	end
 	return self.record or self.char
 end
 
@@ -1274,8 +1353,8 @@ function ns.DB:Sessions()
 	return self.char and self.char.sessions or {}
 end
 
-function ns.DB:Track(session)
-	local host = self:HostFor(session)
+function ns.DB:Track(session, host)
+	host = host or self:HostFor(session)
 	if not session or not host then
 		return EmptyTrack()
 	end
@@ -1293,6 +1372,93 @@ function ns.DB:Track(session)
 		host.tracks[session.id] = track
 	end
 	return EnsureTrack(track)
+end
+
+function ns.DB:LoadedTrack(session, host)
+	host = host or self:HostFor(session)
+	if not session or not host or type(host.tracks) ~= "table" then
+		return nil
+	end
+	local track = host.tracks[session.id]
+	if type(track) == "table" then
+		return track
+	end
+	return nil
+end
+
+function ns.DB:TrackCounts(session, host)
+	host = host or self:HostFor(session)
+	if not session or not host or type(host.tracks) ~= "table" then
+		return 0, 0
+	end
+	local raw = host.tracks[session.id]
+	if type(raw) == "table" then
+		return #(raw.t or {}), #(raw.ek or {})
+	end
+	if type(raw) == "string" then
+		local points, events = DecodeHeader(raw)
+		if points then
+			return points, events
+		end
+	end
+	return 0, 0
+end
+
+-- Walk events without unpacking a packed track into retained tables.
+-- Stops early when fn returns a truthy value.
+function ns.DB:EachEvent(journey, session, fn)
+	if not session or type(fn) ~= "function" then
+		return
+	end
+	local host = journey or self:HostFor(session)
+	local raw = host and type(host.tracks) == "table" and host.tracks[session.id] or nil
+	if type(raw) == "table" then
+		local ek = raw.ek
+		if type(ek) ~= "table" then
+			return
+		end
+		local et, em, ex, ey, ea = raw.et, raw.em, raw.ex, raw.ey, raw.ea
+		for i = 1, #ek do
+			if fn(et and et[i] or 0, ek[i], em and em[i] or 0, ex and ex[i] or 0, ey and ey[i] or 0, ea and ea[i] or 0) then
+				return
+			end
+		end
+		return
+	end
+	if type(raw) ~= "string" or raw:sub(1, 3) ~= "Z3:" then
+		return
+	end
+	local _, totalEvents = DecodeHeader(raw)
+	if not totalEvents or totalEvents <= 0 then
+		return
+	end
+	local bytes = Decode64(raw:sub(4))
+	if bytes:byte(1) ~= 90 or bytes:byte(2) ~= 51 then
+		return
+	end
+	local index = 3
+	local count, events
+	count, index = ReadVar(bytes, index)
+	events, index = ReadVar(bytes, index)
+	for _ = 1, count * 4 do
+		index = SkipVar(bytes, index)
+	end
+	index = SkipRuns(bytes, index, count)
+	index = SkipRuns(bytes, index, count)
+	local previous = 0
+	for _ = 1, events do
+		local delta, kind, mapID, x, y, extra
+		delta, index = ReadVar(bytes, index)
+		previous = previous + delta
+		kind, index = ReadVar(bytes, index)
+		mapID, index = ReadVar(bytes, index)
+		x, index = ReadVar(bytes, index)
+		y, index = ReadVar(bytes, index)
+		extra, index = ReadVar(bytes, index)
+		if fn(previous, kind, Unzig(mapID), Unzig(x), Unzig(y), Unzig(extra)) then
+			return
+		end
+	end
 end
 
 function ns.DB:NoteProgress()
@@ -1982,23 +2148,27 @@ function ns.DB:SessionWorthKeeping(journey, session)
 	if type(session.reach) == "number" and session.reach >= (ns.QUIET_YARDS or 250) then
 		return true
 	end
-	local track = self:Track(session)
-	for i = 1, #(track.ek or {}) do
-		local kind = track.ek[i]
-		local extra = track.ea[i] or 0
+	local keep = false
+	self:EachEvent(journey, session, function(_, kind, _, _, _, extra)
+		extra = extra or 0
 		local spec = ns.EventSpec and ns.EventSpec[kind]
 		if kind == ns.Kind.GROUP then
 			if extra >= self.GROUP_KEPT then
+				keep = true
 				return true
 			end
 		elseif spec and spec.keepsSession then
 			if spec.shape ~= "span" or extra ~= 1 then
+				keep = true
 				return true
 			end
 		end
+	end)
+	if keep then
+		return true
 	end
 	-- Older stops have no measured distance. Leave those alone.
-	if #(track.t or {}) > 0 and type(session.reach) ~= "number" then
+	if type(session.reach) ~= "number" and self:TrackCounts(session, journey) > 0 then
 		return true
 	end
 	return false
@@ -2014,6 +2184,7 @@ function ns.DB:RemoveSession(journey, index)
 	if type(journey.tracks) == "table" and session.id then
 		journey.tracks[session.id] = nil
 	end
+	self.eventGen = (self.eventGen or 0) + 1
 	return true
 end
 
@@ -2369,6 +2540,7 @@ function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 	track.ey[insertAt] = self:PackCoord(y)
 	track.ea[insertAt] = extra or 0
 	session.seen = self:Now()
+	self.eventGen = (self.eventGen or 0) + 1
 	if kind ~= ns.Kind.GROUP and self:CompanyQualifies(kind) then
 		self:CreditCompany(now)
 	end
@@ -2383,12 +2555,15 @@ function ns.DB:LastInstanceDoor()
 	end
 	for s = #sessions, 1, -1 do
 		local session = sessions[s]
-		local track = self:Track(session)
-		for i = #(track.ek or {}), 1, -1 do
-			local kind = track.ek[i]
+		local foundKind, foundExtra
+		self:EachEvent(host, session, function(_, kind, _, _, _, extra)
 			if kind == ns.Kind.INSTANCE_ENTER or kind == ns.Kind.INSTANCE_LEAVE then
-				return kind, track.ea[i], session
+				foundKind = kind
+				foundExtra = extra
 			end
+		end)
+		if foundKind then
+			return foundKind, foundExtra, session
 		end
 	end
 end
@@ -2625,13 +2800,20 @@ function ns.DB:RangeHasWork(journey, startAt, stopAt)
 	if type(sessions) ~= "table" or type(startAt) ~= "number" or type(stopAt) ~= "number" then
 		return false
 	end
+	local found = false
 	for i = 1, #sessions do
 		local session = sessions[i]
 		if type(session) == "table" and type(session.s) == "number" and session.s <= stopAt then
-			local track = self:Track(session)
-			for n = 1, #(track.ek or {}) do
-				local when = session.s + (track.et[n] or 0)
-				if when >= startAt and when <= stopAt and self:CompanyQualifies(track.ek[n]) then
+			local stop = (session == self.session) and self:Now() or (session.seen or session.s)
+			if stop >= startAt - 2 then
+				self:EachEvent(journey, session, function(offset, kind)
+					local when = session.s + (offset or 0)
+					if when >= startAt and when <= stopAt and self:CompanyQualifies(kind) then
+						found = true
+						return true
+					end
+				end)
+				if found then
 					return true
 				end
 			end
@@ -2645,17 +2827,23 @@ function ns.DB:HasKeptMarker(journey, startAt)
 	if type(sessions) ~= "table" or type(startAt) ~= "number" then
 		return false
 	end
+	local found = false
 	for i = 1, #sessions do
 		local session = sessions[i]
-		if type(session) == "table" and type(session.s) == "number" then
-			local track = self:Track(session)
-			for n = 1, #(track.ek or {}) do
-				if track.ek[n] == ns.Kind.GROUP then
-					local when = session.s + (track.et[n] or 0)
-					local extra = track.ea[n] or 0
-					if extra >= self.GROUP_KEPT and math.abs(when - startAt) <= 2 then
-						return true
+		if type(session) == "table" and type(session.s) == "number" and session.s <= startAt + 2 then
+			local stop = (session == self.session) and self:Now() or (session.seen or session.s)
+			if stop >= startAt - 2 then
+				self:EachEvent(journey, session, function(offset, kind, _, _, _, extra)
+					if kind == ns.Kind.GROUP then
+						local when = session.s + (offset or 0)
+						if (extra or 0) >= self.GROUP_KEPT and math.abs(when - startAt) <= 2 then
+							found = true
+							return true
+						end
 					end
+				end)
+				if found then
+					return true
 				end
 			end
 		end
@@ -2664,12 +2852,12 @@ function ns.DB:HasKeptMarker(journey, startAt)
 end
 
 function ns.DB:SpanWorthKeeping(journey, guid, startAt, stopAt)
-	if self:RangeHasWork(journey, startAt, stopAt) or self:HasKeptMarker(journey, startAt) then
-		return true
-	end
 	local people = ZipperDB and ZipperDB.people
 	local row = type(people) == "table" and people[guid] or nil
-	return type(row) == "table" and type(row.ok) == "number" and math.abs(row.ok - startAt) <= 2
+	if type(row) == "table" and type(row.ok) == "number" and math.abs(row.ok - startAt) <= 2 then
+		return true
+	end
+	return self:RangeHasWork(journey, startAt, stopAt) or self:HasKeptMarker(journey, startAt)
 end
 
 function ns.DB:JoinPlace(guid, when)
@@ -2731,16 +2919,23 @@ function ns.DB:HasJoinMarker(journey, when)
 	if type(sessions) ~= "table" or type(when) ~= "number" then
 		return false
 	end
+	local found = false
 	for i = 1, #sessions do
 		local session = sessions[i]
-		if type(session) == "table" and type(session.s) == "number" then
-			local track = self:Track(session)
-			for n = 1, #(track.ek or {}) do
-				if track.ek[n] == ns.Kind.GROUP then
-					local at = session.s + (track.et[n] or 0)
-					if math.abs(at - when) <= 2 then
-						return true
+		if type(session) == "table" and type(session.s) == "number" and session.s <= when + 2 then
+			local stop = (session == self.session) and self:Now() or (session.seen or session.s)
+			if stop >= when - 2 then
+				self:EachEvent(journey, session, function(offset, kind)
+					if kind == ns.Kind.GROUP then
+						local at = session.s + (offset or 0)
+						if math.abs(at - when) <= 2 then
+							found = true
+							return true
+						end
 					end
+				end)
+				if found then
+					return true
 				end
 			end
 		end
@@ -2840,28 +3035,36 @@ local function DropIdleMarkers(self, journey, starts)
 	for i = 1, #sessions do
 		local session = sessions[i]
 		if type(session) == "table" and type(session.s) == "number" and journey.tracks and journey.tracks[session.id] then
-			local track = self:Track(session)
-			local et, ek, em, ex, ey, ea = {}, {}, {}, {}, {}, {}
-			local count = 0
-			local dropped = false
-			for n = 1, #(track.ek or {}) do
-				local kind = track.ek[n]
-				local when = session.s + (track.et[n] or 0)
-				if kind == ns.Kind.GROUP and not MarkerNear(when, starts) then
-					dropped = true
-				else
-					count = count + 1
-					et[count] = track.et[n]
-					ek[count] = kind
-					em[count] = track.em[n]
-					ex[count] = track.ex[n]
-					ey[count] = track.ey[n]
-					ea[count] = track.ea[n]
+			local needsDrop = false
+			self:EachEvent(journey, session, function(offset, kind)
+				if kind == ns.Kind.GROUP then
+					local when = session.s + (offset or 0)
+					if not MarkerNear(when, starts) then
+						needsDrop = true
+						return true
+					end
 				end
-			end
-			if dropped then
+			end)
+			if needsDrop then
+				local track = self:Track(session, journey)
+				local et, ek, em, ex, ey, ea = {}, {}, {}, {}, {}, {}
+				local count = 0
+				for n = 1, #(track.ek or {}) do
+					local kind = track.ek[n]
+					local when = session.s + (track.et[n] or 0)
+					if kind ~= ns.Kind.GROUP or MarkerNear(when, starts) then
+						count = count + 1
+						et[count] = track.et[n]
+						ek[count] = kind
+						em[count] = track.em[n]
+						ex[count] = track.ex[n]
+						ey[count] = track.ey[n]
+						ea[count] = track.ea[n]
+					end
+				end
 				track.et, track.ek, track.em = et, ek, em
 				track.ex, track.ey, track.ea = ex, ey, ea
+				self.eventGen = (self.eventGen or 0) + 1
 			end
 		end
 	end
@@ -3092,7 +3295,7 @@ end
 -- window is still the same run, so a second door click does not add another.
 local COMPANY_INSTANCE_REENTER = 30 * 60
 
-local function CompanyInstanceRuns(self, sessions)
+local function CompanyInstanceRuns(self, journey, sessions)
 	local runs = {}
 	local open
 	local function flush()
@@ -3106,12 +3309,10 @@ local function CompanyInstanceRuns(self, sessions)
 	end
 	for i = 1, #(sessions or {}) do
 		local session = sessions[i]
-		local track = self:Track(session)
-		for n = 1, #(track.ek or {}) do
-			local when = session.s + (track.et[n] or 0)
-			local kind = track.ek[n]
-			local extra = track.ea[n] or 0
-			local mapID = track.em and track.em[n] or 0
+		self:EachEvent(journey, session, function(offset, kind, mapID, _, _, extra)
+			local when = session.s + (offset or 0)
+			extra = extra or 0
+			mapID = mapID or 0
 			if kind == ns.Kind.INSTANCE_ENTER then
 				local instType, instanceID = self:ReadInstance(extra)
 				if instType == ns.Instance.PARTY or instType == ns.Instance.RAID then
@@ -3142,7 +3343,7 @@ local function CompanyInstanceRuns(self, sessions)
 					open.bossWhen = when
 				end
 			end
-		end
+		end)
 	end
 	flush()
 	return runs
@@ -3234,39 +3435,59 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 		local session = sessions[i]
 		local startAt, stopAt = CompanyWindow(self, journey, session, t0, t1, liveEnd)
 		if startAt then
+			local activeRows = {}
 			for _, row in pairs(rows) do
-				row.seconds = row.seconds + SpanOverlap(row.spans, startAt, stopAt, liveEnd)
-			end
-			local track = self:Track(session)
-			for n = 1, #(track.ek or {}) do
-				local when = session.s + (track.et[n] or 0)
-				if when >= startAt and when <= stopAt then
-					local kind = track.ek[n]
-					local extra = track.ea[n]
-					for _, row in pairs(rows) do
-						if SpanCovers(row.spans, when, liveEnd) then
-							if kind == ns.Kind.QUEST_TURNIN then
-								row.quests = row.quests + 1
-							elseif kind == ns.Kind.QUEST_ACCEPT then
-								row.accepts = row.accepts + 1
-							elseif kind == ns.Kind.KILL then
-								row.kills = row.kills + 1
-								local _, elite, rare = self:ReadKill(extra)
-								if elite then
-									row.elites = row.elites + 1
-								elseif rare then
-									row.rares = row.rares + 1
-								end
-							elseif kind == ns.Kind.DEATH then
-								row.deaths = row.deaths + 1
-							end
+				local overlap = SpanOverlap(row.spans, startAt, stopAt, liveEnd)
+				if overlap > 0 then
+					row.seconds = row.seconds + overlap
+					activeRows[#activeRows + 1] = row
+				else
+					local spans = row.spans
+					for s = 1, #spans, 2 do
+						local left = spans[s]
+						local right = spans[s + 1]
+						if type(right) ~= "number" then
+							right = liveEnd
+						end
+						if type(left) == "number" and right >= startAt and left <= stopAt then
+							activeRows[#activeRows + 1] = row
+							break
 						end
 					end
 				end
 			end
+			if #activeRows > 0 then
+				self:EachEvent(journey, session, function(offset, kind, _, _, _, extra)
+					local when = session.s + (offset or 0)
+					if when >= startAt and when <= stopAt then
+						if kind == ns.Kind.QUEST_TURNIN or kind == ns.Kind.QUEST_ACCEPT or kind == ns.Kind.KILL or kind == ns.Kind.DEATH then
+							for r = 1, #activeRows do
+								local row = activeRows[r]
+								if SpanCovers(row.spans, when, liveEnd) then
+									if kind == ns.Kind.QUEST_TURNIN then
+										row.quests = row.quests + 1
+									elseif kind == ns.Kind.QUEST_ACCEPT then
+										row.accepts = row.accepts + 1
+									elseif kind == ns.Kind.KILL then
+										row.kills = row.kills + 1
+										local _, elite, rare = self:ReadKill(extra)
+										if elite then
+											row.elites = row.elites + 1
+										elseif rare then
+											row.rares = row.rares + 1
+										end
+									elseif kind == ns.Kind.DEATH then
+										row.deaths = row.deaths + 1
+									end
+								end
+							end
+						end
+					end
+				end)
+			end
 		end
 	end
-	local runs = CompanyInstanceRuns(self, sessions)
+	local runs = CompanyInstanceRuns(self, journey, sessions)
 	for r = 1, #runs do
 		local run = runs[r]
 		local when = run.bossWhen
@@ -3333,8 +3554,6 @@ function ns.DB:CompanyCacheKey(journey)
 		end
 	end
 	local sessions = journey and journey.sessions or {}
-	local last = sessions[#sessions]
-	local seen = last and (last.seen or last.s) or 0
 	local kills, quests = 0, 0
 	for i = 1, #sessions do
 		local session = sessions[i]
@@ -3345,7 +3564,7 @@ function ns.DB:CompanyCacheKey(journey)
 	if open > 0 and journey == self.record then
 		bucket = math.floor(self:Now() / 30)
 	end
-	return spans .. ":" .. #sessions .. ":" .. seen .. ":" .. kills .. ":" .. quests .. ":" .. bucket
+	return spans .. ":" .. #sessions .. ":" .. (self.eventGen or 0) .. ":" .. kills .. ":" .. quests .. ":" .. bucket
 end
 
 function ns.DB:CompanySpanIndex(journey)
@@ -3698,9 +3917,9 @@ function ns.DB:Stats()
 	local sessions = self:Sessions()
 	local points, events = 0, 0
 	for i = 1, #sessions do
-		local track = self:Track(sessions[i])
-		points = points + #track.t
-		events = events + #track.ek
+		local p, e = self:TrackCounts(sessions[i], self.char)
+		points = points + p
+		events = events + e
 	end
 	return #sessions, points, events
 end
