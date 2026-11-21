@@ -1969,24 +1969,6 @@ function ns.DB:LevelFromLink(link)
 	return lo, hi
 end
 
-local QUIET_KEEP = {
-	[ns.Kind.KILL] = true,
-	[ns.Kind.QUEST_ACCEPT] = true,
-	[ns.Kind.QUEST_TURNIN] = true,
-	[ns.Kind.DEATH] = true,
-	[ns.Kind.SUMMON] = true,
-	[ns.Kind.HEARTH] = true,
-	[ns.Kind.FLIGHT_START] = true,
-	[ns.Kind.INSTANCE_ENTER] = true,
-	[ns.Kind.BOSS] = true,
-	[ns.Kind.LEVEL] = true,
-	[ns.Kind.PORTAL] = true,
-	[ns.Kind.TRAINER] = true,
-	[ns.Kind.CAMP] = true,
-	[ns.Kind.SLEEP] = true,
-	[ns.Kind.FISH] = true,
-}
-
 function ns.DB:SessionWorthKeeping(journey, session)
 	if not Usable(session) then
 		return true
@@ -2004,16 +1986,15 @@ function ns.DB:SessionWorthKeeping(journey, session)
 	for i = 1, #(track.ek or {}) do
 		local kind = track.ek[i]
 		local extra = track.ea[i] or 0
-		if kind == ns.Kind.CAMP or kind == ns.Kind.SLEEP or kind == ns.Kind.FISH then
-			if extra ~= 1 then
-				return true
-			end
-		elseif kind == ns.Kind.GROUP then
+		local spec = ns.EventSpec and ns.EventSpec[kind]
+		if kind == ns.Kind.GROUP then
 			if extra >= self.GROUP_KEPT then
 				return true
 			end
-		elseif QUIET_KEEP[kind] then
-			return true
+		elseif spec and spec.keepsSession then
+			if spec.shape ~= "span" or extra ~= 1 then
+				return true
+			end
 		end
 	end
 	-- Older stops have no measured distance. Leave those alone.
@@ -2436,12 +2417,8 @@ end
 ns.DB.GROUP_KEPT = 16777216
 
 function ns.DB:CompanyQualifies(kind)
-	return kind == ns.Kind.QUEST_ACCEPT
-		or kind == ns.Kind.QUEST_TURNIN
-		or kind == ns.Kind.KILL
-		or kind == ns.Kind.DEATH
-		or kind == ns.Kind.INSTANCE_ENTER
-		or kind == ns.Kind.BOSS
+	local spec = ns.EventSpec and ns.EventSpec[kind]
+	return (spec and spec.qualifiesCompany) and true or false
 end
 
 function ns.DB:TouchPerson(guid, info, now, mapID)

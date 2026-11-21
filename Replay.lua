@@ -36,12 +36,6 @@ local PATH_COLOR_R, PATH_COLOR_G, PATH_COLOR_B, PATH_COLOR_A = 0.25, 0.85, 1, 0.
 local SPEEDS = ns.Replay.speeds
 local MEDIA_CIRCLE = "Interface\\AddOns\\Zipper\\Media\\Circle"
 local MEDIA_RING = "Interface\\AddOns\\Zipper\\Media\\Ring"
--- Quest pips stay darker than KindColor so dense clusters still read on the map.
-local QUEST_ACCEPT_R, QUEST_ACCEPT_G, QUEST_ACCEPT_B = 0.58, 0.44, 0.06
-local QUEST_TURNIN_R, QUEST_TURNIN_G, QUEST_TURNIN_B = 0.235, 0.702, 0.443
-local KILL_R, KILL_G, KILL_B = 0.86, 0.12, 0.10
-local DEATH_R, DEATH_G, DEATH_B = 0.72, 0.08, 0.08
-local LEVEL_R, LEVEL_G, LEVEL_B = 1.00, 0.92, 0.45
 -- Elite portrait chrome is gold; keep the kill fill red and ring the pip.
 local ELITE_BORDER_R, ELITE_BORDER_G, ELITE_BORDER_B = 1.00, 0.82, 0.20
 local MAP_TYPE_ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
@@ -456,46 +450,20 @@ end
 -- Circle for dense marks; Ring for rarer milestones. Sizes stay small so kills
 -- and quest clusters do not blot out the route.
 function ns.Replay:PaintMarker(marker, kind, extra)
-	local texture = MEDIA_CIRCLE
-	local size = PIP
+	local spec = ns.EventSpec and ns.EventSpec[kind]
+	local pip = spec and spec.pip
+	local texture = (pip and pip.shape == "ring") and MEDIA_RING or MEDIA_CIRCLE
+	local size = (pip and pip.size) or PIP
+	local color = (pip and pip.color) or (spec and spec.color) or ns.KindColor[kind]
 	local r, g, b = 1, 0.82, 0.28
+	if color then
+		r, g, b = color[1], color[2], color[3]
+	end
 	local elite = false
 	if kind == Kind.KILL then
 		local _
 		_, elite = ns.DB:ReadKill(extra)
-		r, g, b = KILL_R, KILL_G, KILL_B
 		size = elite and ELITE_PIP or KILL_PIP
-	elseif kind == Kind.FISH then
-		local color = ns.KindColor[Kind.FISH]
-		r, g, b = color[1], color[2], color[3]
-		size = 10
-	elseif kind == Kind.LEVEL then
-		texture = MEDIA_RING
-		r, g, b = LEVEL_R, LEVEL_G, LEVEL_B
-		size = 9
-	elseif kind == Kind.DEATH then
-		texture = MEDIA_RING
-		r, g, b = DEATH_R, DEATH_G, DEATH_B
-		size = 8
-	elseif kind == Kind.BOSS then
-		texture = MEDIA_RING
-		local color = ns.KindColor[Kind.BOSS]
-		r, g, b = color[1], color[2], color[3]
-		size = 9
-	elseif kind == Kind.GROUP then
-		local color = ns.KindColor[Kind.GROUP]
-		r, g, b = color[1], color[2], color[3]
-		size = 7
-	elseif kind == Kind.QUEST_ACCEPT then
-		r, g, b = QUEST_ACCEPT_R, QUEST_ACCEPT_G, QUEST_ACCEPT_B
-	elseif kind == Kind.QUEST_TURNIN then
-		r, g, b = QUEST_TURNIN_R, QUEST_TURNIN_G, QUEST_TURNIN_B
-	else
-		local color = ns.KindColor[kind]
-		if color then
-			r, g, b = color[1], color[2], color[3]
-		end
-		size = 7
 	end
 	marker.texture:SetTexture(texture)
 	marker.texture:SetTexCoord(0, 1, 0, 1)
@@ -517,7 +485,7 @@ function ns.Replay:PaintMarker(marker, kind, extra)
 		end
 	end
 	marker.pipSize = size
-	marker.milestone = kind == Kind.LEVEL or kind == Kind.DEATH or kind == Kind.BOSS
+	marker.milestone = (pip and pip.milestone) and true or false
 	return size
 end
 
@@ -992,9 +960,10 @@ function ns.Replay:DrawMarkers(sessions)
 					break
 				end
 				local kind = track.ek[i]
+				local spec = ns.EventSpec and ns.EventSpec[kind]
 				local isKill = kind == Kind.KILL
 				local when = session.s + (track.et[i] or 0)
-				local spanEnd = (kind == Kind.CAMP or kind == Kind.SLEEP or kind == Kind.FISH) and track.ea[i] == 1
+				local spanEnd = spec and spec.shape == "span" and track.ea[i] == 1
 				local shortRest = (kind == Kind.CAMP or kind == Kind.SLEEP)
 					and not spanEnd
 					and not self:RestStartWorthDrawing(track, i, session.s)
@@ -1002,7 +971,7 @@ function ns.Replay:DrawMarkers(sessions)
 				-- pad so the finishing level-up pip is not clipped off the end.
 				local outside = self.mode == "level" and self.t0
 					and (when < self.t0 - 1.5 or when > ((self.t1 or when) + 1.5))
-				if isKill == wantKill and kind ~= Kind.ZONE and kind ~= Kind.EAT and kind ~= Kind.IDLE and not spanEnd and not shortRest and not outside and self:SegmentFade(when) > 0 then
+				if isKill == wantKill and spec and spec.pip and not spanEnd and not shortRest and not outside and self:SegmentFade(when) > 0 then
 					local mapID = track.em[i]
 					local nx = track.ex[i] / ns.COORD_SCALE
 					local ny = track.ey[i] / ns.COORD_SCALE
@@ -1102,8 +1071,7 @@ function ns.Replay:PlayheadStance()
 	if not sessions or not when then
 		return "move"
 	end
-	local afk, idle = false, false
-	local camp, sleep, meal, fish = false, false, false, false
+	local active = {}
 	for s = 1, #sessions do
 		local session = sessions[s]
 		local track = ns.DB:Track(session)
@@ -1114,44 +1082,42 @@ function ns.Replay:PlayheadStance()
 			end
 			local kind = track.ek[i]
 			local extra = track.ea[i]
-			if kind == Kind.AFK_START then
-				afk = true
-			elseif kind == Kind.AFK_END then
-				afk = false
-			elseif kind == Kind.IDLE and (not extra or extra == 0) then
-				idle = true
-			elseif kind == Kind.IDLE and extra == 1 then
-				idle = false
-			elseif kind == Kind.CAMP and (not extra or extra == 0) then
-				afk = false
-				camp = true
-			elseif kind == Kind.CAMP and extra == 1 then
-				camp = false
-			elseif kind == Kind.SLEEP and (not extra or extra == 0) then
-				afk = false
-				sleep = true
-			elseif kind == Kind.SLEEP and extra == 1 then
-				sleep = false
-			elseif kind == Kind.EAT and (not extra or extra == 0) then
-				afk = false
-				meal = true
-			elseif kind == Kind.EAT and extra == 1 then
-				meal = false
-			elseif kind == Kind.FISH and (not extra or extra == 0) then
-				afk = false
-				fish = true
-			elseif kind == Kind.FISH and extra == 1 then
-				fish = false
+			local spec = ns.EventSpec and ns.EventSpec[kind]
+			if spec then
+				if spec.shape == "span" and spec.playhead then
+					if not extra or extra == 0 then
+						active[kind] = true
+						if spec.blocksAFK then
+							active[Kind.AFK_START] = false
+						end
+					elseif extra == 1 then
+						active[kind] = false
+					end
+				elseif spec.shape == "pair" and spec.playhead then
+					active[kind] = true
+				elseif spec.shape == "pairEnd" and spec.pairStart then
+					active[spec.pairStart] = false
+				end
 			end
 		end
 	end
-	if fish then
-		return "fish"
+	local busy, parked = false, false
+	for kind, on in pairs(active) do
+		if on then
+			local stance = ns.EventSpec[kind] and ns.EventSpec[kind].playhead
+			if stance == "fish" then
+				return "fish"
+			elseif stance == "busy" then
+				busy = true
+			elseif stance == "parked" then
+				parked = true
+			end
+		end
 	end
-	if camp or sleep or meal then
+	if busy then
 		return "move"
 	end
-	if idle or afk then
+	if parked then
 		return "parked"
 	end
 	local s1, i1, s2, i2 = Locate(sessions, when)
@@ -5474,30 +5440,37 @@ local function LegendSwatchColor(entry)
 end
 
 function ns.Replay:LegendEntries()
-	local fish = ns.KindColor[Kind.FISH]
-	local group = ns.KindColor[Kind.GROUP]
-	local hearth = ns.KindColor[Kind.HEARTH]
-	local portal = ns.KindColor[Kind.PORTAL]
-	local camp = ns.KindColor[Kind.CAMP]
-	local sleep = ns.KindColor[Kind.SLEEP]
-	local trainer = ns.KindColor[Kind.TRAINER]
-	local instance = ns.KindColor[Kind.INSTANCE_ENTER]
-	return {
-		{ label = L["Kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 8 },
-		{ label = L["Elite kill"], texture = MEDIA_CIRCLE, r = KILL_R, g = KILL_G, b = KILL_B, size = 11, elite = true },
-		{ label = L["Quest pickup"], texture = MEDIA_CIRCLE, r = QUEST_ACCEPT_R, g = QUEST_ACCEPT_G, b = QUEST_ACCEPT_B, size = 8 },
-		{ label = L["Quest turn-in"], texture = MEDIA_CIRCLE, r = QUEST_TURNIN_R, g = QUEST_TURNIN_G, b = QUEST_TURNIN_B, size = 8 },
-		{ label = L["Death"], texture = MEDIA_RING, r = DEATH_R, g = DEATH_G, b = DEATH_B, size = 10 },
-		{ label = L["Level up"], texture = MEDIA_RING, r = LEVEL_R, g = LEVEL_G, b = LEVEL_B, size = 10 },
-		{ label = L["Fishing"], texture = MEDIA_CIRCLE, r = fish[1], g = fish[2], b = fish[3], size = 10 },
-		{ label = L["Joined Party"], texture = MEDIA_CIRCLE, r = group[1], g = group[2], b = group[3], size = 9 },
-		{ label = L["Hearth"], texture = MEDIA_CIRCLE, r = hearth[1], g = hearth[2], b = hearth[3], size = 9 },
-		{ label = L["Teleport"], texture = MEDIA_CIRCLE, r = portal[1], g = portal[2], b = portal[3], size = 9 },
-		{ label = L["Campfire"], texture = MEDIA_CIRCLE, r = camp[1], g = camp[2], b = camp[3], size = 9 },
-		{ label = L["Sleeping bag"], texture = MEDIA_CIRCLE, r = sleep[1], g = sleep[2], b = sleep[3], size = 9 },
-		{ label = L["Trainer"], texture = MEDIA_CIRCLE, r = trainer[1], g = trainer[2], b = trainer[3], size = 9 },
-		{ label = L["Entered instance"], texture = MEDIA_CIRCLE, r = instance[1], g = instance[2], b = instance[3], size = 9 },
-	}
+	local entries = {}
+	local list = ns.LegendSpecs or {}
+	for i = 1, #list do
+		local spec = list[i]
+		local pip = spec.pip
+		local legend = pip and pip.legend
+		if pip and legend then
+			local color = pip.color or spec.color or { 1, 0.82, 0.28 }
+			local texture = pip.shape == "ring" and MEDIA_RING or MEDIA_CIRCLE
+			entries[#entries + 1] = {
+				label = legend.label or spec.name,
+				texture = texture,
+				r = color[1],
+				g = color[2],
+				b = color[3],
+				size = legend.size or 9,
+			}
+			if spec.kind == Kind.KILL then
+				entries[#entries + 1] = {
+					label = L["Elite kill"],
+					texture = MEDIA_CIRCLE,
+					r = color[1],
+					g = color[2],
+					b = color[3],
+					size = 11,
+					elite = true,
+				}
+			end
+		end
+	end
+	return entries
 end
 
 function ns.Replay:HideMapLegend()

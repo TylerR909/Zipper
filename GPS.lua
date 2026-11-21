@@ -13,6 +13,10 @@ ns.GPS = {
 	active = false,
 	moving = false,
 	onTaxi = false,
+	activities = {},
+	activityEvents = {},
+	activeSpans = {},
+	spanGen = {},
 }
 
 local Kind = ns.Kind
@@ -88,6 +92,162 @@ local function SpellName(spellID)
 		return nil
 	end
 	return name
+end
+
+function ns.GPS:PlainNumber(value)
+	return IsPlainNumber(value)
+end
+
+function ns.GPS:PlainBool(value, fallback)
+	return PlainBool(value, fallback)
+end
+
+function ns.GPS:SpellName(spellID)
+	return SpellName(spellID)
+end
+
+function ns.GPS:AuraIndexSecret(index)
+	-- GetBuffDataByIndex throws while auras are secret and the caller is tainted.
+	-- The predicate is safe. inCombat is the fallback when that API is missing.
+	if C_Secrets and C_Secrets.ShouldUnitAuraIndexBeSecret then
+		local secret = PlainBool(C_Secrets.ShouldUnitAuraIndexBeSecret("player", index))
+		if secret == nil then
+			return true
+		end
+		return secret
+	end
+	return self.inCombat and true or false
+end
+
+function ns.GPS:PlayerAura(spellID)
+	local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
+	if not aura or (issecretvalue and issecretvalue(aura)) then
+		return nil
+	end
+	return aura
+end
+
+-- Activities/index.xml registers stateful standing-still detectors here.
+-- Shared span lifecycle keeps AFK suppression, Idle clearing, and grace timers
+-- in one place instead of repeating them per activity.
+function ns.GPS:RegisterActivity(activity)
+	if type(activity) ~= "table" or type(activity.id) ~= "string" then
+		return
+	end
+	self.activities[#self.activities + 1] = activity
+	if type(activity.events) == "table" then
+		for i = 1, #activity.events do
+			local ev = activity.events[i]
+			local list = self.activityEvents[ev]
+			if not list then
+				list = {}
+				self.activityEvents[ev] = list
+			end
+			list[#list + 1] = activity
+		end
+	end
+end
+
+function ns.GPS:NotifyActivities(method, ...)
+	local list = self.activities
+	for i = 1, #list do
+		local fn = list[i][method]
+		if fn then
+			fn(list[i], self, ...)
+		end
+	end
+end
+
+function ns.GPS:DispatchActivityEvent(event, ...)
+	local list = self.activityEvents[event]
+	if not list then
+		return
+	end
+	for i = 1, #list do
+		local fn = list[i].OnEvent
+		if fn then
+			fn(list[i], self, event, ...)
+		end
+	end
+end
+
+function ns.GPS:ClearStill()
+	self:NotifyActivities("OnClearStill")
+end
+
+function ns.GPS:SpanActive(kind)
+	return self.activeSpans[kind] == true
+end
+
+function ns.GPS:AnyActivityBlocksAFK()
+	for kind in pairs(self.activeSpans) do
+		local spec = ns.EventSpec and ns.EventSpec[kind]
+		if spec and spec.blocksAFK then
+			return true
+		end
+	end
+	return false
+end
+
+function ns.GPS:AnyActivityBlocksIdle()
+	for kind in pairs(self.activeSpans) do
+		local spec = ns.EventSpec and ns.EventSpec[kind]
+		if spec and spec.blocksIdle then
+			return true
+		end
+	end
+	return false
+end
+
+function ns.GPS:BeginSpan(kind)
+	if not ns.Config:WantsKind(kind) then
+		return false
+	end
+	self.spanGen[kind] = (self.spanGen[kind] or 0) + 1
+	if self.activeSpans[kind] then
+		return true
+	end
+	local spec = ns.EventSpec and ns.EventSpec[kind]
+	self:ClearStill()
+	if spec and spec.blocksAFK and self.afk then
+		self.afk = false
+		self:Mark(Kind.AFK_END, 0)
+	end
+	self.activeSpans[kind] = true
+	self:Mark(kind, 0)
+	return true
+end
+
+function ns.GPS:EndSpan(kind)
+	self.spanGen[kind] = (self.spanGen[kind] or 0) + 1
+	if not self.activeSpans[kind] then
+		return false
+	end
+	self.activeSpans[kind] = nil
+	self:Mark(kind, 1)
+	self:ClearStill()
+	self:SyncAFK()
+	return true
+end
+
+function ns.GPS:ScheduleEndSpan(kind, seconds, keepGoing)
+	if not self.activeSpans[kind] then
+		return
+	end
+	self.spanGen[kind] = (self.spanGen[kind] or 0) + 1
+	local gen = self.spanGen[kind]
+	if C_Timer and C_Timer.After then
+		C_Timer.After(seconds, function()
+			if self.active and self.activeSpans[kind] and self.spanGen[kind] == gen then
+				if keepGoing and keepGoing() then
+					return
+				end
+				self:EndSpan(kind)
+			end
+		end)
+	else
+		self:EndSpan(kind)
+	end
 end
 
 function ns.GPS:ReadPosition()
@@ -393,15 +553,7 @@ function ns.GPS:SyncTaxi()
 		return
 	end
 	self.onTaxi = taxi
-	if taxi then
-		self.restSince = nil
-		if self.restKind then
-			self:EndRest()
-		end
-		self:ClearStill()
-	else
-		self.stillSince = nil
-	end
+	self:NotifyActivities("OnTaxi", taxi)
 	self:Mark(taxi and Kind.FLIGHT_START or Kind.FLIGHT_END, 0)
 end
 
@@ -419,12 +571,7 @@ function ns.GPS:SyncMount()
 		return
 	end
 	self.mounted = mounted
-	if mounted then
-		self.restSince = nil
-		if self.restKind then
-			self:EndRest()
-		end
-	end
+	self:NotifyActivities("OnMount", mounted)
 	self:Mark(mounted and Kind.MOUNT or Kind.DISMOUNT, 0)
 end
 
@@ -433,7 +580,7 @@ function ns.GPS:SyncAFK()
 	if afk == nil then
 		return
 	end
-	if self.restKind or self.meal or self.fishing then
+	if self:AnyActivityBlocksAFK() then
 		if self.afk then
 			self.afk = false
 			self:Mark(Kind.AFK_END, 0)
@@ -457,434 +604,6 @@ function ns.GPS:SyncAFK()
 	end
 	self.afk = afk
 	self:Mark(afk and Kind.AFK_START or Kind.AFK_END, 0)
-end
-
-local CAMPFIRE_AURA = 1283391
-local REST_SECONDS = 60
--- Sleeping-bag cast arms a short window; Well-Rested alone must not keep it open.
-local SLEEP_ARM_SECONDS = 180
-
-function ns.GPS:AuraIndexSecret(index)
-	-- GetBuffDataByIndex throws while auras are secret and the caller is tainted.
-	-- The predicate is safe. inCombat is the fallback when that API is missing.
-	if C_Secrets and C_Secrets.ShouldUnitAuraIndexBeSecret then
-		local secret = PlainBool(C_Secrets.ShouldUnitAuraIndexBeSecret("player", index))
-		if secret == nil then
-			return true
-		end
-		return secret
-	end
-	return self.inCombat and true or false
-end
-
-function ns.GPS:ReadRest()
-	local camp, sleep, earned = false, false, false
-	if self:AuraIndexSecret(1) then
-		return nil
-	end
-	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID and self:PlayerAura(CAMPFIRE_AURA) then
-		camp = true
-	end
-	if not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
-		return camp, sleep, earned
-	end
-	for i = 1, 40 do
-		if self:AuraIndexSecret(i) then
-			return nil
-		end
-		local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-		if not aura then
-			break
-		end
-		if issecretvalue and issecretvalue(aura) then
-			return nil
-		end
-		local name = aura.name
-		local spellID = aura.spellId
-		if issecretvalue and issecretvalue(name) then
-			name = nil
-		end
-		if not IsPlainNumber(spellID) then
-			spellID = nil
-		end
-		local which, ready = ns.RestSignal(name, spellID)
-		if which == "sleep" then
-			-- Well-Rested is ready=true only. A future non-ready sleep aura would
-			-- mean real proximity; do not treat lingering earned rest as in-bag.
-			if ready then
-				earned = true
-			else
-				sleep = true
-			end
-		elseif which == "camp" then
-			if ready then
-				earned = true
-			else
-				camp = true
-			end
-		end
-	end
-	return camp, sleep, earned
-end
-
-function ns.GPS:BagArmed(now)
-	if not self.sleepArmed then
-		return false
-	end
-	now = now or ns.DB:Now()
-	if now - self.sleepArmed > SLEEP_ARM_SECONDS then
-		self.sleepArmed = nil
-		return false
-	end
-	return true
-end
-
-function ns.GPS:ArmSleepBag()
-	self.sleepArmed = ns.DB:Now()
-	self:EnsureRestWatch()
-end
-
-function ns.GPS:PlayerAura(spellID)
-	local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-	if not aura or (issecretvalue and issecretvalue(aura)) then
-		return nil
-	end
-	return aura
-end
-
-function ns.GPS:BeginRest(kind)
-	if self.restKind == kind then
-		return
-	end
-	if self.restKind then
-		self:EndRest()
-	end
-	self:ClearStill()
-	if self.afk then
-		self.afk = false
-		self:Mark(Kind.AFK_END, 0)
-	end
-	self.restKind = kind
-	self.restSince = nil
-	self:Mark(kind, 0)
-end
-
-function ns.GPS:EndRest()
-	local kind = self.restKind
-	if not kind then
-		return
-	end
-	self.restKind = nil
-	self.restSince = nil
-	if kind == Kind.SLEEP then
-		self.sleepArmed = nil
-	end
-	self:Mark(kind, 1)
-	self:ClearStill()
-	self:SyncAFK()
-end
-
-function ns.GPS:StopRestWatch()
-	if self.restTicker then
-		self.restTicker:Cancel()
-		self.restTicker = nil
-	end
-end
-
-function ns.GPS:EnsureRestWatch()
-	if self.restTicker or not C_Timer or not C_Timer.NewTicker then
-		return
-	end
-	self.restTicker = C_Timer.NewTicker(5, function()
-		if self.active then
-			self:WatchRest()
-		end
-	end)
-end
-
-function ns.GPS:WatchRest()
-	if not ns.Config:WantsKind(Kind.CAMP) then
-		self.restSince = nil
-		self.sleepArmed = nil
-		if self.restKind then
-			self:EndRest()
-		end
-		self:StopRestWatch()
-		return
-	end
-	local camp, sleep, earned = self:ReadRest()
-	if camp == nil then
-		return
-	end
-	local now = ns.DB:Now()
-	local sleepProx = sleep or self:BagArmed(now)
-	-- Camp ends when you leave the fire. Sleep ends on move/combat, not when
-	-- Well-Rested flickers, or bag-armed windows would restart every pause.
-	if self.restKind == Kind.CAMP and not camp then
-		self:EndRest()
-	end
-	if not camp and not sleepProx then
-		self.restSince = nil
-		if not self.restKind then
-			self:StopRestWatch()
-		end
-		return
-	end
-	self:EnsureRestWatch()
-	if self.moving or self.onTaxi or self.inCombat then
-		self.restSince = nil
-		if self.restKind then
-			self:EndRest()
-		end
-		return
-	end
-	if self.restKind then
-		return
-	end
-	-- Earned camp benefits only start a camp while you are still at the fire.
-	-- Sleeping-bag / Well-Rested always needs the stillness timer so a recent
-	-- bag cast cannot spam starts between pulls.
-	if earned and camp then
-		self:BeginRest(Kind.CAMP)
-		return
-	end
-	local want = camp and Kind.CAMP or (sleepProx and Kind.SLEEP) or nil
-	if not want then
-		return
-	end
-	if not self.restSince then
-		self.restSince = now
-	elseif now - self.restSince >= REST_SECONDS then
-		self:BeginRest(want)
-		if want == Kind.SLEEP then
-			self.sleepArmed = nil
-		end
-	end
-end
-
-function ns.GPS:ReadMeal()
-	if self:AuraIndexSecret(1) then
-		return nil
-	end
-	if not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
-		return false
-	end
-	for i = 1, 40 do
-		if self:AuraIndexSecret(i) then
-			return nil
-		end
-		local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-		if not aura then
-			break
-		end
-		if issecretvalue and issecretvalue(aura) then
-			return nil
-		end
-		local name = aura.name
-		if issecretvalue and issecretvalue(name) then
-			name = nil
-		end
-		if ns.MealSignal(name) then
-			return true
-		end
-	end
-	return false
-end
-
-function ns.GPS:BeginMeal()
-	if self.meal then
-		return
-	end
-	self:ClearStill()
-	if self.afk then
-		self.afk = false
-		self:Mark(Kind.AFK_END, 0)
-	end
-	self.meal = true
-	self:Mark(Kind.EAT, 0)
-end
-
-function ns.GPS:EndMeal()
-	if not self.meal then
-		return
-	end
-	self.meal = false
-	self:Mark(Kind.EAT, 1)
-	self:ClearStill()
-	self:SyncAFK()
-end
-
-function ns.GPS:WatchMeal()
-	local eating = self:ReadMeal()
-	if eating == nil then
-		return
-	end
-	if eating then
-		self:BeginMeal()
-	else
-		self:EndMeal()
-	end
-end
-
--- Brief pause between casts stays one fishing span so the map gets one pin.
-local FISH_END_GRACE = 2.5
-
-function ns.GPS:IsFishingChannel(spellID)
-	if ns.FishingSpell(spellID) then
-		return true
-	end
-	local name = SpellName(spellID)
-	if ns.FishingSpell(nil, name) then
-		return true
-	end
-	if not UnitChannelInfo then
-		return false
-	end
-	local channelName, _, _, _, _, _, _, channelID = UnitChannelInfo("player")
-	if ns.FishingSpell(channelID, channelName) then
-		return true
-	end
-	return false
-end
-
-function ns.GPS:BeginFish()
-	if not ns.Config:WantsKind(Kind.FISH) then
-		return
-	end
-	self.fishEndGen = (self.fishEndGen or 0) + 1
-	if self.fishing then
-		return
-	end
-	self:ClearStill()
-	if self.afk then
-		self.afk = false
-		self:Mark(Kind.AFK_END, 0)
-	end
-	self.fishing = true
-	self:Mark(Kind.FISH, 0)
-end
-
-function ns.GPS:EndFish()
-	self.fishEndGen = (self.fishEndGen or 0) + 1
-	if not self.fishing then
-		return
-	end
-	self.fishing = false
-	self:Mark(Kind.FISH, 1)
-	self:ClearStill()
-	self:SyncAFK()
-end
-
-function ns.GPS:ScheduleEndFish()
-	if not self.fishing then
-		return
-	end
-	self.fishEndGen = (self.fishEndGen or 0) + 1
-	local gen = self.fishEndGen
-	if C_Timer and C_Timer.After then
-		C_Timer.After(FISH_END_GRACE, function()
-			if self.active and self.fishing and self.fishEndGen == gen then
-				self:EndFish()
-			end
-		end)
-	else
-		self:EndFish()
-	end
-end
-
-function ns.GPS:WatchFish()
-	if not ns.Config:WantsKind(Kind.FISH) then
-		if self.fishing then
-			self:EndFish()
-		end
-		return
-	end
-	if self:IsFishingChannel() then
-		self:BeginFish()
-	elseif self.fishing then
-		self:ScheduleEndFish()
-	end
-end
-
--- Recognized after this much stillness; the recorded span backdates to when
--- stillness began. Same window as the parked playhead ring.
-local IDLE_RECOGNIZE = 20
-
-function ns.GPS:BusyForIdle()
-	return self.moving
-		or self.onTaxi
-		or self.inCombat
-		or self.restKind
-		or self.meal
-		or self.fishing
-		or self.npcBusy
-		or false
-end
-
-function ns.GPS:ClearStill()
-	self.stillSince = nil
-	if self.idle then
-		self:EndIdle()
-	end
-end
-
-function ns.GPS:SetNpcBusy(busy)
-	busy = busy and true or false
-	if self.npcBusy == busy then
-		return
-	end
-	self.npcBusy = busy
-	if busy then
-		self:ClearStill()
-	else
-		self.stillSince = nil
-	end
-end
-
-function ns.GPS:BeginIdle(when)
-	if not ns.Config:WantsKind(Kind.IDLE) then
-		return
-	end
-	if self.idle or self:BusyForIdle() then
-		return
-	end
-	if type(when) ~= "number" then
-		when = self.stillSince or ns.DB:Now()
-	end
-	if not self:MarkAt(Kind.IDLE, 0, when) then
-		return
-	end
-	self.idle = true
-end
-
-function ns.GPS:EndIdle()
-	if not self.idle then
-		return
-	end
-	self.idle = false
-	self:Mark(Kind.IDLE, 1)
-end
-
-function ns.GPS:WatchIdle()
-	if not ns.Config:WantsKind(Kind.IDLE) then
-		self:ClearStill()
-		return
-	end
-	if self:BusyForIdle() then
-		self:ClearStill()
-		return
-	end
-	local now = ns.DB:Now()
-	if not self.stillSince then
-		self.stillSince = now
-		return
-	end
-	if self.idle then
-		return
-	end
-	if now - self.stillSince >= IDLE_RECOGNIZE then
-		self:BeginIdle(self.stillSince)
-	end
 end
 
 function ns.GPS:OnStopTurning()
@@ -912,15 +631,7 @@ function ns.GPS:OnCombat(entered)
 	if was == self.inCombat then
 		return
 	end
-	if self.inCombat then
-		self.restSince = nil
-		if self.restKind then
-			self:EndRest()
-		end
-		self:ClearStill()
-	else
-		self.stillSince = nil
-	end
+	self:NotifyActivities("OnCombat", self.inCombat)
 	if self.moving or self.onTaxi then
 		self:ConsiderSample(STEP_YARDS, false)
 	end
@@ -1075,45 +786,37 @@ function ns.GPS:EnsureEvents()
 		end)
 	end
 	local frame = self.frame
-	frame:RegisterEvent("PLAYER_STARTED_MOVING")
-	frame:RegisterEvent("PLAYER_STOPPED_MOVING")
-	frame:RegisterEvent("PLAYER_STOPPED_TURNING")
-	frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-	frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-	frame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
-	frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
-	frame:RegisterEvent("PLAYER_DEAD")
-	frame:RegisterEvent("PLAYER_LEVEL_UP")
-	frame:RegisterEvent("PLAYER_UNGHOST")
-	frame:RegisterEvent("QUEST_ACCEPTED")
-	frame:RegisterEvent("QUEST_TURNED_IN")
-	frame:RegisterEvent("CONFIRM_SUMMON")
-	frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-	frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
-	frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
-	frame:RegisterEvent("TRAINER_SHOW")
-	frame:RegisterEvent("TRAINER_UPDATE")
-	frame:RegisterEvent("TRAINER_CLOSED")
-	frame:RegisterEvent("GOSSIP_SHOW")
-	frame:RegisterEvent("GOSSIP_CLOSED")
-	frame:RegisterEvent("MERCHANT_SHOW")
-	frame:RegisterEvent("MERCHANT_CLOSED")
-	frame:RegisterEvent("MAIL_SHOW")
-	frame:RegisterEvent("MAIL_CLOSED")
-	frame:RegisterEvent("BANKFRAME_OPENED")
-	frame:RegisterEvent("BANKFRAME_CLOSED")
-	frame:RegisterEvent("AUCTION_HOUSE_SHOW")
-	frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
-	frame:RegisterEvent("QUEST_GREETING")
-	frame:RegisterEvent("QUEST_DETAIL")
-	frame:RegisterEvent("QUEST_PROGRESS")
-	frame:RegisterEvent("QUEST_COMPLETE")
-	frame:RegisterEvent("QUEST_FINISHED")
-	frame:RegisterEvent("UNIT_AURA")
-	frame:RegisterEvent("PARTY_KILL")
-	frame:RegisterEvent("BOSS_KILL")
-	frame:RegisterEvent("PLAYER_CONTROL_LOST")
-	frame:RegisterEvent("PLAYER_CONTROL_GAINED")
+	local registered = {}
+	local function add(ev)
+		if not registered[ev] then
+			registered[ev] = true
+			frame:RegisterEvent(ev)
+		end
+	end
+	add("PLAYER_STARTED_MOVING")
+	add("PLAYER_STOPPED_MOVING")
+	add("PLAYER_STOPPED_TURNING")
+	add("PLAYER_REGEN_DISABLED")
+	add("PLAYER_REGEN_ENABLED")
+	add("PLAYER_MOUNT_DISPLAY_CHANGED")
+	add("PLAYER_FLAGS_CHANGED")
+	add("PLAYER_DEAD")
+	add("PLAYER_LEVEL_UP")
+	add("PLAYER_UNGHOST")
+	add("QUEST_ACCEPTED")
+	add("QUEST_TURNED_IN")
+	add("CONFIRM_SUMMON")
+	add("UNIT_SPELLCAST_SUCCEEDED")
+	add("TRAINER_SHOW")
+	add("TRAINER_UPDATE")
+	add("TRAINER_CLOSED")
+	add("PARTY_KILL")
+	add("BOSS_KILL")
+	add("PLAYER_CONTROL_LOST")
+	add("PLAYER_CONTROL_GAINED")
+	for ev in pairs(self.activityEvents) do
+		add(ev)
+	end
 	self.eventsReady = true
 	return true
 end
@@ -1133,7 +836,7 @@ function ns.GPS:Tick()
 	self:SyncTaxi()
 	self:SyncInstance()
 	self:CheckSummon()
-	self:WatchIdle()
+	self:NotifyActivities("OnTick")
 	if self.needAnchor then
 		if self:ReadPosition() then
 			self:ConsiderSample(0, true)
@@ -1158,23 +861,12 @@ function ns.GPS:OnEvent(event, ...)
 	end
 	if event == "PLAYER_STARTED_MOVING" then
 		self.moving = true
-		self.restSince = nil
-		if self.restKind then
-			self:EndRest()
-		end
-		if self.meal then
-			self:EndMeal()
-		end
-		if self.fishing then
-			self:EndFish()
-		end
-		self:ClearStill()
+		self:NotifyActivities("OnMoveStart")
 		self:ConsiderSample(STOP_YARDS, false)
 	elseif event == "PLAYER_STOPPED_MOVING" then
 		self.moving = false
-		self.stillSince = nil
 		self:ConsiderSample(STOP_YARDS, false)
-		self:WatchIdle()
+		self:NotifyActivities("OnMoveStop")
 	elseif event == "PLAYER_STOPPED_TURNING" then
 		self:OnStopTurning()
 	elseif event == "PLAYER_REGEN_DISABLED" then
@@ -1239,25 +931,10 @@ function ns.GPS:OnEvent(event, ...)
 					self:Mark(Kind.PORTAL, spellID)
 				elseif cast == "ritual" then
 					self:Mark(Kind.SUMMON, spellID)
-				elseif spellID == 1307230 or (name and string.find(name, "Sleeping Bag", 1, true)) then
-					self:ArmSleepBag()
 				end
 			end
 		end
-	elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
-		local unit, _, spellID = ...
-		if not (issecretvalue and issecretvalue(unit)) and unit == "player" and self:IsFishingChannel(spellID) then
-			self:BeginFish()
-		end
-	elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
-		local unit, _, spellID = ...
-		if not (issecretvalue and issecretvalue(unit)) and unit == "player" then
-			if self.fishing or self:IsFishingChannel(spellID) then
-				self:ScheduleEndFish()
-			end
-		end
 	elseif event == "TRAINER_SHOW" then
-		self:SetNpcBusy(true)
 		self.trainerSeen = false
 		if C_Timer and C_Timer.After then
 			C_Timer.After(0.2, function()
@@ -1270,22 +947,6 @@ function ns.GPS:OnEvent(event, ...)
 		self:OnTrainer()
 	elseif event == "TRAINER_CLOSED" then
 		self.trainerSeen = false
-		self:SetNpcBusy(false)
-	elseif event == "GOSSIP_SHOW" or event == "MERCHANT_SHOW" or event == "MAIL_SHOW"
-		or event == "BANKFRAME_OPENED" or event == "AUCTION_HOUSE_SHOW"
-		or event == "QUEST_GREETING" or event == "QUEST_DETAIL"
-		or event == "QUEST_PROGRESS" or event == "QUEST_COMPLETE" then
-		self:SetNpcBusy(true)
-	elseif event == "GOSSIP_CLOSED" or event == "MERCHANT_CLOSED" or event == "MAIL_CLOSED"
-		or event == "BANKFRAME_CLOSED" or event == "AUCTION_HOUSE_CLOSED"
-		or event == "QUEST_FINISHED" then
-		self:SetNpcBusy(false)
-	elseif event == "UNIT_AURA" then
-		local unit = ...
-		if unit == "player" and not (issecretvalue and issecretvalue(unit)) then
-			self:WatchRest()
-			self:WatchMeal()
-		end
 	elseif event == "PARTY_KILL" then
 		local attackerGUID, targetGUID = ...
 		self:OnKill(attackerGUID, targetGUID)
@@ -1295,6 +956,7 @@ function ns.GPS:OnEvent(event, ...)
 	elseif event == "PLAYER_CONTROL_LOST" or event == "PLAYER_CONTROL_GAINED" then
 		self:SyncTaxi()
 	end
+	self:DispatchActivityEvent(event, ...)
 end
 
 function ns.GPS:Start(continued)
@@ -1328,17 +990,10 @@ function ns.GPS:Start(continued)
 		self:RememberWorld()
 	end
 
-	self.npcBusy = false
-	self.stillSince = nil
-	if self.idle then
-		self:EndIdle()
-	end
 	self:SyncMount()
 	self:SyncAFK()
 	self:SyncTaxi()
-	self:WatchMeal()
-	self:WatchFish()
-	self:WatchIdle()
+	self:NotifyActivities("OnStart")
 
 	if not self.ticker then
 		self.ticker = C_Timer.NewTicker(1, function()
@@ -1349,14 +1004,8 @@ function ns.GPS:Start(continued)
 end
 
 function ns.GPS:Stop()
-	self:EndMeal()
-	self:EndFish()
-	self:EndRest()
-	self:StopRestWatch()
-	self:EndIdle()
-	self.stillSince = nil
-	self.sleepArmed = nil
-	self.npcBusy = false
+	self:NotifyActivities("OnStop")
+	self.activeSpans = {}
 	self.active = false
 	self.moving = false
 	ns.DB:NoteProgress()

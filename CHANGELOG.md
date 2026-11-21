@@ -10,6 +10,7 @@
 - Pauses can switch between the bars and a pie of those same times. A chart with more than one drawing shows that choice under its note.
 - Where time went can stay a pie, or split that time by level as stacked bars or a share bar. How you moved can be bars or a pie. Elites and rares can show each level's share. Kills and turn-ins stays the grouped bars.
 - `/zip search heart` lists characters you have played with. A single letter is too short, and chat shows at most 8.
+- Crafting is its own activity: cast-bar tradeskill time is recorded for the Pauses chart, kept out of AFK and idle, and left off the map (no pips).
 
 ### Changed
 

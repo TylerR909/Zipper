@@ -302,9 +302,17 @@ function ns.Viz:Summarize(replay, sessions)
 	sessions = sessions or {}
 	local Kind = ns.Kind
 	local Travel = ns.Travel
+	local function blankPauses()
+		local out = {}
+		local specs = ns.PauseSpecs or {}
+		for i = 1, #specs do
+			out[specs[i].pause.key] = 0
+		end
+		return out
+	end
 	local where = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
 	local travel = { foot = 0, mount = 0, flight = 0, ghost = 0 }
-	local pauses = { idle = 0, afk = 0, camp = 0, sleep = 0, fish = 0, eat = 0 }
+	local pauses = blankPauses()
 	local kills = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
 	local turnins = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
 	local idleAt = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
@@ -434,7 +442,7 @@ function ns.Viz:Summarize(replay, sessions)
 		return {
 			where = blankCounts(),
 			travel = { foot = 0, mount = 0, flight = 0, ghost = 0 },
-			pauses = { idle = 0, afk = 0, camp = 0, sleep = 0, fish = 0, eat = 0 },
+			pauses = blankPauses(),
 			kills = blankCounts(),
 			turnins = blankCounts(),
 			idleAt = blankCounts(),
@@ -689,7 +697,8 @@ function ns.Viz:Summarize(replay, sessions)
 					end
 					return track.m[sampleAt]
 				end
-				local afkStart, idleStart, idlePlace, campStart, sleepStart, fishStart, eatStart
+				local idleStart, idlePlace
+				local pauseOpen = {}
 				local instStart, instType
 				local function addPause(field, startT, endT, still)
 					local a, b = Overlap(startT, endT, clip0, clip1)
@@ -741,6 +750,7 @@ function ns.Viz:Summarize(replay, sessions)
 					local when = session.s + (track.et[i] or 0)
 					local extra = track.ea and track.ea[i]
 					local inside = when >= clip0 and when <= clip1
+					local spec = ns.EventSpec and ns.EventSpec[kind]
 					if kind == Kind.INSTANCE_ENTER then
 						splitIdle(when)
 						instStart = when
@@ -760,37 +770,29 @@ function ns.Viz:Summarize(replay, sessions)
 						end
 						instStart, instType = nil, nil
 						idlePlace = placeNow()
-					elseif kind == Kind.AFK_START then
-						afkStart = when
-					elseif kind == Kind.AFK_END and afkStart then
-						addPause("afk", afkStart, when, false)
-						afkStart = nil
 					elseif kind == Kind.IDLE and (not extra or extra == 0) then
 						idleStart = when
 						idlePlace = placeNow()
 					elseif kind == Kind.IDLE and extra == 1 and idleStart then
 						addIdle(idleStart, when, idlePlace)
 						idleStart, idlePlace = nil, nil
-					elseif kind == Kind.CAMP and (not extra or extra == 0) then
-						campStart = when
-					elseif kind == Kind.CAMP and extra == 1 and campStart then
-						addPause("camp", campStart, when, true)
-						campStart = nil
-					elseif kind == Kind.SLEEP and (not extra or extra == 0) then
-						sleepStart = when
-					elseif kind == Kind.SLEEP and extra == 1 and sleepStart then
-						addPause("sleep", sleepStart, when, true)
-						sleepStart = nil
-					elseif kind == Kind.FISH and (not extra or extra == 0) then
-						fishStart = when
-					elseif kind == Kind.FISH and extra == 1 and fishStart then
-						addPause("fish", fishStart, when, false)
-						fishStart = nil
-					elseif kind == Kind.EAT and (not extra or extra == 0) then
-						eatStart = when
-					elseif kind == Kind.EAT and extra == 1 and eatStart then
-						addPause("eat", eatStart, when, false)
-						eatStart = nil
+					elseif spec and spec.pause and not spec.pause.custom then
+						if spec.shape == "span" then
+							if not extra or extra == 0 then
+								pauseOpen[kind] = when
+							elseif extra == 1 and pauseOpen[kind] then
+								addPause(spec.pause.key, pauseOpen[kind], when, spec.pause.still)
+								pauseOpen[kind] = nil
+							end
+						elseif spec.shape == "pair" then
+							pauseOpen[kind] = when
+						end
+					elseif spec and spec.shape == "pairEnd" and spec.pairStart and pauseOpen[spec.pairStart] then
+						local startSpec = ns.EventSpec[spec.pairStart]
+						if startSpec and startSpec.pause and not startSpec.pause.custom then
+							addPause(startSpec.pause.key, pauseOpen[spec.pairStart], when, startSpec.pause.still)
+							pauseOpen[spec.pairStart] = nil
+						end
 					elseif inside and kind == Kind.KILL then
 						killEvents = killEvents + 1
 						local place = instType or WORLD
@@ -839,23 +841,14 @@ function ns.Viz:Summarize(replay, sessions)
 						bump(levelAtForward(when, session.lv), "deaths")
 					end
 				end
-				if afkStart then
-					addPause("afk", afkStart, stop, false)
-				end
 				if idleStart then
 					addIdle(idleStart, stop, idlePlace)
 				end
-				if campStart then
-					addPause("camp", campStart, stop, true)
-				end
-				if sleepStart then
-					addPause("sleep", sleepStart, stop, true)
-				end
-				if fishStart then
-					addPause("fish", fishStart, stop, false)
-				end
-				if eatStart then
-					addPause("eat", eatStart, stop, false)
+				for kind, startT in pairs(pauseOpen) do
+					local spec = ns.EventSpec and ns.EventSpec[kind]
+					if spec and spec.pause and not spec.pause.custom then
+						addPause(spec.pause.key, startT, stop, spec.pause.still)
+					end
 				end
 				if instStart and instType then
 					local a, b = Overlap(instStart, stop, clip0, clip1)

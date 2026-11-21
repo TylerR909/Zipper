@@ -17,6 +17,7 @@ Enums.lua
 Config.lua
 DB.lua
 GPS.lua
+Activities/index.xml
 Social.lua
 Map.lua
 MapUtilsShim.lua

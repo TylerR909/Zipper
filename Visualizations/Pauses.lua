@@ -1,15 +1,6 @@
 local _, ns = ...
 local L = ns.L
 
-local ORDER = {
-	{ key = "idle", text = "Idle", r = 0.62, g = 0.62, b = 0.68 },
-	{ key = "afk", text = "AFK", r = 0.55, g = 0.55, b = 0.85 },
-	{ key = "camp", text = "Camped", r = 0.95, g = 0.45, b = 0.12 },
-	{ key = "sleep", text = "Slept", r = 0.55, g = 0.62, b = 0.95 },
-	{ key = "fish", text = "Fishing", r = 0.25, g = 0.55, b = 0.95 },
-	{ key = "eat", text = "Eating", r = 0.72, g = 0.58, b = 0.32 },
-}
-
 ns.Viz:Register({
 	id = "pauses",
 	label = L["Pauses"],
@@ -19,15 +10,17 @@ ns.Viz:Register({
 	displays = { "meters", "pie" },
 	Build = function(summary)
 		local bag = summary.pauses or {}
+		local specs = ns.PauseSpecs or {}
 		local rows = {}
-		for i = 1, #ORDER do
-			local row = ORDER[i]
+		for i = 1, #specs do
+			local spec = specs[i]
+			local color = spec.color or { 0.62, 0.62, 0.68 }
 			rows[#rows + 1] = {
-				label = L[row.text],
-				value = bag[row.key] or 0,
-				r = row.r,
-				g = row.g,
-				b = row.b,
+				label = spec.pause.label or spec.name,
+				value = bag[spec.pause.key] or 0,
+				r = color[1],
+				g = color[2],
+				b = color[3],
 			}
 		end
 		return { rows = rows }

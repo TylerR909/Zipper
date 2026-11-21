@@ -6,6 +6,7 @@ end
 local L = ns.L
 
 -- Stored as numbers. Names and colors are for code and the replay, not the saved data.
+-- Append-only: these numbers are packed into Z3 SavedVariables and must never be renumbered.
 ns.Kind = {
 	KILL = 1,
 	QUEST_ACCEPT = 2,
@@ -32,6 +33,7 @@ ns.Kind = {
 	BOSS = 23,
 	FISH = 24,
 	IDLE = 25,
+	CRAFT = 26,
 }
 
 -- How a path sample was traveled. Stored on the point, not as a string.
@@ -42,61 +44,338 @@ ns.Travel = {
 	GHOST = 3,
 }
 
-ns.KindName = {
-	[1] = L["Kill"],
-	[2] = L["Quest accepted"],
-	[3] = L["Quest turned in"],
-	[4] = L["Death"],
-	[5] = L["Summon"],
-	[6] = L["Hearth"],
-	[7] = L["Flight start"],
-	[8] = L["Flight end"],
-	[9] = L["Mounted"],
-	[10] = L["Dismounted"],
-	[11] = L["AFK start"],
-	[12] = L["AFK end"],
-	[13] = L["Entered instance"],
-	[14] = L["Left instance"],
-	[15] = L["Zone"],
-	[16] = L["Level up"],
-	[17] = L["Joined Party"],
-	[18] = L["Teleport"],
-	[19] = L["Trainer"],
-	[20] = L["Campfire"],
-	[21] = L["Sleeping bag"],
-	[22] = L["Eating"],
-	[23] = L["Boss"],
-	[24] = L["Fishing"],
-	[25] = L["Idle"],
-}
+-- Single declarative definition for every event kind.
+-- Config, DB, Replay, and Viz read from ns.EventSpec rather than keeping parallel lists:
+--   name:             Localized display name (populates ns.KindName)
+--   color:            { r, g, b } default color (populates ns.KindColor)
+--   shape:            "point" | "span" (extra 0=start, 1=end) | "pair" | "pairEnd"
+--   pairEnd / pairStart: linked kind id for "pair" / "pairEnd" events
+--   config:           { key, page = "road"|"moments", label, order } creates a Settings toggle
+--   configKey:        shares an existing Settings toggle without creating a second checkbox
+--   keepsSession:     true when this event prevents a stop from being dropped as quiet
+--   qualifiesCompany: true when this event credits active party spans as shared moments
+--   pip:              false (off the map) or { shape="circle"|"ring", size, color?, milestone?, legend? }
+--   playhead:         "fish" | "busy" (suppresses parked ring) | "parked" | nil
+--   blocksAFK:        true when an active span of this kind suppresses AFK
+--   blocksIdle:       true when an active span of this kind counts as busy for Idle
+--   pause:            { key, label, order, still?, custom? } feeds Viz pauses + Pauses chart
+local Kind = ns.Kind
+ns.EventSpec = {}
+ns.KindName = {}
+ns.KindColor = {}
 
-ns.KindColor = {
-	[1] = { 1.00, 0.25, 0.20 },
-	[2] = { 1.00, 0.85, 0.20 },
-	[3] = { 0.30, 1.00, 0.40 },
-	[4] = { 0.75, 0.75, 0.75 },
-	[5] = { 0.75, 0.40, 1.00 },
-	[6] = { 0.35, 0.60, 1.00 },
-	[7] = { 0.20, 0.90, 0.90 },
-	[8] = { 0.10, 0.55, 0.60 },
-	[9] = { 1.00, 0.55, 0.15 },
-	[10] = { 0.60, 0.35, 0.15 },
-	[11] = { 0.55, 0.55, 0.85 },
-	[12] = { 0.35, 0.35, 0.55 },
-	[13] = { 1.00, 0.40, 0.70 },
-	[14] = { 0.60, 0.25, 0.45 },
-	[15] = { 0.92, 0.92, 0.92 },
-	[16] = { 1.00, 0.95, 0.55 },
-	[17] = { 0.45, 0.75, 1.00 },
-	[18] = { 0.20, 0.78, 0.95 },
-	[19] = { 0.78, 0.58, 0.28 },
-	[20] = { 0.95, 0.45, 0.12 },
-	[21] = { 0.55, 0.62, 0.95 },
-	[22] = { 0.72, 0.58, 0.32 },
-	[23] = { 1.00, 0.55, 0.20 },
-	[24] = { 0.25, 0.55, 0.95 },
-	[25] = { 0.62, 0.62, 0.68 },
-}
+local function DefineEvent(kind, spec)
+	spec.kind = kind
+	spec.shape = spec.shape or "point"
+	ns.EventSpec[kind] = spec
+	ns.KindName[kind] = spec.name
+	ns.KindColor[kind] = spec.color
+end
+
+DefineEvent(Kind.KILL, {
+	name = L["Kill"],
+	color = { 1.00, 0.25, 0.20 },
+	config = { key = "kills", page = "moments", label = L["Kills"], order = 1 },
+	keepsSession = true,
+	qualifiesCompany = true,
+	pip = {
+		shape = "circle",
+		size = 5,
+		color = { 0.86, 0.12, 0.10 },
+		legend = { order = 1, size = 8 },
+	},
+})
+
+DefineEvent(Kind.QUEST_ACCEPT, {
+	name = L["Quest accepted"],
+	color = { 1.00, 0.85, 0.20 },
+	config = { key = "questAccept", page = "moments", label = L["Quest pickup"], order = 2 },
+	keepsSession = true,
+	qualifiesCompany = true,
+	-- Quest pips stay darker than KindColor so dense clusters still read on the map.
+	pip = {
+		shape = "circle",
+		size = 6,
+		color = { 0.58, 0.44, 0.06 },
+		legend = { order = 2, label = L["Quest pickup"], size = 8 },
+	},
+})
+
+DefineEvent(Kind.QUEST_TURNIN, {
+	name = L["Quest turned in"],
+	color = { 0.30, 1.00, 0.40 },
+	config = { key = "questTurnin", page = "moments", label = L["Quest turn-in"], order = 3 },
+	keepsSession = true,
+	qualifiesCompany = true,
+	pip = {
+		shape = "circle",
+		size = 6,
+		color = { 0.235, 0.702, 0.443 },
+		legend = { order = 3, label = L["Quest turn-in"], size = 8 },
+	},
+})
+
+DefineEvent(Kind.DEATH, {
+	name = L["Death"],
+	color = { 0.75, 0.75, 0.75 },
+	config = { key = "death", page = "moments", label = L["Deaths"], order = 4 },
+	keepsSession = true,
+	qualifiesCompany = true,
+	pip = {
+		shape = "ring",
+		size = 8,
+		color = { 0.72, 0.08, 0.08 },
+		milestone = true,
+		legend = { order = 4, size = 10 },
+	},
+})
+
+DefineEvent(Kind.SUMMON, {
+	name = L["Summon"],
+	color = { 0.75, 0.40, 1.00 },
+	config = { key = "summon", page = "moments", label = L["Summons"], order = 6 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.HEARTH, {
+	name = L["Hearth"],
+	color = { 0.35, 0.60, 1.00 },
+	config = { key = "hearth", page = "moments", label = L["Hearths"], order = 5 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 7, legend = { order = 8, size = 9 } },
+})
+
+DefineEvent(Kind.FLIGHT_START, {
+	name = L["Flight start"],
+	color = { 0.20, 0.90, 0.90 },
+	shape = "pair",
+	pairEnd = Kind.FLIGHT_END,
+	config = { key = "flight", page = "road", label = L["Flights"], order = 3 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.FLIGHT_END, {
+	name = L["Flight end"],
+	color = { 0.10, 0.55, 0.60 },
+	shape = "pairEnd",
+	pairStart = Kind.FLIGHT_START,
+	configKey = "flight",
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.MOUNT, {
+	name = L["Mounted"],
+	color = { 1.00, 0.55, 0.15 },
+	shape = "pair",
+	pairEnd = Kind.DISMOUNT,
+	config = { key = "mount", page = "road", label = L["Mount and dismount"], order = 2 },
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.DISMOUNT, {
+	name = L["Dismounted"],
+	color = { 0.60, 0.35, 0.15 },
+	shape = "pairEnd",
+	pairStart = Kind.MOUNT,
+	configKey = "mount",
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.AFK_START, {
+	name = L["AFK start"],
+	color = { 0.55, 0.55, 0.85 },
+	shape = "pair",
+	pairEnd = Kind.AFK_END,
+	config = { key = "afk", page = "road", label = L["AFK"], order = 5 },
+	pip = { shape = "circle", size = 7 },
+	playhead = "parked",
+	pause = { key = "afk", label = L["AFK"], order = 2, still = false },
+})
+
+DefineEvent(Kind.AFK_END, {
+	name = L["AFK end"],
+	color = { 0.35, 0.35, 0.55 },
+	shape = "pairEnd",
+	pairStart = Kind.AFK_START,
+	configKey = "afk",
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.INSTANCE_ENTER, {
+	name = L["Entered instance"],
+	color = { 1.00, 0.40, 0.70 },
+	shape = "pair",
+	pairEnd = Kind.INSTANCE_LEAVE,
+	config = { key = "instance", page = "moments", label = L["Dungeons and raids"], order = 9 },
+	keepsSession = true,
+	qualifiesCompany = true,
+	pip = { shape = "circle", size = 7, legend = { order = 13, size = 9 } },
+})
+
+DefineEvent(Kind.INSTANCE_LEAVE, {
+	name = L["Left instance"],
+	color = { 0.60, 0.25, 0.45 },
+	shape = "pairEnd",
+	pairStart = Kind.INSTANCE_ENTER,
+	configKey = "instance",
+	pip = { shape = "circle", size = 7 },
+})
+
+DefineEvent(Kind.ZONE, {
+	name = L["Zone"],
+	color = { 0.92, 0.92, 0.92 },
+	config = { key = "zone", page = "road", label = L["Zone changes"], order = 4 },
+	pip = false,
+})
+
+DefineEvent(Kind.LEVEL, {
+	name = L["Level up"],
+	color = { 1.00, 0.95, 0.55 },
+	keepsSession = true,
+	pip = {
+		shape = "ring",
+		size = 9,
+		color = { 1.00, 0.92, 0.45 },
+		milestone = true,
+		legend = { order = 5, size = 10 },
+	},
+})
+
+DefineEvent(Kind.GROUP, {
+	name = L["Joined Party"],
+	color = { 0.45, 0.75, 1.00 },
+	config = { key = "party", page = "moments", label = L["Party members"], order = 10 },
+	pip = { shape = "circle", size = 7, legend = { order = 7, size = 9 } },
+})
+
+DefineEvent(Kind.PORTAL, {
+	name = L["Teleport"],
+	color = { 0.20, 0.78, 0.95 },
+	config = { key = "portal", page = "moments", label = L["Teleports and portals"], order = 7 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 7, legend = { order = 9, size = 9 } },
+})
+
+DefineEvent(Kind.TRAINER, {
+	name = L["Trainer"],
+	color = { 0.78, 0.58, 0.28 },
+	config = { key = "trainer", page = "moments", label = L["Trainers"], order = 8 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 7, legend = { order = 12, size = 9 } },
+})
+
+DefineEvent(Kind.CAMP, {
+	name = L["Campfire"],
+	color = { 0.95, 0.45, 0.12 },
+	shape = "span",
+	config = { key = "rest", page = "road", label = L["Camps and sleeping bags"], order = 7 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 7, legend = { order = 10, size = 9 } },
+	playhead = "busy",
+	blocksAFK = true,
+	blocksIdle = true,
+	pause = { key = "camp", label = L["Camped"], order = 3, still = true },
+})
+
+DefineEvent(Kind.SLEEP, {
+	name = L["Sleeping bag"],
+	color = { 0.55, 0.62, 0.95 },
+	shape = "span",
+	configKey = "rest",
+	keepsSession = true,
+	pip = { shape = "circle", size = 7, legend = { order = 11, size = 9 } },
+	playhead = "busy",
+	blocksAFK = true,
+	blocksIdle = true,
+	pause = { key = "sleep", label = L["Slept"], order = 4, still = true },
+})
+
+DefineEvent(Kind.EAT, {
+	name = L["Eating"],
+	color = { 0.72, 0.58, 0.32 },
+	shape = "span",
+	pip = false,
+	playhead = "busy",
+	blocksAFK = true,
+	blocksIdle = true,
+	pause = { key = "eat", label = L["Eating"], order = 6, still = false },
+})
+
+DefineEvent(Kind.BOSS, {
+	name = L["Boss"],
+	color = { 1.00, 0.55, 0.20 },
+	configKey = "instance",
+	keepsSession = true,
+	qualifiesCompany = true,
+	pip = { shape = "ring", size = 9, milestone = true },
+})
+
+DefineEvent(Kind.FISH, {
+	name = L["Fishing"],
+	color = { 0.25, 0.55, 0.95 },
+	shape = "span",
+	config = { key = "fishing", page = "road", label = L["Fishing"], order = 8 },
+	keepsSession = true,
+	pip = { shape = "circle", size = 10, legend = { order = 6, size = 10 } },
+	playhead = "fish",
+	blocksAFK = true,
+	blocksIdle = true,
+	pause = { key = "fish", label = L["Fishing"], order = 5, still = false },
+})
+
+DefineEvent(Kind.IDLE, {
+	name = L["Idle"],
+	color = { 0.62, 0.62, 0.68 },
+	shape = "span",
+	config = { key = "idle", page = "road", label = L["Idle"], order = 6 },
+	pip = false,
+	playhead = "parked",
+	-- Idle splits across instance doors and subtracts from Where; Viz handles it explicitly.
+	pause = { key = "idle", label = L["Idle"], order = 1, still = false, custom = true },
+})
+
+DefineEvent(Kind.CRAFT, {
+	name = L["Crafting"],
+	color = { 0.90, 0.72, 0.28 },
+	shape = "span",
+	config = { key = "crafting", page = "road", label = L["Crafting"], order = 9 },
+	keepsSession = true,
+	pip = false,
+	playhead = "busy",
+	blocksAFK = true,
+	blocksIdle = true,
+	pause = { key = "craft", label = L["Crafting"], order = 7, still = false },
+})
+
+-- Ordered lists derived once from ns.EventSpec for Config, Replay, and Viz.
+ns.PauseSpecs = {}
+ns.LegendSpecs = {}
+for _, spec in pairs(ns.EventSpec) do
+	if spec.pause then
+		ns.PauseSpecs[#ns.PauseSpecs + 1] = spec
+	end
+	if spec.pip and spec.pip.legend then
+		ns.LegendSpecs[#ns.LegendSpecs + 1] = spec
+	end
+end
+
+table.sort(ns.PauseSpecs, function(a, b)
+	local ao, bo = a.pause.order or 999, b.pause.order or 999
+	if ao ~= bo then
+		return ao < bo
+	end
+	return a.kind < b.kind
+end)
+
+table.sort(ns.LegendSpecs, function(a, b)
+	local ao, bo = a.pip.legend.order or 999, b.pip.legend.order or 999
+	if ao ~= bo then
+		return ao < bo
+	end
+	return a.kind < b.kind
+end)
 
 -- Class file from UnitClass. Stored once per person, not on every path event.
 ns.ClassName = {

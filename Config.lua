@@ -6,72 +6,47 @@ ns.Config = {}
 -- Minutes of trail shown on the map while glancing. 0 is the whole history.
 ns.Config.GLANCE_STOPS = { 5, 10, 15, 20, 30, 45, 60, 0 }
 
-local TRACK_DEFAULTS = {
-	path = true,
-	kills = true,
-	questAccept = true,
-	questTurnin = true,
-	death = true,
-	summon = true,
-	hearth = true,
-	portal = true,
-	trainer = true,
-	flight = true,
-	mount = true,
-	afk = true,
-	idle = true,
-	rest = true,
-	fishing = true,
-	instance = true,
-	zone = true,
-	party = true,
+local TRACK_DEFAULTS = { path = true }
+local KIND_KEY = {}
+local TRACKS = {}
+local ROAD = {
+	{ key = "path", label = L["Movement"], order = 1 },
 }
+local MOMENTS = {}
 
-local KIND_KEY = {
-	[ns.Kind.KILL] = "kills",
-	[ns.Kind.QUEST_ACCEPT] = "questAccept",
-	[ns.Kind.QUEST_TURNIN] = "questTurnin",
-	[ns.Kind.DEATH] = "death",
-	[ns.Kind.SUMMON] = "summon",
-	[ns.Kind.HEARTH] = "hearth",
-	[ns.Kind.PORTAL] = "portal",
-	[ns.Kind.TRAINER] = "trainer",
-	[ns.Kind.CAMP] = "rest",
-	[ns.Kind.SLEEP] = "rest",
-	[ns.Kind.FISH] = "fishing",
-	[ns.Kind.FLIGHT_START] = "flight",
-	[ns.Kind.FLIGHT_END] = "flight",
-	[ns.Kind.MOUNT] = "mount",
-	[ns.Kind.DISMOUNT] = "mount",
-	[ns.Kind.AFK_START] = "afk",
-	[ns.Kind.AFK_END] = "afk",
-	[ns.Kind.IDLE] = "idle",
-	[ns.Kind.INSTANCE_ENTER] = "instance",
-	[ns.Kind.INSTANCE_LEAVE] = "instance",
-	[ns.Kind.BOSS] = "instance",
-	[ns.Kind.ZONE] = "zone",
-	[ns.Kind.GROUP] = "party",
-}
-
-local TRACKS = {
-	{ key = "kills", label = "Kills" },
-	{ key = "questAccept", label = "Quest pickups" },
-	{ key = "questTurnin", label = "Quest turn-ins" },
-	{ key = "death", label = "Deaths" },
-	{ key = "summon", label = "Summons" },
-	{ key = "hearth", label = "Hearths" },
-	{ key = "portal", label = "Teleports and portals" },
-	{ key = "trainer", label = "Trainers" },
-	{ key = "flight", label = "Flights" },
-	{ key = "mount", label = "Mount and dismount" },
-	{ key = "afk", label = "AFK" },
-	{ key = "idle", label = "Idle" },
-	{ key = "rest", label = "Camps and sleeping bags" },
-	{ key = "fishing", label = "Fishing" },
-	{ key = "instance", label = "Dungeons and raids" },
-	{ key = "party", label = "Party members" },
-	{ key = "zone", label = "Zone changes" },
-}
+do
+	local seen = {}
+	for kind, spec in pairs(ns.EventSpec or {}) do
+		local key = (spec.config and spec.config.key) or spec.configKey
+		if key then
+			KIND_KEY[kind] = key
+			TRACK_DEFAULTS[key] = true
+		end
+		if spec.config and spec.config.key and not seen[spec.config.key] then
+			seen[spec.config.key] = true
+			local entry = {
+				key = spec.config.key,
+				label = spec.config.label or spec.name,
+				order = spec.config.order or 999,
+				kind = kind,
+			}
+			TRACKS[#TRACKS + 1] = entry
+			if spec.config.page == "road" then
+				ROAD[#ROAD + 1] = entry
+			elseif spec.config.page == "moments" then
+				MOMENTS[#MOMENTS + 1] = entry
+			end
+		end
+	end
+	local function byOrder(a, b)
+		if (a.order or 999) ~= (b.order or 999) then
+			return (a.order or 999) < (b.order or 999)
+		end
+		return (a.kind or 0) < (b.kind or 0)
+	end
+	table.sort(ROAD, byOrder)
+	table.sort(MOMENTS, byOrder)
+end
 
 function ns.Config:ClampMinutes(value)
 	value = math.floor((tonumber(value) or 60) + 0.5)
@@ -340,30 +315,6 @@ local PAGES = {
 	{ key = "road", label = L["The road"] },
 	{ key = "moments", label = L["Moments"] },
 	{ key = "saved", label = L["Saved data"] },
-}
-
-local ROAD = {
-	{ key = "path", label = L["Movement"] },
-	{ key = "mount", label = L["Mount and dismount"] },
-	{ key = "flight", label = L["Flights"] },
-	{ key = "zone", label = L["Zone changes"] },
-	{ key = "afk", label = L["AFK"] },
-	{ key = "idle", label = L["Idle"] },
-	{ key = "rest", label = L["Camps and sleeping bags"] },
-	{ key = "fishing", label = L["Fishing"] },
-}
-
-local MOMENTS = {
-	{ key = "kills", label = L["Kills"] },
-	{ key = "questAccept", label = L["Quest pickup"] },
-	{ key = "questTurnin", label = L["Quest turn-in"] },
-	{ key = "death", label = L["Deaths"] },
-	{ key = "hearth", label = L["Hearths"] },
-	{ key = "summon", label = L["Summons"] },
-	{ key = "portal", label = L["Teleports and portals"] },
-	{ key = "trainer", label = L["Trainers"] },
-	{ key = "instance", label = L["Dungeons and raids"] },
-	{ key = "party", label = L["Party members"] },
 }
 
 local function AddCheck(parent, name, label)
