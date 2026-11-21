@@ -75,12 +75,23 @@ local function Bounds(sessions)
 	local points = 0
 	for s = 1, #sessions do
 		local session = sessions[s]
-		local track = ns.DB:Track(session)
-		local n = #track.t
+		local track = ns.DB:LoadedTrack(session)
+		local n, first, last
+		if track then
+			n = #(track.t or {})
+			if n > 0 then
+				first = session.s + track.t[1]
+				last = session.s + track.t[n]
+			end
+		else
+			n = ns.DB:TrackCounts(session)
+			if n > 0 then
+				first = session.s
+				last = session.seen or session.s
+			end
+		end
 		points = points + n
-		if n > 0 then
-			local first = session.s + track.t[1]
-			local last = session.s + track.t[n]
+		if first then
 			if not t0 or first < t0 then
 				t0 = first
 			end
@@ -167,15 +178,25 @@ function ns.Replay:Project(mapID, x, y)
 	if mapID == view then
 		return x, y
 	end
-	local minX, maxX, minY, maxY = C_Map.GetMapRectOnMap(mapID, view)
-	if not minX or not maxX or not minY or not maxY then
+	if self.rectCacheView ~= view then
+		self.rectCacheView = view
+		self.rectCache = {}
+	end
+	local rect = self.rectCache[mapID]
+	if rect == nil then
+		local minX, maxX, minY, maxY = C_Map.GetMapRectOnMap(mapID, view)
+		if minX and maxX and minY and maxY and maxX > minX and maxY > minY then
+			rect = { minX, maxX - minX, minY, maxY - minY }
+		else
+			rect = false
+		end
+		self.rectCache[mapID] = rect
+	end
+	if not rect then
 		return nil
 	end
-	if maxX <= minX or maxY <= minY then
-		return nil
-	end
-	local px = minX + (x * (maxX - minX))
-	local py = minY + (y * (maxY - minY))
+	local px = rect[1] + (x * rect[2])
+	local py = rect[3] + (y * rect[4])
 	if px < -0.02 or px > 1.02 or py < -0.02 or py > 1.02 then
 		return nil
 	end
@@ -222,8 +243,8 @@ function ns.Replay:EnsurePools()
 	end
 end
 
-function ns.Replay:AcquireLine()
-	local layer = self:PathLayer()
+function ns.Replay:AcquireLine(layer)
+	layer = layer or self:PathLayer()
 	if not layer then
 		return nil
 	end
@@ -271,11 +292,19 @@ function ns.Replay:LineLook(mode, speed)
 end
 
 function ns.Replay:InferModes(track)
+	local n = #track.t
+	local eventCount = track.ek and #track.ek or 0
+	if not self.inferredModes then
+		self.inferredModes = setmetatable({}, { __mode = "k" })
+	end
+	local cached = self.inferredModes[track]
+	if cached and cached.n == n and cached.ev == eventCount then
+		return cached.modes
+	end
 	local modes = {}
 	local taxi, mounted = false, false
 	local eventIndex = 1
-	local eventCount = track.ek and #track.ek or 0
-	for i = 1, #track.t do
+	for i = 1, n do
 		local at = track.t[i]
 		while eventIndex <= eventCount and (track.et[eventIndex] or 0) <= at do
 			local kind = track.ek[eventIndex]
@@ -298,13 +327,14 @@ function ns.Replay:InferModes(track)
 			modes[i] = ns.Travel.FOOT
 		end
 	end
+	self.inferredModes[track] = { n = n, ev = eventCount, modes = modes }
 	return modes
 end
 
-function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha)
+function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha, width, height, scale)
 	local parent = line:GetParent()
-	local width = parent and parent:GetWidth()
-	local height = parent and parent:GetHeight()
+	width = width or (parent and parent:GetWidth())
+	height = height or (parent and parent:GetHeight())
 	if not width or width <= 0 or not height or height <= 0 then
 		line:Hide()
 		return false
@@ -317,8 +347,10 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha)
 		line:Hide()
 		return false
 	end
-	local canvas = self:Canvas()
-	local scale = (canvas and canvas:GetScale()) or 1
+	if not scale then
+		local canvas = self:Canvas()
+		scale = (canvas and canvas:GetScale()) or 1
+	end
 	if scale < 0.05 then
 		scale = 0.05
 	end
@@ -557,12 +589,19 @@ function ns.Replay:BreakTimes(sessions)
 	return times
 end
 
-function ns.Replay:CollectPath(sessions, minDist)
-	local oldest, newest = self:TrailSpan()
-	local breakTimes = self:BreakTimes(sessions)
+function ns.Replay:CollectPath(sessions, minDist, oldest, newest, breakTimes, instanceSpans, cap)
+	if oldest == nil and newest == nil then
+		oldest, newest = self:TrailSpan()
+	end
+	breakTimes = breakTimes or self:BreakTimes(sessions)
 	local breakIndex = 1
-	local instanceSpans = self:InstanceSpans(sessions)
-	local xs, ys, brk, modes, speeds, times, maps = {}, {}, {}, {}, {}, {}, {}
+	instanceSpans = instanceSpans or self:InstanceSpans(sessions)
+	local buf = self.pathBuf
+	if not buf then
+		buf = { xs = {}, ys = {}, brk = {}, modes = {}, speeds = {}, times = {}, maps = {} }
+		self.pathBuf = buf
+	end
+	local xs, ys, brk, modes, speeds, times, maps = buf.xs, buf.ys, buf.brk, buf.modes, buf.speeds, buf.times, buf.maps
 	local n = 0
 	local prevT
 	local lastX, lastY, lastMode
@@ -626,6 +665,9 @@ function ns.Replay:CollectPath(sessions, minDist)
 							brk[n] = (not open) or crosses
 							lastX, lastY, lastMode = px, py, mode
 							open = true
+							if cap and n > cap then
+								return xs, ys, brk, modes, speeds, times, maps, n
+							end
 						end
 					end
 					prevT = t
@@ -805,19 +847,57 @@ function ns.Replay:TrailSpan()
 	return oldest, nowT
 end
 
-function ns.Replay:SegmentFade(older)
+function ns.Replay:FadeContext()
 	local nowT = self:TrailNow()
+	local window = self:TrailWindow()
+	local ctx = self.fadeCtx
+	if not ctx then
+		ctx = {}
+		self.fadeCtx = ctx
+	end
+	ctx.nowT = nowT
+	ctx.window = window
+	if window then
+		ctx.fade = math.min(45, math.max(10, window * 0.12))
+		local usingReplay = self:UsingReplayTrail() and true or false
+		ctx.usingReplay = usingReplay
+		if usingReplay then
+			local pieces = self:PlayPieces()
+			ctx.pieces = pieces
+			ctx.nowPlayed = self:PlayedAt(nowT, pieces)
+		else
+			ctx.pieces = nil
+			ctx.nowPlayed = nil
+		end
+	else
+		ctx.fade = nil
+		ctx.usingReplay = false
+		ctx.pieces = nil
+		ctx.nowPlayed = nil
+	end
+	return ctx
+end
+
+function ns.Replay:SegmentFade(older, ctx)
+	local nowT = ctx and ctx.nowT or self:TrailNow()
 	-- A ding mark can land a tick past the playhead float; keep it if it is the tip.
 	if not older or older > nowT + 1.5 then
 		return 0
 	end
-	local window = self:TrailWindow()
+	local window = ctx and ctx.window
+	if not ctx then
+		window = self:TrailWindow()
+	end
 	if not window then
 		return 1
 	end
 	local age
-	if self:UsingReplayTrail() then
-		age = self:PlayedAt(nowT) - self:PlayedAt(math.min(older, nowT))
+	local usingReplay = ctx and ctx.usingReplay or (not ctx and self:UsingReplayTrail())
+	if usingReplay then
+		local pieces = ctx and ctx.pieces or self:PlayPieces()
+		local nowPlayed = (ctx and ctx.nowPlayed) or self:PlayedAt(nowT, pieces)
+		local olderPlayed = self:PlayedAt(older < nowT and older or nowT, pieces)
+		age = nowPlayed - olderPlayed
 		if age < 0 then
 			age = 0
 		end
@@ -827,7 +907,7 @@ function ns.Replay:SegmentFade(older)
 	if age <= window then
 		return 1
 	end
-	local fade = math.min(45, math.max(10, window * 0.12))
+	local fade = (ctx and ctx.fade) or math.min(45, math.max(10, window * 0.12))
 	if age >= window + fade then
 		return 0
 	end
@@ -835,12 +915,13 @@ function ns.Replay:SegmentFade(older)
 end
 
 function ns.Replay:RefreshTrailFade()
+	local ctx = self:FadeContext()
 	local count = self.segmentCount or 0
 	for i = 1, count do
 		local seg = self.segments[i]
 		local line = seg and seg.line
 		if line then
-			local fade = self:SegmentFade(seg.t1)
+			local fade = self:SegmentFade(seg.t1, ctx)
 			local r, g, b, a = self:LineLook(seg.mode, seg.speed)
 			a = (a or 0.9) * fade
 			if not seg.placed or a < 0.03 then
@@ -853,7 +934,7 @@ function ns.Replay:RefreshTrailFade()
 	end
 	for i = 1, self.markerUsed or 0 do
 		local marker = self.markers[i]
-		local fade = self:SegmentFade(marker.when)
+		local fade = self:SegmentFade(marker.when, ctx)
 		if fade < 0.03 then
 			marker:Hide()
 		else
@@ -864,10 +945,15 @@ function ns.Replay:RefreshTrailFade()
 end
 
 function ns.Replay:DrawPath(sessions)
+	local oldest, newest = self:TrailSpan()
+	local breakTimes = self:BreakTimes(sessions)
+	local instanceSpans = self:InstanceSpans(sessions)
 	local minDist = 0.0015
 	local xs, ys, brk, modes, speeds, times, maps, n
-	for _ = 1, 5 do
-		xs, ys, brk, modes, speeds, times, maps, n = self:CollectPath(sessions, minDist)
+	for attempt = 1, 5 do
+		xs, ys, brk, modes, speeds, times, maps, n = self:CollectPath(
+			sessions, minDist, oldest, newest, breakTimes, instanceSpans, attempt < 5 and LINE_CAP or nil
+		)
 		if n <= LINE_CAP then
 			break
 		end
@@ -875,18 +961,23 @@ function ns.Replay:DrawPath(sessions)
 	end
 	self.lineUsed = 0
 	self.segmentCount = 0
+	self.hoverGen = (self.hoverGen or 0) + 1
 	local canvas = self:Canvas()
-	if not canvas or canvas:GetWidth() <= 0 or not self:PathLayer() then
+	local layer = canvas and canvas:GetWidth() > 0 and self:PathLayer() or nil
+	if not layer then
 		self:HideSpareLines()
 		return
 	end
+	local width, height = layer:GetWidth(), layer:GetHeight()
+	local scale = (canvas and canvas:GetScale()) or 1
+	local ctx = self:FadeContext()
 	self.segments = self.segments or {}
 	for i = 2, n do
 		if not brk[i] then
-			local line = self:AcquireLine()
+			local line = self:AcquireLine(layer)
 			if line then
-				local fade = self:SegmentFade(times[i - 1])
-				local placed = self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i], fade)
+				local fade = self:SegmentFade(times[i - 1], ctx)
+				local placed = self:PlaceLine(line, xs[i - 1], ys[i - 1], xs[i], ys[i], modes[i], speeds[i], fade, width, height, scale)
 				self.segmentCount = self.segmentCount + 1
 				local seg = self.segments[self.segmentCount]
 				if not seg then
@@ -944,6 +1035,10 @@ function ns.Replay:DrawMarkers(sessions)
 		self:HideSpareMarkers()
 		return
 	end
+	local mapHost = ns.Map:Use()
+	local baseLevel = mapHost:OverlayLevel(canvas)
+	local oldest, newest = self:TrailSpan()
+	local ctx = self:FadeContext()
 	local fishCluster = {}
 	local tipFishing = self:PlayheadStance() == "fish"
 	local tipMap, tipX, tipY = self:PlayheadPlace()
@@ -954,64 +1049,72 @@ function ns.Replay:DrawMarkers(sessions)
 				break
 			end
 			local session = sessions[s]
-			local track = ns.DB:Track(session)
-			for i = #track.ek, 1, -1 do
-				if shown >= cap then
-					break
-				end
-				local kind = track.ek[i]
-				local spec = ns.EventSpec and ns.EventSpec[kind]
-				local isKill = kind == Kind.KILL
-				local when = session.s + (track.et[i] or 0)
-				local spanEnd = spec and spec.shape == "span" and track.ea[i] == 1
-				local shortRest = (kind == Kind.CAMP or kind == Kind.SLEEP)
-					and not spanEnd
-					and not self:RestStartWorthDrawing(track, i, session.s)
-				-- Level bounds and the ding mark share a timestamp; allow a 1.5s
-				-- pad so the finishing level-up pip is not clipped off the end.
-				local outside = self.mode == "level" and self.t0
-					and (when < self.t0 - 1.5 or when > ((self.t1 or when) + 1.5))
-				if isKill == wantKill and spec and spec.pip and not spanEnd and not shortRest and not outside and self:SegmentFade(when) > 0 then
-					local mapID = track.em[i]
-					local nx = track.ex[i] / ns.COORD_SCALE
-					local ny = track.ey[i] / ns.COORD_SCALE
-					local skipFish = false
-					if kind == Kind.FISH then
-						-- Tip already shows fishing; skip the pip underfoot.
-						if tipFishing and tipMap and mapID == tipMap
-							and tipX and tipY
-							and self:YardsApart(mapID, nx, ny, tipX, tipY) <= FISH_DEDUP_YARDS then
-							skipFish = true
-						elseif self:FishNearCluster(fishCluster, mapID, nx, ny) then
-							skipFish = true
-						else
-							fishCluster[#fishCluster + 1] = { mapID = mapID, x = nx, y = ny }
-						end
+			local sessStart = session.s or 0
+			local sessStop = ns.DB:SessionStop(session) or sessStart
+			if (not oldest or sessStop >= oldest - 2) and (not newest or sessStart <= newest + 2) then
+				local track = ns.DB:Track(session)
+				for i = #track.ek, 1, -1 do
+					if shown >= cap then
+						break
 					end
-					if not skipFish then
-						local px, py = self:Project(mapID, nx, ny)
-						if px then
-							shown = shown + 1
-							local marker = self:AcquireMarker()
-							local size = self:PaintMarker(marker, kind, track.ea[i])
-							marker:SetAlpha(self:SegmentFade(when))
-							ns.Map:Use():FitPin(marker, size)
-							marker.kind = kind
-							marker.extra = track.ea[i]
-							marker.mapID = mapID
-							marker.when = when
-							marker.session = session
-							ns.Map:Use():Place(marker, px, py)
-							-- Level/death/boss sit above the class tip (+15) so the
-							-- finishing ding ring is not covered at the playhead.
-							local bump = 5
-							if marker.milestone then
-								bump = 18
-							elseif isKill then
-								bump = 3
+					local kind = track.ek[i]
+					local isKill = kind == Kind.KILL
+					if isKill == wantKill then
+						local spec = ns.EventSpec and ns.EventSpec[kind]
+						local when = sessStart + (track.et[i] or 0)
+						local spanEnd = spec and spec.shape == "span" and track.ea[i] == 1
+						local outside = self.mode == "level" and self.t0
+							and (when < self.t0 - 1.5 or when > ((self.t1 or when) + 1.5))
+						if spec and spec.pip and not spanEnd and not outside then
+							local fade = self:SegmentFade(when, ctx)
+							if fade > 0 then
+								local shortRest = (kind == Kind.CAMP or kind == Kind.SLEEP)
+									and not self:RestStartWorthDrawing(track, i, sessStart)
+								if not shortRest then
+									local mapID = track.em[i]
+									local nx = track.ex[i] / ns.COORD_SCALE
+									local ny = track.ey[i] / ns.COORD_SCALE
+									local skipFish = false
+									if kind == Kind.FISH then
+										-- Tip already shows fishing; skip the pip underfoot.
+										if tipFishing and tipMap and mapID == tipMap
+											and tipX and tipY
+											and self:YardsApart(mapID, nx, ny, tipX, tipY) <= FISH_DEDUP_YARDS then
+											skipFish = true
+										elseif self:FishNearCluster(fishCluster, mapID, nx, ny) then
+											skipFish = true
+										else
+											fishCluster[#fishCluster + 1] = { mapID = mapID, x = nx, y = ny }
+										end
+									end
+									if not skipFish then
+										local px, py = self:Project(mapID, nx, ny)
+										if px then
+											shown = shown + 1
+											local marker = self:AcquireMarker()
+											local size = self:PaintMarker(marker, kind, track.ea[i])
+											marker:SetAlpha(fade)
+											mapHost:FitPin(marker, size)
+											marker.kind = kind
+											marker.extra = track.ea[i]
+											marker.mapID = mapID
+											marker.when = when
+											marker.session = session
+											mapHost:Place(marker, px, py)
+											-- Level/death/boss sit above the class tip (+15) so the
+											-- finishing ding ring is not covered at the playhead.
+											local bump = 5
+											if marker.milestone then
+												bump = 18
+											elseif isKill then
+												bump = 3
+											end
+											marker:SetFrameLevel(baseLevel + bump)
+											marker:Show()
+										end
+									end
+								end
 							end
-							marker:SetFrameLevel(ns.Map:Use():OverlayLevel(canvas) + bump)
-							marker:Show()
 						end
 					end
 				end
@@ -1311,29 +1414,28 @@ function ns.Replay:RestStillSeconds(track, modes, sessionStart, fromT, toT)
 	local scale = ns.COORD_SCALE
 	local travel = 0
 	local lastI
-	for i = 1, #track.t do
+	local startI = FirstIndexAtOrAfter(track.t, sessionStart, fromT)
+	for i = startI, #track.t do
 		local at = sessionStart + (track.t[i] or 0)
 		if at > toT then
 			break
 		end
-		if at >= fromT then
-			local mode = modes and modes[i]
-			if mode and mode ~= ns.Travel.FOOT then
+		local mode = modes and modes[i]
+		if mode and mode ~= ns.Travel.FOOT then
+			return 0
+		end
+		if lastI then
+			if track.m[i] ~= track.m[lastI] then
 				return 0
 			end
-			if lastI then
-				if track.m[i] ~= track.m[lastI] then
-					return 0
-				end
-				local dx = ((track.x[i] or 0) - (track.x[lastI] or 0)) / scale
-				local dy = ((track.y[i] or 0) - (track.y[lastI] or 0)) / scale
-				travel = travel + math.sqrt((dx * dx) + (dy * dy))
-				if travel > REST_STILL then
-					return 0
-				end
+			local dx = ((track.x[i] or 0) - (track.x[lastI] or 0)) / scale
+			local dy = ((track.y[i] or 0) - (track.y[lastI] or 0)) / scale
+			travel = travel + math.sqrt((dx * dx) + (dy * dy))
+			if travel > REST_STILL then
+				return 0
 			end
-			lastI = i
 		end
+		lastI = i
 	end
 	return toT - fromT
 end
@@ -1602,10 +1704,17 @@ function ns.Replay:PlaceName(mapID)
 	if not mapID or mapID == 0 or not C_Map or not C_Map.GetMapInfo then
 		return nil
 	end
+	self.placeNames = self.placeNames or {}
+	local cached = self.placeNames[mapID]
+	if cached ~= nil then
+		return cached or nil
+	end
 	local info = C_Map.GetMapInfo(mapID)
 	if info and type(info.name) == "string" and not (issecretvalue and issecretvalue(info.name)) and info.name ~= "" then
+		self.placeNames[mapID] = info.name
 		return info.name
 	end
+	self.placeNames[mapID] = false
 	return nil
 end
 
@@ -1825,7 +1934,10 @@ function ns.Replay:PaintUnitCompany(tooltip)
 		return
 	end
 	local journey = ns.DB.record or ns.DB.char
-	local person = journey and ns.DB:CompanyByGuid(journey, guid)
+	if not journey or type(journey.with) ~= "table" or not journey.with[guid] then
+		return
+	end
+	local person = ns.DB:CompanyByGuid(journey, guid)
 	if not person then
 		return
 	end
@@ -2081,20 +2193,31 @@ end
 
 function ns.Replay:StatsKey(sessions)
 	local parts = { tostring(#sessions) }
+	local current = ns.DB.session
+	local hasLive = false
 	for i = 1, #sessions do
 		local session = sessions[i]
-		local track = ns.DB:Track(session)
+		local pts, evs = ns.DB:TrackCounts(session)
+		local seen = session.seen or 0
+		if session == current then
+			hasLive = true
+			seen = math.floor(seen / 10)
+		end
 		parts[#parts + 1] = string.format(
 			"%s.%s.%s.%s.%s.%s.%s.%s",
 			session.id or i,
-			session.seen or 0,
+			seen,
 			session.kills or 0,
 			session.quests or 0,
 			session.el or 0,
 			session.ex or 0,
-			#track.t,
-			#(track.ek or {})
+			pts,
+			evs
 		)
+	end
+	local t1Key = self.t1 or ""
+	if hasLive and type(self.t1) == "number" then
+		t1Key = math.floor(self.t1 / 10)
 	end
 	parts[#parts + 1] = string.format(
 		"%s.%s.%s.%s.%s",
@@ -2102,7 +2225,7 @@ function ns.Replay:StatsKey(sessions)
 		self.levelLo or "",
 		self.levelHi or "",
 		self.t0 or "",
-		self.t1 or ""
+		t1Key
 	)
 	local with = ns.DB.char and ns.DB.char.with
 	local spans = 0
@@ -2114,6 +2237,17 @@ function ns.Replay:StatsKey(sessions)
 		end
 	end
 	parts[#parts + 1] = "c" .. spans
+	return table.concat(parts, ":")
+end
+
+function ns.Replay:ChapterKey(sessions)
+	local parts = { tostring(#sessions) }
+	for i = 1, #sessions do
+		local session = sessions[i]
+		local pts, evs = ns.DB:TrackCounts(session)
+		parts[#parts + 1] = string.format("%s.%s.%s", session.id or i, pts, evs)
+	end
+	parts[#parts + 1] = string.format("%s.%s.%s.%s", self.mode or "", self.levelLo or "", self.levelHi or "", self.t0 or "")
 	return table.concat(parts, ":")
 end
 
@@ -2422,6 +2556,24 @@ local function MergePieces(pieces)
 end
 
 function ns.Replay:PlayPieces()
+	local sessions = self.sessions or {}
+	local count = #sessions
+	local first = sessions[1]
+	local last = sessions[count]
+	local now = ns.DB:Now()
+	if self.playPieces
+		and self.playPiecesChar == ns.DB.char
+		and self.playPiecesMode == self.mode
+		and self.playPiecesLo == self.levelLo
+		and self.playPiecesHi == self.levelHi
+		and self.playPiecesT0 == self.t0
+		and self.playPiecesT1 == self.t1
+		and self.playPiecesCount == count
+		and self.playPiecesFirst == first
+		and self.playPiecesLast == last
+		and self.playPiecesNow == now then
+		return self.playPieces
+	end
 	local pieces = {}
 	if self.mode == "level" and self.levelLo then
 		local spans = ns.DB:LevelSpans(ns.DB.char)
@@ -2437,8 +2589,7 @@ function ns.Replay:PlayPieces()
 			end
 		end
 	else
-		local sessions = self.sessions or {}
-		for i = 1, #sessions do
+		for i = 1, count do
 			local session = sessions[i]
 			if type(session) == "table" and type(session.s) == "number" then
 				local stop = ns.DB:SessionStop(session) or session.s
@@ -2452,11 +2603,22 @@ function ns.Replay:PlayPieces()
 	if #pieces == 0 and self.t0 and self.t1 and self.t1 > self.t0 then
 		pieces[1] = { t0 = self.t0, t1 = self.t1 }
 	end
+	self.playPieces = pieces
+	self.playPiecesChar = ns.DB.char
+	self.playPiecesMode = self.mode
+	self.playPiecesLo = self.levelLo
+	self.playPiecesHi = self.levelHi
+	self.playPiecesT0 = self.t0
+	self.playPiecesT1 = self.t1
+	self.playPiecesCount = count
+	self.playPiecesFirst = first
+	self.playPiecesLast = last
+	self.playPiecesNow = now
 	return pieces
 end
 
-function ns.Replay:PlayedAt(when)
-	local pieces = self:PlayPieces()
+function ns.Replay:PlayedAt(when, pieces)
+	pieces = pieces or self:PlayPieces()
 	local total, elapsed = 0, 0
 	when = when or 0
 	for i = 1, #pieces do
@@ -3091,7 +3253,7 @@ function ns.Replay:SyncChapters()
 		return
 	end
 	local sessions = self.sessions or {}
-	local key = self:StatsKey(sessions)
+	local key = self:ChapterKey(sessions)
 	local width = self.scrub and self.scrub:GetWidth() or 0
 	if key ~= self.chapterKey then
 		self.chapterKey = key
@@ -3345,6 +3507,11 @@ function ns.Replay:HoverPath()
 		return
 	end
 	local rawX, rawY = GetCursorPosition()
+	local hoverGen = self.hoverGen or 0
+	if rawX == self.hoverX and rawY == self.hoverY and hoverGen == self.lastHoverGen then
+		return
+	end
+	self.hoverX, self.hoverY, self.lastHoverGen = rawX, rawY, hoverGen
 	local cx, cy = rawX / scale, rawY / scale
 	if cx < left or cx > right or cy > top or cy < bottom then
 		self:HidePathTip()
@@ -3388,9 +3555,9 @@ function ns.Replay:HoverPath()
 	GameTooltip:SetOwner(layer, "ANCHOR_CURSOR")
 	GameTooltip:ClearLines()
 	GameTooltip:AddLine(date("%b %d, %H:%M", when), 1, 0.86, 0.45)
-	local info = best.map and C_Map.GetMapInfo(best.map)
-	if info and info.name then
-		GameTooltip:AddLine(info.name, 1, 1, 1)
+	local mapName = best.map and self:PlaceName(best.map)
+	if mapName then
+		GameTooltip:AddLine(mapName, 1, 1, 1)
 	end
 	if best.mode == ns.Travel.GHOST then
 		GameTooltip:AddLine(L["Ghost"], 0.7, 0.7, 0.74)
@@ -3409,6 +3576,7 @@ function ns.Replay:ClearOverlay()
 	self.lineUsed = 0
 	self.markerUsed = 0
 	self.segmentCount = 0
+	self.hoverGen = (self.hoverGen or 0) + 1
 	self:HidePathTip()
 	if self.lines then
 		self:HideSpareLines()
@@ -3517,11 +3685,17 @@ function ns.Replay:OnDataChanged()
 		end
 		return
 	end
+	local mapShown = WorldMapFrame and WorldMapFrame:IsShown()
+	local panelShown = self.frame and self.frame:IsShown()
+	if not mapShown and not panelShown then
+		self.dirty = true
+		return
+	end
 	if not self.route then
 		self.dirty = true
 		return
 	end
-	if self.frame and self.frame:IsShown() and self.mode ~= "current" and self.mode ~= "all" and self.mode ~= "span" then
+	if panelShown and self.mode ~= "current" and self.mode ~= "all" and self.mode ~= "span" then
 		self.dirty = true
 		return
 	end
@@ -3757,6 +3931,29 @@ end
 
 function ns.Replay:RefreshLevelList()
 	local content = self.listContent
+	local journey = ns.DB.char
+	local sessions = journey and journey.sessions or {}
+	local levels = journey and journey.levels or {}
+	local last = sessions[#sessions]
+	local bucket = 0
+	if last and last == ns.DB.session then
+		bucket = math.floor(ns.DB:Now() / 5)
+	end
+	local listKey = string.format(
+		"%s:%d:%d:%s:%s:%s:%d:%s",
+		tostring(ns.DB.viewKey or ""),
+		#sessions,
+		#levels,
+		tostring(self.levelLo or ""),
+		tostring(self.levelHi or ""),
+		tostring(self.blockedKey or ""),
+		bucket,
+		tostring(last and last.el or "")
+	)
+	if listKey == self.levelListKey then
+		return
+	end
+	self.levelListKey = listKey
 	local groups = self:LevelGroups()
 	for i = 1, #groups do
 		local group = groups[i]
@@ -3858,6 +4055,7 @@ function ns.Replay:RefreshList()
 		self:RefreshLevelList()
 		return
 	end
+	self.levelListKey = nil
 	local sessions = ns.DB:Sessions()
 	if self.charButton then
 		if self.blockedKey and self.blockedLabel then
@@ -4132,6 +4330,8 @@ function ns.Replay:OnUpdate(_, elapsed)
 	local trailWait = 0.25 / math.max(self.speed or 1, 1)
 	if trailWait > 0.05 then
 		trailWait = 0.05
+	elseif trailWait < 0.03 then
+		trailWait = 0.03
 	end
 	if self.trailDirty and (GetTime() - (self.lastTrailRedraw or 0)) >= trailWait then
 		self.lastTrailRedraw = GetTime()
