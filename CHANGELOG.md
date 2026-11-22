@@ -6,6 +6,10 @@
 
 - Crafting is its own activity: cast-bar tradeskill time is recorded for the Pauses chart, kept out of AFK and idle, and left off the map (no pips).
 
+### Changed
+
+- The open session in the replay list is labeled Current instead of its start date.
+
 ### Fixed
 
 - Login, `/zip status`, party pruning, and party tooltips read packed history instead of unpacking every session into memory.

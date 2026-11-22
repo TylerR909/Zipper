@@ -4121,7 +4121,8 @@ function ns.Replay:RefreshList()
 			selected = session == ns.DB:Current()
 		end
 		local gained = ns.DB:LevelsGained(session)
-		row.label:SetText(string.format(L["%s    %s    +%.2f lv    %d kills"], date("%m/%d %H:%M", session.s), FormatClock(duration), gained, session.kills or 0))
+		local when = session == ns.DB:Current() and L["Current"] or date("%m/%d %H:%M", session.s)
+		row.label:SetText(string.format(L["%s    %s    +%.2f lv    %d kills"], when, FormatClock(duration), gained, session.kills or 0))
 		row.bar:SetShown(selected)
 		if selected then
 			row.label:SetTextColor(1, 0.86, 0.45)
