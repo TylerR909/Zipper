@@ -240,7 +240,19 @@ function ns.Social:ZoneFor(zones, name)
 	if zones[name] then
 		return zones[name]
 	end
+	-- Forever folders use First-Last; display names use "First Last".
+	local spaced = name:gsub("-", " ")
+	local dashed = name:gsub(" ", "-")
+	if spaced ~= name and zones[spaced] then
+		return zones[spaced]
+	end
+	if dashed ~= name and zones[dashed] then
+		return zones[dashed]
+	end
 	local bare = name:match("^[^-]+")
+	if bare then
+		bare = bare:match("^(%S+)") or bare
+	end
 	if bare and zones[bare] then
 		return zones[bare]
 	end
@@ -248,7 +260,7 @@ function ns.Social:ZoneFor(zones, name)
 		if listed == name or listed:sub(1, #name + 1) == name .. "-" then
 			return zone
 		end
-		if bare and (listed == bare or listed:sub(1, #bare + 1) == bare .. "-") then
+		if bare and (listed == bare or listed:sub(1, #bare + 1) == bare .. "-" or listed:sub(1, #bare + 1) == bare .. " ") then
 			return zone
 		end
 	end
@@ -547,11 +559,18 @@ function ns.Social:Snapshot()
 		elseif not guid then
 			return nil, false
 		else
-			local name, realm = UnitName(unit)
-			name = PlainString(name)
-			realm = PlainString(realm)
-			if name and realm and realm ~= home then
-				name = name .. "-" .. realm
+			local name = ns.UnitDisplayName and ns.UnitDisplayName(unit) or nil
+			if not name then
+				local first, second = UnitName(unit)
+				first = PlainString(first)
+				second = PlainString(second)
+				if first and second and RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled() then
+					name = first .. " " .. second
+				elseif first and second and second ~= home then
+					name = first .. "-" .. second
+				else
+					name = first
+				end
 			end
 			local _, classFile = UnitClass(unit)
 			classFile = PlainString(classFile)

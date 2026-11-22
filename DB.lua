@@ -480,6 +480,46 @@ function ns.DB:UnpackTrack(packed)
 	return track
 end
 
+-- Forever regional unique names: UnitName's second return is surname, joined with a
+-- space (see Blizzard Camelot NameUtil). GetUnitName wraps that for display.
+function ns.UnitDisplayName(unit)
+	unit = unit or "player"
+	local function usable(value)
+		if type(value) ~= "string" then
+			return nil
+		end
+		if issecretvalue and issecretvalue(value) then
+			return nil
+		end
+		if value == "" then
+			return nil
+		end
+		return value
+	end
+	if GetUnitName then
+		local full = usable(GetUnitName(unit, true))
+		if full then
+			-- Surname uses a space; a trailing -Realm can still appear on other flavors.
+			return full:match("^([^-]+)") or full
+		end
+	end
+	local name, second
+	if UnitNameUnmodified then
+		name, second = UnitNameUnmodified(unit)
+	elseif UnitName then
+		name, second = UnitName(unit)
+	end
+	name = usable(name)
+	second = usable(second)
+	if not name then
+		return nil
+	end
+	if second and RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled() then
+		return name .. " " .. second
+	end
+	return name
+end
+
 function ns.DB:NewJourney(name, realm)
 	return {
 		name = name or "Character",
@@ -495,10 +535,15 @@ function ns.DB:JourneyLabel(journey)
 	if type(journey) ~= "table" then
 		return "Character"
 	end
-	if journey.realm and journey.realm ~= "" then
-		return (journey.name or "Character") .. "-" .. journey.realm
+	local name = journey.name or "Character"
+	-- Regional unique names already include the surname; skip the long realm suffix.
+	if RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled() then
+		return name
 	end
-	return journey.name or "Character"
+	if journey.realm and journey.realm ~= "" then
+		return name .. "-" .. journey.realm
+	end
+	return name
 end
 
 function ns.DB:EnsureStore()
@@ -1043,12 +1088,17 @@ function ns.DB:BindPlayer()
 	if type(guid) ~= "string" or guid == "" then
 		return false
 	end
-	local name = UnitName and UnitName("player") or nil
+	local name = ns.UnitDisplayName("player")
 	if type(name) ~= "string" or name == "" then
 		name = "Character"
 	end
 	local realm = GetRealmName and GetRealmName() or ""
-	if type(realm) ~= "string" then
+	if type(realm) ~= "string" or (issecretvalue and issecretvalue(realm)) then
+		realm = ""
+	end
+	-- With regional unique names the realm label is a ruleset bucket, not part of the
+	-- character identity shown in the replay picker.
+	if RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled() then
 		realm = ""
 	end
 	self.playerKey = guid
