@@ -1461,22 +1461,35 @@ function ns.DB:EachEvent(journey, session, fn)
 	end
 end
 
+local function PlainNumber(value)
+	if type(value) ~= "number" or (issecretvalue and issecretvalue(value)) then
+		return nil
+	end
+	return value
+end
+
 function ns.DB:NoteProgress()
 	local session = self.session
 	if not session then
 		return
 	end
-	local level = UnitLevel("player")
-	local xp = UnitXP("player")
-	local maxXP = UnitXPMax("player")
-	if type(level) ~= "number" or level <= 0 then
+	local level = PlainNumber(UnitLevel("player"))
+	local xp = PlainNumber(UnitXP("player"))
+	local maxXP = PlainNumber(UnitXPMax("player"))
+	if not level or level <= 0 or not xp or not maxXP then
 		return
 	end
-	if type(xp) ~= "number" then
-		xp = 0
+	-- During logout teardown the client can return 0/0 XP and a stale level.
+	-- Keep the last good sample instead of wiping the session's end bar.
+	local maxLevel = GetMaxPlayerLevel and PlainNumber(GetMaxPlayerLevel())
+	if maxXP <= 0 and (not maxLevel or level < maxLevel) then
+		return
 	end
-	if type(maxXP) ~= "number" then
-		maxXP = 0
+	if type(session.lv) == "number" and level < session.lv then
+		return
+	end
+	if type(session.el) == "number" and level < session.el then
+		return
 	end
 	if session.lv == nil then
 		session.lv = level
@@ -1495,8 +1508,15 @@ function ns.DB:NoteLevelUp(level, now)
 	end
 	now = now or self:Now()
 	-- The ding is the session's latest moment. A level span ignores a ding past seen.
-	if self.session and (type(self.session.seen) ~= "number" or now > self.session.seen) then
-		self.session.seen = now
+	if self.session then
+		if type(self.session.seen) ~= "number" or now > self.session.seen then
+			self.session.seen = now
+		end
+		if type(self.session.el) ~= "number" or level > self.session.el then
+			self.session.el = level
+			self.session.ex = 0
+			self.session.em = 0
+		end
 	end
 	if type(host.levels) ~= "table" then
 		host.levels = {}
@@ -1635,6 +1655,130 @@ function ns.DB:LevelSpans(journey)
 		end
 	end
 	return spans
+end
+
+local GAP_EPS = 0.01
+
+local function ClampFrac(xp, maxXP)
+	if type(maxXP) ~= "number" or maxXP <= 0 or type(xp) ~= "number" then
+		return nil
+	end
+	local frac = xp / maxXP
+	if frac < 0 then
+		return 0
+	end
+	if frac > 1 then
+		return 1
+	end
+	return frac
+end
+
+-- Detects XP and whole-level gaps between consecutive saved sessions (e.g. after a crash).
+-- Returns a map keyed by level: { missing = frac, whole = bool, t0 = sec, t1 = sec, ranges = { { from, to } } }.
+function ns.DB:LevelGaps(journey)
+	journey = journey or self.char
+	if type(journey) ~= "table" then
+		return {}
+	end
+	local sessions = journey.sessions
+	if type(sessions) ~= "table" or #sessions < 2 then
+		return {}
+	end
+	local dings = CollectDings(journey)
+	local function highestDingIn(session)
+		if type(session.s) ~= "number" then
+			return nil
+		end
+		local stop = (type(session.seen) == "number" and session.seen or session.s) + 1
+		local top
+		for i = 1, #dings do
+			local ding = dings[i]
+			if ding.t >= session.s and ding.t <= stop then
+				if not top or ding.lv > top then
+					top = ding.lv
+				end
+			end
+		end
+		return top
+	end
+	local byLevel = {}
+	local function addGap(lv, fromFrac, toFrac, whole, t0, t1)
+		local diff = toFrac - fromFrac
+		if not whole and diff < GAP_EPS then
+			return
+		end
+		local entry = byLevel[lv]
+		if not entry then
+			entry = {
+				missing = 0,
+				whole = whole and true or false,
+				t0 = t0,
+				t1 = t1,
+				ranges = {},
+			}
+			byLevel[lv] = entry
+		else
+			if not whole then
+				entry.whole = false
+			end
+			if t0 and (not entry.t0 or t0 < entry.t0) then
+				entry.t0 = t0
+			end
+			if t1 and (not entry.t1 or t1 > entry.t1) then
+				entry.t1 = t1
+			end
+		end
+		entry.missing = math.min(1, entry.missing + diff)
+		entry.ranges[#entry.ranges + 1] = { from = fromFrac, to = toFrac }
+	end
+
+	local prev
+	for i = 1, #sessions do
+		local curr = sessions[i]
+		if type(curr) == "table" then
+			local currLv = curr.lv
+			local currEl = curr.el or currLv
+			if prev and type(currLv) == "number" and currLv > 0 then
+				local prevLv = type(prev.lv) == "number" and prev.lv or 0
+				local prevDing = highestDingIn(prev) or 0
+				local explainedTo = math.max(prevLv, prevDing)
+				local prevEl = type(prev.el) == "number" and prev.el or 0
+				local prevFrac = ClampFrac(prev.ex, prev.em)
+				local currFrac = ClampFrac(curr.xp, curr.xm)
+				local prevEnd = prev.seen or prev.s
+				local currStart = curr.s
+				local barTrusted = prevFrac ~= nil and prevEl >= explainedTo and prevEl > 0
+				if barTrusted then
+					if currLv == prevEl then
+						if currFrac and (currFrac - prevFrac) >= GAP_EPS then
+							addGap(currLv, prevFrac, currFrac, false, prevEnd, currStart)
+						end
+					elseif currLv > prevEl then
+						if (1 - prevFrac) >= GAP_EPS then
+							addGap(prevEl, prevFrac, 1, false, prevEnd, currStart)
+						end
+						for skipped = prevEl + 1, currLv - 1 do
+							addGap(skipped, 0, 1, true, prevEnd, currStart)
+						end
+						if currFrac and currFrac >= GAP_EPS then
+							addGap(currLv, 0, currFrac, false, prevEnd, currStart)
+						end
+					end
+				elseif explainedTo > 0 and currLv > explainedTo then
+					for skipped = explainedTo + 1, currLv - 1 do
+						addGap(skipped, 0, 1, true, prevEnd, currStart)
+					end
+					if currFrac and currFrac >= GAP_EPS then
+						addGap(currLv, 0, currFrac, false, prevEnd, currStart)
+					end
+				end
+			end
+			if (type(currLv) == "number" and currLv > 0) or (type(currEl) == "number" and currEl > 0) then
+				prev = curr
+			end
+		end
+	end
+	return byLevel
 end
 
 function ns.DB:LevelBounds(journey, lo, hi)

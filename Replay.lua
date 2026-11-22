@@ -2082,6 +2082,74 @@ function ns.Replay:LevelGroups()
 			end
 		end
 	end
+	local gapsByLevel = ns.DB:LevelGaps(ns.DB.char)
+	local covered = {}
+	for i = 1, #order do
+		local group = order[i]
+		local top = group.lvTo or group.lv
+		local missingFrac = 0
+		local gaps = nil
+		for lv = group.lv, top do
+			covered[lv] = true
+			local entry = gapsByLevel[lv]
+			if entry and entry.missing > 0 then
+				missingFrac = missingFrac + entry.missing
+				gaps = gaps or {}
+				if entry.whole then
+					gaps[#gaps + 1] = { lv = lv, from = 0, to = 1, whole = true }
+				else
+					for r = 1, #entry.ranges do
+						local range = entry.ranges[r]
+						gaps[#gaps + 1] = { lv = lv, from = range.from, to = range.to, whole = false }
+					end
+				end
+			end
+		end
+		if missingFrac > 0 and gaps then
+			group.missingFrac = missingFrac
+			group.gaps = gaps
+		end
+	end
+	local skipped = {}
+	for lv, entry in pairs(gapsByLevel) do
+		if entry.whole and not covered[lv] then
+			skipped[#skipped + 1] = lv
+		end
+	end
+	if #skipped > 0 then
+		table.sort(skipped)
+		local runStart, runEnd, runT0, runT1
+		local function flushMissing()
+			if not runStart then
+				return
+			end
+			order[#order + 1] = {
+				lv = runStart,
+				lvTo = runEnd ~= runStart and runEnd or nil,
+				seconds = 0,
+				open = false,
+				missing = true,
+				missingFrac = runEnd - runStart + 1,
+				t0 = runT0 or 0,
+				last = runT1 or runT0 or 0,
+			}
+			runStart, runEnd, runT0, runT1 = nil, nil, nil, nil
+		end
+		for i = 1, #skipped do
+			local lv = skipped[i]
+			local entry = gapsByLevel[lv]
+			if runStart and lv == runEnd + 1 and entry.t0 == runT0 and entry.t1 == runT1 then
+				runEnd = lv
+			else
+				flushMissing()
+				runStart = lv
+				runEnd = lv
+				runT0 = entry.t0
+				runT1 = entry.t1
+			end
+		end
+		flushMissing()
+	end
 	table.sort(order, function(a, b)
 		if a.last == b.last then
 			return a.lv > b.lv
@@ -2137,6 +2205,40 @@ function ns.Replay:LevelSeconds(lo, hi)
 	return seconds
 end
 
+local function MissingPct(frac)
+	if not frac or frac <= 0 then
+		return 0
+	end
+	local pct = math.floor(frac * 100 + 0.5)
+	if pct < 1 then
+		pct = 1
+	elseif pct > 100 then
+		pct = 100
+	end
+	return pct
+end
+
+function ns.Replay:LevelMissingSummary(lo, hi)
+	if not lo then
+		return false, nil
+	end
+	hi = hi or lo
+	local groups = self:LevelGroups()
+	local hasMissing = false
+	local singlePct = nil
+	for i = 1, #groups do
+		local group = groups[i]
+		local top = group.lvTo or group.lv
+		if top >= lo and group.lv <= hi and (group.missing or (group.missingFrac and group.missingFrac > 0)) then
+			hasMissing = true
+			if lo == hi and group.lv == lo and top == hi and not group.missing then
+				singlePct = MissingPct(group.missingFrac)
+			end
+		end
+	end
+	return hasMissing, singlePct
+end
+
 -- Finished levels count as 1.00 each; an open level adds its current XP fraction.
 function ns.Replay:LevelsGainedInSelection()
 	local lo = self.levelLo
@@ -2150,7 +2252,7 @@ function ns.Replay:LevelsGainedInSelection()
 	for i = 1, #groups do
 		local group = groups[i]
 		local top = group.lvTo or group.lv
-		if top >= lo and group.lv <= hi then
+		if not group.missing and top >= lo and group.lv <= hi then
 			local a = math.max(group.lv, lo)
 			local b = math.min(top, hi)
 			if a <= b then
@@ -2182,7 +2284,20 @@ function ns.Replay:LevelStatRows()
 		local group = groups[i]
 		local top = group.lvTo or group.lv
 		if not self.levelLo or (top >= self.levelLo and group.lv <= (self.levelHi or self.levelLo)) then
-			rows[#rows + 1] = { self:LevelName(group), FormatClock(group.seconds or 0) }
+			if group.missing then
+				rows[#rows + 1] = { self:LevelName(group), L["Missing"], r = 0.90, g = 0.56, b = 0.28 }
+			elseif group.missingFrac and group.missingFrac > 0 then
+				local clock = FormatClock(group.seconds or 0)
+				local value
+				if group.lvTo and group.lvTo ~= group.lv then
+					value = string.format(L["%s (missing data)"], clock)
+				else
+					value = string.format(L["%s (~%d%% missing)"], clock, MissingPct(group.missingFrac))
+				end
+				rows[#rows + 1] = { self:LevelName(group), value }
+			else
+				rows[#rows + 1] = { self:LevelName(group), FormatClock(group.seconds or 0) }
+			end
 		end
 	end
 	if #rows == 1 then
@@ -2496,16 +2611,26 @@ function ns.Replay:ScopeCaption()
 		if not self.levelLo then
 			return L["Pick a level to replay it. Shift-click a second level for a range."]
 		end
+		local base
 		if self.levelHi and self.levelHi ~= self.levelLo then
 			if self:LevelIsOpen(self.levelLo, self.levelHi) then
-				return string.format(L["Levels %d–%d, so far."], self.levelLo, self.levelHi)
+				base = string.format(L["Levels %d–%d, so far."], self.levelLo, self.levelHi)
+			else
+				base = string.format(L["Levels %d–%d."], self.levelLo, self.levelHi)
 			end
-			return string.format(L["Levels %d–%d."], self.levelLo, self.levelHi)
+		elseif self:LevelIsOpen(self.levelLo) then
+			base = string.format(L["Level %d, so far."], self.levelLo)
+		else
+			base = string.format(L["Level %d."], self.levelLo)
 		end
-		if self:LevelIsOpen(self.levelLo) then
-			return string.format(L["Level %d, so far."], self.levelLo)
+		local hasMissing, singlePct = self:LevelMissingSummary(self.levelLo, self.levelHi)
+		if hasMissing then
+			if singlePct then
+				return string.format(L["%s Missing ~%d%% of XP data."], base, singlePct)
+			end
+			return string.format(L["%s Some data is missing."], base)
 		end
-		return string.format(L["Level %d."], self.levelLo)
+		return base
 	end
 	if self.mode == "all" then
 		if count <= 1 then
@@ -3782,12 +3907,14 @@ function ns.Replay:SelectAll()
 		local lo, hi
 		for i = 1, #groups do
 			local group = groups[i]
-			local top = group.lvTo or group.lv
-			if not lo or group.lv < lo then
-				lo = group.lv
-			end
-			if not hi or top > hi then
-				hi = top
+			if not group.missing then
+				local top = group.lvTo or group.lv
+				if not lo or group.lv < lo then
+					lo = group.lv
+				end
+				if not hi or top > hi then
+					hi = top
+				end
 			end
 		end
 		if lo then
@@ -3929,6 +4056,54 @@ function ns.Replay:SelectLevel(lo, hi, extend)
 	self:SetMode("level", nil, true)
 end
 
+function ns.Replay:ShowLevelGapTooltip(row)
+	local group = row and row.levelGroup
+	if not group or not (group.missing or (group.missingFrac and group.missingFrac > 0)) or not GameTooltip then
+		return
+	end
+	GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+	if group.missing then
+		GameTooltip:SetText(string.format(L["%s — Missing level"], self:LevelName(group)), 0.95, 0.62, 0.28)
+		if group.lvTo and group.lvTo ~= group.lv then
+			GameTooltip:AddLine(L["No data recorded for these levels."], 0.90, 0.88, 0.82, true)
+		else
+			GameTooltip:AddLine(L["No data recorded for this level."], 0.90, 0.88, 0.82, true)
+		end
+	else
+		GameTooltip:SetText(string.format(L["%s — Missing data"], self:LevelName(group)), 0.95, 0.62, 0.28)
+		local gaps = group.gaps or {}
+		local multiLevel = group.lvTo and group.lvTo ~= group.lv
+		if not multiLevel then
+			local pct = MissingPct(group.missingFrac)
+			if #gaps == 1 then
+				local fromPct = math.floor(gaps[1].from * 100 + 0.5)
+				local toPct = math.floor(gaps[1].to * 100 + 0.5)
+				GameTooltip:AddLine(string.format(L["Missing ~%d%% of this level (%d%% to %d%% XP)."], pct, fromPct, toPct), 0.90, 0.88, 0.82, true)
+			else
+				GameTooltip:AddLine(string.format(L["Missing ~%d%% of this level:"], pct), 0.90, 0.88, 0.82, true)
+				for i = 1, #gaps do
+					local fromPct = math.floor(gaps[i].from * 100 + 0.5)
+					local toPct = math.floor(gaps[i].to * 100 + 0.5)
+					GameTooltip:AddLine("  " .. string.format(L["%d%% to %d%% XP"], fromPct, toPct), 0.85, 0.82, 0.76)
+				end
+			end
+		else
+			for i = 1, #gaps do
+				local gap = gaps[i]
+				if gap.whole then
+					GameTooltip:AddLine(string.format(L["Level %d: no data"], gap.lv), 0.90, 0.88, 0.82)
+				else
+					local fromPct = math.floor(gap.from * 100 + 0.5)
+					local toPct = math.floor(gap.to * 100 + 0.5)
+					GameTooltip:AddLine(string.format(L["Level %d: %d%% to %d%% XP"], gap.lv, fromPct, toPct), 0.90, 0.88, 0.82)
+				end
+			end
+		end
+	end
+	GameTooltip:AddLine(L["Data between sessions was not saved."], 0.65, 0.63, 0.58, true)
+	GameTooltip:Show()
+end
+
 function ns.Replay:RefreshLevelList()
 	local content = self.listContent
 	local journey = ns.DB.char
@@ -3967,6 +4142,11 @@ function ns.Replay:RefreshLevelList()
 			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 			row.label:SetJustifyH("LEFT")
 			row.label:SetJustifyV("MIDDLE")
+			row.badge = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.badge:SetJustifyH("RIGHT")
+			row.badge:SetJustifyV("MIDDLE")
+			row.badge:SetPoint("RIGHT", -8, 0)
+			row.badge:Hide()
 			row:SetScript("OnClick", function(button)
 				local shift = IsShiftKeyDown and IsShiftKeyDown()
 				if shift and issecretvalue and issecretvalue(shift) then
@@ -3980,28 +4160,80 @@ function ns.Replay:RefreshLevelList()
 					ns.Replay:SelectSession(button.sessionIndex, shift and true or false)
 				end
 			end)
+			row:SetScript("OnEnter", function(button)
+				ns.Replay:ShowLevelGapTooltip(button)
+			end)
+			row:SetScript("OnLeave", function(button)
+				if GameTooltip and GameTooltip:IsOwned(button) then
+					GameTooltip:Hide()
+				end
+			end)
 			self.rows[i] = row
+		elseif not row.badge then
+			row.badge = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			row.badge:SetJustifyH("RIGHT")
+			row.badge:SetJustifyV("MIDDLE")
+			row.badge:SetPoint("RIGHT", -8, 0)
+			row.badge:Hide()
+			row:SetScript("OnEnter", function(button)
+				ns.Replay:ShowLevelGapTooltip(button)
+			end)
+			row:SetScript("OnLeave", function(button)
+				if GameTooltip and GameTooltip:IsOwned(button) then
+					GameTooltip:Hide()
+				end
+			end)
 		end
 		row:SetHeight(24)
 		row.sessionIndex = nil
-		row.level = group.lv
-		row.levelTop = group.lvTo or group.lv
-		local selected = self.levelLo and row.levelTop >= self.levelLo and row.level <= (self.levelHi or self.levelLo)
+		row.levelGroup = group
+		local selected = false
+		if group.missing then
+			row.level = nil
+			row.levelTop = nil
+		else
+			row.level = group.lv
+			row.levelTop = group.lvTo or group.lv
+			selected = self.levelLo and row.levelTop >= self.levelLo and row.level <= (self.levelHi or self.levelLo)
+		end
+		local badgeText = nil
+		if group.missing then
+			badgeText = L["Missing"]
+		elseif group.missingFrac and group.missingFrac > 0 then
+			if group.lvTo and group.lvTo ~= group.lv then
+				badgeText = L["Missing data"]
+			else
+				badgeText = string.format(L["~%d%% missing"], MissingPct(group.missingFrac))
+			end
+		end
 		-- One line. A long route clips at the row edge instead of wrapping
 		-- a leftover word back under the level number.
 		row.label:ClearAllPoints()
 		row.label:SetPoint("LEFT", 10, 0)
-		row.label:SetPoint("RIGHT", -8, 0)
+		if badgeText then
+			row.badge:SetText(badgeText)
+			row.badge:SetTextColor(0.92, 0.58, 0.28)
+			row.badge:Show()
+			row.label:SetPoint("RIGHT", row.badge, "LEFT", -6, 0)
+		else
+			row.badge:Hide()
+			row.label:SetPoint("RIGHT", -8, 0)
+		end
 		row.label:SetJustifyH("LEFT")
 		row.label:SetJustifyV("MIDDLE")
 		row.label:SetWordWrap(false)
-		row.label:SetText(self:LevelRowLabel(group))
-		row.bar:SetShown(selected)
-		if selected then
-			row.label:SetTextColor(1, 0.86, 0.45)
+		if group.missing then
+			row.label:SetText(self:LevelName(group))
+			row.label:SetTextColor(0.75, 0.52, 0.30)
 		else
-			row.label:SetTextColor(0.82, 0.80, 0.74)
+			row.label:SetText(self:LevelRowLabel(group))
+			if selected then
+				row.label:SetTextColor(1, 0.86, 0.45)
+			else
+				row.label:SetTextColor(0.82, 0.80, 0.74)
+			end
 		end
+		row.bar:SetShown(selected)
 		row:ClearAllPoints()
 		row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * 24))
 		row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
@@ -4098,6 +4330,10 @@ function ns.Replay:RefreshList()
 			self.rows[i] = row
 		end
 		row:SetHeight(24)
+		if row.badge then
+			row.badge:Hide()
+		end
+		row.levelGroup = nil
 		row.label:ClearAllPoints()
 		row.label:SetPoint("LEFT", 10, 0)
 		row.label:SetPoint("RIGHT", -8, 0)
