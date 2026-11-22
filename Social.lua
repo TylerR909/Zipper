@@ -249,20 +249,23 @@ function ns.Social:ZoneFor(zones, name)
 	if dashed ~= name and zones[dashed] then
 		return zones[dashed]
 	end
-	local bare = name:match("^[^-]+")
-	if bare then
-		bare = bare:match("^(%S+)") or bare
-	end
-	if bare and zones[bare] then
-		return zones[bare]
-	end
-	for listed, zone in pairs(zones) do
-		if listed == name or listed:sub(1, #name + 1) == name .. "-" then
-			return zone
+	-- Single-token query: allow an old realm suffix (Foo-Realm) only when surnames
+	-- are off. With regional unique names, Foo-Baz is another character, not a realm.
+	local firstOnly = spaced:match("^(%S+)$")
+	if firstOnly then
+		if not (RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled()) then
+			for listed, zone in pairs(zones) do
+				if listed:sub(1, #name + 1) == name .. "-" then
+					return zone
+				end
+			end
 		end
-		if bare and (listed == bare or listed:sub(1, #bare + 1) == bare .. "-" or listed:sub(1, #bare + 1) == bare .. " ") then
-			return zone
-		end
+		return nil
+	end
+	-- Full name query: roster may only have the first name. Never treat Foo Baz as Foo Bar.
+	local first = spaced:match("^(%S+)")
+	if first and zones[first] then
+		return zones[first]
 	end
 	return nil
 end
