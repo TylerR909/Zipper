@@ -3336,6 +3336,125 @@ function ns.Replay:AcquirePip(index)
 	return pip
 end
 
+function ns.Replay:AcquireGapPip(index)
+	self.gapPips = self.gapPips or {}
+	local pip = self.gapPips[index]
+	if pip then
+		return pip
+	end
+	pip = CreateFrame("Button", nil, self.chrome or self.frame)
+	pip:SetSize(12, 16)
+	pip.mark = pip:CreateTexture(nil, "OVERLAY")
+	pip.mark:SetTexture("Interface\\Buttons\\WHITE8X8")
+	pip.mark:SetSize(4, 14)
+	pip.mark:SetPoint("BOTTOM", 0, 0)
+	pip.mark:SetVertexColor(0.96, 0.48, 0.16, 1)
+	pip:SetScript("OnClick", function(self)
+		ns.Replay:SeekToTime(self.when)
+	end)
+	pip:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine(L["Missing data"], 0.96, 0.58, 0.24)
+		local items = self.gapItems or {}
+		for i = 1, #items do
+			local item = items[i]
+			if item.whole then
+				GameTooltip:AddLine(string.format(L["Level %d: no data"], item.lv), 0.90, 0.88, 0.82)
+			else
+				local fromPct = math.floor((item.from or 0) * 100 + 0.5)
+				local toPct = math.floor((item.to or 0) * 100 + 0.5)
+				GameTooltip:AddLine(string.format(L["Level %d: %d%% to %d%% XP"], item.lv, fromPct, toPct), 0.90, 0.88, 0.82)
+			end
+		end
+		if self.gapT0 and self.gapT1 then
+			GameTooltip:AddLine(string.format("%s – %s", date("%b %d, %H:%M", self.gapT0), date("%b %d, %H:%M", self.gapT1)), 0.72, 0.70, 0.65)
+		elseif self.when then
+			GameTooltip:AddLine(date("%b %d, %H:%M", self.when), 0.72, 0.70, 0.65)
+		end
+		GameTooltip:AddLine(L["Data between sessions was not saved."], 0.65, 0.63, 0.58, true)
+		GameTooltip:Show()
+	end)
+	pip:SetScript("OnLeave", function(self)
+		if GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+	self.gapPips[index] = pip
+	return pip
+end
+
+function ns.Replay:TimelineGaps()
+	if not self.t0 or not self.t1 or self.t1 <= self.t0 then
+		return {}
+	end
+	local gapsByLevel = ns.DB:LevelGaps(ns.DB.char)
+	local bySeam, seams = {}, {}
+	local function addRange(lv, range, whole)
+		local gt0 = range.t0
+		local gt1 = range.t1
+		local when
+		if gt1 and gt1 >= self.t0 - 1 and gt1 <= self.t1 + 1 then
+			when = gt1
+		elseif gt0 and gt0 >= self.t0 - 1 and gt0 <= self.t1 + 1 then
+			when = gt0
+		else
+			return
+		end
+		if when < self.t0 then
+			when = self.t0
+		elseif when > self.t1 then
+			when = self.t1
+		end
+		local key = string.format("%s:%s", tostring(gt0 or 0), tostring(gt1 or 0))
+		local seam = bySeam[key]
+		if not seam then
+			seam = { when = when, t0 = gt0, t1 = gt1, items = {} }
+			bySeam[key] = seam
+			seams[#seams + 1] = seam
+		end
+		seam.items[#seam.items + 1] = { lv = lv, from = range.from, to = range.to, whole = whole and true or false }
+	end
+	if self.mode == "level" and self.levelLo then
+		local lo = self.levelLo
+		local hi = self.levelHi or lo
+		for lv = lo, hi do
+			local entry = gapsByLevel[lv]
+			if entry and entry.missing > 0 then
+				if entry.whole then
+					addRange(lv, { from = 0, to = 1, t0 = entry.t0, t1 = entry.t1 }, true)
+				else
+					for i = 1, #(entry.ranges or {}) do
+						addRange(lv, entry.ranges[i], false)
+					end
+				end
+			end
+		end
+	elseif #(self.sessions or {}) >= 2 then
+		local levels = {}
+		for lv in pairs(gapsByLevel) do
+			levels[#levels + 1] = lv
+		end
+		table.sort(levels)
+		for i = 1, #levels do
+			local lv = levels[i]
+			local entry = gapsByLevel[lv]
+			if entry and entry.missing > 0 then
+				local list = entry.whole and { { from = 0, to = 1, t0 = entry.t0, t1 = entry.t1 } } or (entry.ranges or {})
+				for r = 1, #list do
+					local range = list[r]
+					if range.t0 and range.t1 and range.t0 >= self.t0 - 1 and range.t1 <= self.t1 + 1 then
+						addRange(lv, range, entry.whole)
+					end
+				end
+			end
+		end
+	end
+	table.sort(seams, function(a, b)
+		return a.when < b.when
+	end)
+	return seams
+end
+
 function ns.Replay:LayoutPips()
 	local scrub = self.scrub
 	local chapters = self.chapters or {}
@@ -3371,6 +3490,37 @@ function ns.Replay:LayoutPips()
 	if self.pips then
 		for i = shown + 1, #self.pips do
 			self.pips[i]:Hide()
+		end
+	end
+	local gapShown = 0
+	if width > 20 and total > 0 then
+		local seams = self:TimelineGaps()
+		local gapLevel = (scrub:GetFrameLevel() or 1) + 7
+		for i = 1, #seams do
+			local seam = seams[i]
+			local elapsed = self:PlayedAt(seam.when)
+			local fraction = elapsed / total
+			if fraction < 0 then
+				fraction = 0
+			elseif fraction > 1 then
+				fraction = 1
+			end
+			local pip = self:AcquireGapPip(i)
+			pip.when = seam.when
+			pip.gapT0 = seam.t0
+			pip.gapT1 = seam.t1
+			pip.gapItems = seam.items
+			pip:SetParent(self.chrome or self.frame)
+			pip:SetFrameLevel(gapLevel)
+			pip:ClearAllPoints()
+			pip:SetPoint("BOTTOM", scrub, "TOPLEFT", fraction * width, 3)
+			pip:Show()
+			gapShown = i
+		end
+	end
+	if self.gapPips then
+		for i = gapShown + 1, #self.gapPips do
+			self.gapPips[i]:Hide()
 		end
 	end
 end
@@ -4990,6 +5140,11 @@ function ns.Replay:OwnChrome()
 	if self.pips then
 		for i = 1, #self.pips do
 			owned[#owned + 1] = self.pips[i]
+		end
+	end
+	if self.gapPips then
+		for i = 1, #self.gapPips do
+			owned[#owned + 1] = self.gapPips[i]
 		end
 	end
 	for i = 1, #owned do

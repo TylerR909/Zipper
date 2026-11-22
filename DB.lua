@@ -1779,7 +1779,7 @@ function ns.DB:LevelGaps(journey)
 			end
 		end
 		entry.missing = math.min(1, entry.missing + diff)
-		entry.ranges[#entry.ranges + 1] = { from = fromFrac, to = toFrac }
+		entry.ranges[#entry.ranges + 1] = { from = fromFrac, to = toFrac, t0 = t0, t1 = t1 }
 	end
 
 	local prev
