@@ -373,6 +373,8 @@ S("%s Missing ~%d%% of XP data.")
 S("%s Some data is missing.")
 S("%s (~%d%% missing)")
 S("%s (missing data)")
+S("Missing ~%d%% of Level %d")
+S("Missing Level %d")
 
 -- NewLocale returns a write-only proxy. Reading a key on it asserts.
 -- Later files need the real table, which is what GetLocale hands back.

@@ -2788,6 +2788,33 @@ function ns.Replay:TimeAtPlayed(seconds)
 	return pieces[#pieces].t1
 end
 
+function ns.Replay:TimelineMissingText()
+	if self.mode ~= "level" or not self.levelLo then
+		return nil
+	end
+	local lo = self.levelLo
+	local hi = self.levelHi or lo
+	local gapsByLevel = ns.DB:LevelGaps(ns.DB.char)
+	local affected = {}
+	for lv = lo, hi do
+		local entry = gapsByLevel[lv]
+		if entry and entry.missing > 0 then
+			affected[#affected + 1] = { lv = lv, entry = entry }
+		end
+	end
+	if #affected == 0 then
+		return nil
+	end
+	if #affected == 1 then
+		local item = affected[1]
+		if item.entry.whole then
+			return string.format(L["Missing Level %d"], item.lv)
+		end
+		return string.format(L["Missing ~%d%% of Level %d"], MissingPct(item.entry.missing), item.lv)
+	end
+	return L["Missing data"]
+end
+
 function ns.Replay:UpdateReadout()
 	if not self.timeText then
 		return
@@ -2798,6 +2825,9 @@ function ns.Replay:UpdateReadout()
 	local sessions = self.sessions or {}
 	if not self.t0 or not self.t1 then
 		self.timeText:SetText(L["No path yet. Walk somewhere and Zipper will keep the points."])
+		if self.timeMissing then
+			self.timeMissing:Hide()
+		end
 		self:UpdateRecap(sessions)
 		self.playButton:SetText(L["Play"])
 		self:SyncTrailSlider()
@@ -2816,6 +2846,15 @@ function ns.Replay:UpdateReadout()
 		elapsed = total
 	end
 	self.timeText:SetText(string.format("%s  /  %s", FormatClock(elapsed), FormatClock(total)))
+	if self.timeMissing then
+		local note = self:TimelineMissingText()
+		if note then
+			self.timeMissing:SetText(note)
+			self.timeMissing:Show()
+		else
+			self.timeMissing:Hide()
+		end
+	end
 	self:UpdateRecap(sessions)
 	if not self.playing then
 		self.playButton:SetText(L["Play"])
@@ -4931,6 +4970,7 @@ function ns.Replay:OwnChrome()
 		self.chapterStrip,
 		self.scrub,
 		self.timeText,
+		self.timeMissing,
 		self.playButton,
 		self.trailLabel,
 		self.trailValue,
@@ -5077,6 +5117,10 @@ function ns.Replay:Layout(width, height)
 	self.timeText:ClearAllPoints()
 	self.timeText:SetPoint("TOPLEFT", side + 2, body - 92)
 	self.timeText:SetPoint("RIGHT", frame, "RIGHT", -(side + 2), 0)
+	if self.timeMissing then
+		self.timeMissing:ClearAllPoints()
+		self.timeMissing:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(side + 2), body - 92)
+	end
 	local jumpWidth, jumpGap = 72, 8
 	for i = 1, #self.jumpButtons do
 		self.jumpButtons[i]:ClearAllPoints()
@@ -5677,6 +5721,13 @@ function ns.Replay:CreateFrame()
 	timeText:SetJustifyH("LEFT")
 	timeText:SetTextColor(0.85, 0.82, 0.70)
 
+	local timeMissing = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	timeMissing:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -18, -368)
+	timeMissing:SetJustifyH("RIGHT")
+	timeMissing:SetWordWrap(false)
+	timeMissing:SetTextColor(0.92, 0.58, 0.28)
+	timeMissing:Hide()
+
 	local statInset = CreateFrame("Frame", nil, frame, "BackdropTemplate")
 	statInset:SetPoint("TOPLEFT", 16, -500)
 	statInset:SetPoint("BOTTOMRIGHT", -16, 14)
@@ -5727,6 +5778,7 @@ function ns.Replay:CreateFrame()
 	self.chapterEnd = chapterEnd
 	self.chapterText = chapterText
 	self.timeText = timeText
+	self.timeMissing = timeMissing
 	self.trailLabel = trailLabel
 	self.trailValue = trailValue
 	self.trailSlider = trail
@@ -6179,6 +6231,9 @@ function ns.Replay:ApplySkin()
 		end
 		if self.timeText then
 			paint(skin.Font, self.timeText)
+		end
+		if self.timeMissing then
+			paint(skin.Font, self.timeMissing)
 		end
 		if self.trailLabel then
 			paint(skin.Font, self.trailLabel)
