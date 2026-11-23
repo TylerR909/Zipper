@@ -28,8 +28,13 @@ boot:SetScript("OnEvent", function(_, event, arg1)
 		elseif migrated == "purgePrivate" then
 			ns:Print(string.format(L["Finished deleting %s's Non-Global journey."], ns.DB:JourneyLabel(ns.DB.record)))
 		end
-		if ns.DB.record and ns.Config:SkipQuiet() and ns.DB:DropQuietTail() > 0 then
-			ns:Print(L["Skipped a quiet stop from the last login."])
+		if ns.DB.record and ns.Config:SkipQuiet() then
+			local skipped = ns.DB:DropQuietTail()
+			if skipped == 1 then
+				ns:Print(L["Skipped a quiet stop from the last login."])
+			elseif skipped > 1 then
+				ns:Print(string.format(L["Skipped %d quiet stops from previous logins."], skipped))
+			end
 		end
 		if ns.DB.record then
 			local _, continued = ns.DB:Open(ns.DB:Now(), false)

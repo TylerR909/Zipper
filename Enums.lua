@@ -544,5 +544,17 @@ end
 ns.CONTINUE_SECONDS = 180
 -- A finished stop closer than this to its first spot, with nothing else done, is quiet.
 ns.QUIET_YARDS = 250
+-- Auto-compaction on login never silently drops a session longer than this.
+ns.QUIET_MAX_SECONDS = 900
 ns.SAMPLE_CAP = 20000
 ns.COORD_SCALE = 10000
+
+-- Capital city UiMapIDs in Classic / Forever.
+ns.CityMaps = {
+	[1453] = true, -- Stormwind City
+	[1454] = true, -- Orgrimmar
+	[1455] = true, -- Ironforge
+	[1456] = true, -- Thunder Bluff
+	[1457] = true, -- Darnassus
+	[1458] = true, -- Undercity
+}

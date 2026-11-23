@@ -4022,6 +4022,7 @@ function ns.Replay:OnDataChanged()
 end
 
 function ns.Replay:SetMode(mode, index, alreadyRemembered)
+	self.armedDelete = nil
 	self:ClearBlocked()
 	if mode == "current" and ns.DB.playerKey then
 		ns.DB:SetView(ns.DB.playerKey)
@@ -4375,6 +4376,16 @@ function ns.Replay:RefreshLevelList()
 		end
 		row:SetHeight(24)
 		row.sessionIndex = nil
+		row.sessionRef = nil
+		if row.delBtn then
+			row.delBtn:Hide()
+		end
+		if row.confirmBtn then
+			row.confirmBtn:Hide()
+		end
+		if row.cancelBtn then
+			row.cancelBtn:Hide()
+		end
 		row.levelGroup = group
 		local selected = false
 		if group.missing then
@@ -4467,6 +4478,281 @@ function ns.Replay:LevelRowLabel(group)
 	return text
 end
 
+local function EnsureSessionRowActions(row)
+	if row.delBtn then
+		return
+	end
+	local del = CreateFrame("Button", nil, row)
+	del:SetSize(18, 18)
+	del:SetPoint("RIGHT", -4, 0)
+	del.icon = del:CreateTexture(nil, "ARTWORK")
+	del.icon:SetSize(12, 12)
+	del.icon:SetPoint("CENTER")
+	del.icon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+	del.icon:SetVertexColor(0.62, 0.60, 0.56, 0.78)
+	del:SetScript("OnEnter", function(self)
+		self.icon:SetVertexColor(1.0, 0.36, 0.32, 1.0)
+		if GameTooltip then
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:SetText(L["Delete this session"])
+			GameTooltip:Show()
+		end
+	end)
+	del:SetScript("OnLeave", function(self)
+		self.icon:SetVertexColor(0.62, 0.60, 0.56, 0.78)
+		if GameTooltip and GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+	del:SetScript("OnClick", function(self)
+		local parent = self:GetParent()
+		if parent and parent.sessionRef then
+			ns.Replay:RequestDeleteSession(parent.sessionRef)
+		end
+	end)
+	del:Hide()
+
+	local cancel = CreateFrame("Button", nil, row)
+	cancel:SetSize(18, 18)
+	cancel:SetPoint("RIGHT", -4, 0)
+	cancel.icon = cancel:CreateTexture(nil, "ARTWORK")
+	cancel.icon:SetSize(12, 12)
+	cancel.icon:SetPoint("CENTER")
+	cancel.icon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+	cancel.icon:SetVertexColor(0.82, 0.80, 0.74, 0.95)
+	cancel:SetScript("OnEnter", function(self)
+		self.icon:SetVertexColor(1.0, 1.0, 1.0, 1.0)
+		if GameTooltip then
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:SetText(L["Cancel"])
+			GameTooltip:Show()
+		end
+	end)
+	cancel:SetScript("OnLeave", function(self)
+		self.icon:SetVertexColor(0.82, 0.80, 0.74, 0.95)
+		if GameTooltip and GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+	cancel:SetScript("OnClick", function()
+		ns.Replay.armedDelete = nil
+		ns.Replay:RefreshList()
+	end)
+	cancel:Hide()
+
+	local confirm = CreateFrame("Button", nil, row)
+	confirm:SetSize(18, 18)
+	confirm:SetPoint("RIGHT", cancel, "LEFT", -2, 0)
+	confirm.icon = confirm:CreateTexture(nil, "ARTWORK")
+	confirm.icon:SetSize(14, 14)
+	confirm.icon:SetPoint("CENTER")
+	confirm.icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+	confirm.icon:SetVertexColor(0.45, 0.95, 0.45, 0.95)
+	confirm:SetScript("OnEnter", function(self)
+		self.icon:SetVertexColor(0.65, 1.0, 0.65, 1.0)
+		if GameTooltip then
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:SetText(L["Confirm delete"])
+			GameTooltip:Show()
+		end
+	end)
+	confirm:SetScript("OnLeave", function(self)
+		self.icon:SetVertexColor(0.45, 0.95, 0.45, 0.95)
+		if GameTooltip and GameTooltip:IsOwned(self) then
+			GameTooltip:Hide()
+		end
+	end)
+	confirm:SetScript("OnClick", function(self)
+		local parent = self:GetParent()
+		local session = parent and parent.sessionRef
+		ns.Replay.armedDelete = nil
+		if session then
+			ns.Replay:DeleteSessionNow(ns.DB.char, session)
+		end
+	end)
+	confirm:Hide()
+
+	row.delBtn = del
+	row.cancelBtn = cancel
+	row.confirmBtn = confirm
+end
+
+function ns.Replay:RequestDeleteSession(session)
+	if not session or session == ns.DB:Current() then
+		return
+	end
+	local journey = ns.DB.char
+	if type(journey) ~= "table" then
+		return
+	end
+	local gained = ns.DB:LevelsGained(session)
+	local leveled = type(session.lv) == "number" and type(session.el) == "number" and session.el > session.lv
+	if gained > 0 or leveled then
+		self.armedDelete = nil
+		self:RefreshList()
+		if StaticPopupDialogs and StaticPopup_Show then
+			if not StaticPopupDialogs.ZIPPER_DELETE_XP_SESSION then
+				StaticPopupDialogs.ZIPPER_DELETE_XP_SESSION = {
+					text = "%s",
+					button1 = L["Delete"],
+					button2 = L["Cancel"],
+					timeout = 0,
+					whileDead = true,
+					hideOnEscape = true,
+					preferredIndex = 3,
+					OnAccept = function(_, data)
+						if type(data) == "table" and data.journey and data.session then
+							ns.Replay:DeleteSessionNow(data.journey, data.session)
+						end
+					end,
+				}
+			end
+			local when = date("%m/%d %H:%M", session.s)
+			local dur = FormatClock((ns.DB:SessionStop(session) or session.s) - session.s)
+			local msg = string.format(
+				L["Delete session from %s (%s)?\n\nThis session gained +%.2f levels of XP and cannot be recovered."],
+				when, dur, gained or 0
+			)
+			StaticPopup_Show("ZIPPER_DELETE_XP_SESSION", msg, nil, {
+				journey = journey,
+				session = session,
+			})
+			return
+		end
+	end
+	self.armedDelete = session
+	self:RefreshList()
+end
+
+function ns.Replay:CaptureSelectionRefs()
+	local sessions = ns.DB:Sessions()
+	local span = {}
+	if self.mode == "span" and self.sessionLo and self.sessionHi then
+		for i = self.sessionLo, self.sessionHi do
+			if sessions[i] then
+				span[sessions[i]] = true
+			end
+		end
+	end
+	return {
+		journey = ns.DB.char,
+		mode = self.mode,
+		oldIndex = self.index,
+		idxSession = self.index and sessions[self.index] or nil,
+		span = span,
+	}
+end
+
+function ns.Replay:RestoreSelectionAfterDelete(snap)
+	self.armedDelete = nil
+	self.statsKey = nil
+	self.chapterKey = nil
+	if snap and snap.journey and snap.journey ~= ns.DB.char then
+		return
+	end
+	local sessions = ns.DB:Sessions()
+	local count = #sessions
+	local function findSession(target)
+		if not target then
+			return nil
+		end
+		for i = 1, count do
+			if sessions[i] == target then
+				return i
+			end
+		end
+		return nil
+	end
+	if count == 0 then
+		self.mode = "all"
+		self.index = nil
+		self.sessionLo = nil
+		self.sessionHi = nil
+	elseif self.mode == "one" then
+		local found = findSession(snap and snap.idxSession)
+		if found then
+			self.index = found
+		else
+			local fallback = (snap and snap.oldIndex) or self.index or count
+			if fallback > count then
+				fallback = count
+			elseif fallback < 1 then
+				fallback = 1
+			end
+			self.index = fallback
+		end
+		if sessions[self.index] == ns.DB:Current() then
+			self.mode = "current"
+			self.index = nil
+		end
+	elseif self.mode == "span" then
+		local lo, hi
+		local kept = snap and snap.span
+		if kept then
+			for i = 1, count do
+				if kept[sessions[i]] then
+					if not lo then
+						lo = i
+					end
+					hi = i
+				end
+			end
+		end
+		if not lo then
+			self.mode = "all"
+			self.index = nil
+			self.sessionLo = nil
+			self.sessionHi = nil
+		elseif lo == hi then
+			self.sessionLo = lo
+			self.sessionHi = lo
+			if sessions[lo] == ns.DB:Current() then
+				self.mode = "current"
+				self.index = nil
+			else
+				self.mode = "one"
+				self.index = lo
+			end
+		else
+			self.index = lo
+			self.sessionLo = lo
+			self.sessionHi = hi
+		end
+	end
+	if self.frame and self.frame:IsShown() then
+		self:ReloadView()
+		self:SyncSessionAnchor()
+		self:RefreshList()
+		self:UpdateReadout()
+		self:Redraw()
+	else
+		self.dirty = true
+	end
+end
+
+function ns.Replay:DeleteSessionNow(journey, session)
+	if type(journey) ~= "table" or not session or session == ns.DB:Current() then
+		return
+	end
+	local when = date("%m/%d %H:%M", session.s)
+	local snap = self:CaptureSelectionRefs()
+	local removed = ns.DB:DeleteSession(journey, session)
+	if not removed then
+		return
+	end
+	if journey == ns.DB.char then
+		self:RestoreSelectionAfterDelete(snap)
+	else
+		self.armedDelete = nil
+	end
+	if ns.Config then
+		ns.Config:RefreshSize()
+		ns.Config:RefreshIsolationList()
+		ns.Config:RefreshPurgeList()
+	end
+	ns:Print(string.format(L["Deleted session from %s."], when))
+end
+
 function ns.Replay:RefreshList()
 	local content = self.listContent
 	if not content then
@@ -4478,6 +4764,18 @@ function ns.Replay:RefreshList()
 	end
 	self.levelListKey = nil
 	local sessions = ns.DB:Sessions()
+	if self.armedDelete then
+		local found = false
+		for i = 1, #sessions do
+			if sessions[i] == self.armedDelete then
+				found = true
+				break
+			end
+		end
+		if not found then
+			self.armedDelete = nil
+		end
+	end
 	if self.charButton then
 		if self.blockedKey and self.blockedLabel then
 			self.charButton:SetText(self.blockedLabel)
@@ -4518,20 +4816,33 @@ function ns.Replay:RefreshList()
 			end)
 			self.rows[i] = row
 		end
+		EnsureSessionRowActions(row)
 		row:SetHeight(24)
 		if row.badge then
 			row.badge:Hide()
 		end
 		row.levelGroup = nil
+		row.sessionIndex = index
+		row.sessionRef = session
+		row.level = nil
+		local isCurrent = session == ns.DB:Current()
+		local armed = not isCurrent and self.armedDelete == session
+		row.delBtn:SetShown(not isCurrent and not armed)
+		row.confirmBtn:SetShown(armed)
+		row.cancelBtn:SetShown(armed)
 		row.label:ClearAllPoints()
 		row.label:SetPoint("LEFT", 10, 0)
-		row.label:SetPoint("RIGHT", -8, 0)
+		if armed then
+			row.label:SetPoint("RIGHT", -46, 0)
+		elseif not isCurrent then
+			row.label:SetPoint("RIGHT", -24, 0)
+		else
+			row.label:SetPoint("RIGHT", -8, 0)
+		end
 		row.label:SetJustifyH("LEFT")
 		row.label:SetJustifyV("MIDDLE")
-		row.label:SetWordWrap(true)
+		row.label:SetWordWrap(false)
 		row.label:SetIndentedWordWrap(false)
-		row.sessionIndex = index
-		row.level = nil
 		local duration = (ns.DB:SessionStop(session) or session.s) - session.s
 		local lo = self.sessionLo
 		local hi = self.sessionHi or lo
@@ -4543,10 +4854,10 @@ function ns.Replay:RefreshList()
 		elseif self.mode == "one" then
 			selected = self.index == index
 		elseif self.mode == "current" then
-			selected = session == ns.DB:Current()
+			selected = isCurrent
 		end
 		local gained = ns.DB:LevelsGained(session)
-		local when = session == ns.DB:Current() and L["Current"] or date("%m/%d %H:%M", session.s)
+		local when = isCurrent and L["Current"] or date("%m/%d %H:%M", session.s)
 		row.label:SetText(string.format(L["%s    %s    +%.2f lv    %d kills"], when, FormatClock(duration), gained, session.kills or 0))
 		row.bar:SetShown(selected)
 		if selected then
@@ -5347,6 +5658,7 @@ function ns.Replay:CreateFrame()
 		ns.Replay:Redraw()
 	end)
 	frame:SetScript("OnHide", function()
+		ns.Replay.armedDelete = nil
 		ns.Replay.playing = false
 		if ns.Replay.playButton then
 			ns.Replay.playButton:SetText(L["Play"])

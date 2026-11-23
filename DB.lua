@@ -2329,6 +2329,276 @@ function ns.DB:LevelFromLink(link)
 	return lo, hi
 end
 
+local MAP_TYPE_ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
+
+local function MapTooWide(mapID)
+	if not mapID or not C_Map or not C_Map.GetMapInfo then
+		return false
+	end
+	local info = C_Map.GetMapInfo(mapID)
+	local mapType = info and info.mapType
+	return type(mapType) == "number" and mapType < MAP_TYPE_ZONE
+end
+
+local function SafeMaxLevel()
+	local maxLv = GetMaxPlayerLevel and GetMaxPlayerLevel()
+	if type(maxLv) == "number" and not (issecretvalue and issecretvalue(maxLv)) and maxLv >= 1 then
+		return maxLv
+	end
+	return 60
+end
+
+local function MergeSpansDuration(spans, t0, t1)
+	if #spans == 0 or not t0 or not t1 or t1 <= t0 then
+		return 0
+	end
+	table.sort(spans, function(a, b)
+		if a[1] == b[1] then
+			return a[2] < b[2]
+		end
+		return a[1] < b[1]
+	end)
+	local total = 0
+	local curA, curB
+	for i = 1, #spans do
+		local a, b = spans[i][1], spans[i][2]
+		if a < t0 then
+			a = t0
+		end
+		if b > t1 then
+			b = t1
+		end
+		if b > a then
+			if not curA then
+				curA, curB = a, b
+			elseif a <= curB then
+				if b > curB then
+					curB = b
+				end
+			else
+				total = total + (curB - curA)
+				curA, curB = a, b
+			end
+		end
+	end
+	if curA then
+		total = total + (curB - curA)
+	end
+	return total
+end
+
+function ns.DB:SessionBytes(journey, session)
+	if not Usable(session) then
+		return 0
+	end
+	local host = journey or self:HostFor(session)
+	local raw = host and type(host.tracks) == "table" and host.tracks[session.id] or nil
+	local trackBytes = 0
+	if type(raw) == "string" then
+		trackBytes = #raw
+	elseif type(raw) == "table" then
+		-- Match MeasureJourney's per-track estimate without unpacking anything new.
+		local points = type(raw.t) == "table" and #raw.t or 0
+		local events = type(raw.ek) == "table" and #raw.ek or 0
+		trackBytes = math.floor(4 + points * 5.2 + events * 9.5 + 0.5)
+	end
+	return 48 + trackBytes
+end
+
+-- Inspect a session's maps and events without unpacking a Z3 track into tables.
+function ns.DB:InspectSession(journey, session)
+	if not Usable(session) then
+		return nil
+	end
+	local host = journey or self:HostFor(session)
+	local raw = host and type(host.tracks) == "table" and host.tracks[session.id] or nil
+	local startAt = session.s
+	local stopAt = self:SessionStop(session) or startAt
+	local duration = stopAt - startAt
+	if duration < 0 then
+		duration = 0
+	end
+	local cityMaps = ns.CityMaps or {}
+	local Kind = ns.Kind
+	local samples = 0
+	local events = 0
+	local hasMap = false
+	local allCity = true
+	local hasInstance = false
+	local hasBoss = false
+	local hasDeath = false
+	local hasQuestAccept = false
+	local hasCraftOrFish = false
+	local hasKeptGroup = false
+	local hasKeepEvent = false
+	local hasOtherKeepEvent = false
+	local idleSpans = {}
+	local openIdle, openAfk
+
+	local function handleEvent(when, kind, _, _, _, extra)
+		extra = extra or 0
+		local spec = ns.EventSpec and ns.EventSpec[kind]
+		if kind == Kind.GROUP then
+			if extra >= self.GROUP_KEPT then
+				hasKeptGroup = true
+				hasKeepEvent = true
+			end
+		elseif spec and spec.keepsSession then
+			if spec.shape ~= "span" or extra ~= 1 then
+				hasKeepEvent = true
+				if kind ~= Kind.CRAFT and kind ~= Kind.FISH then
+					hasOtherKeepEvent = true
+				end
+			end
+		end
+		if kind == Kind.INSTANCE_ENTER or kind == Kind.INSTANCE_LEAVE then
+			hasInstance = true
+		elseif kind == Kind.BOSS then
+			hasBoss = true
+			hasInstance = true
+		elseif kind == Kind.DEATH then
+			hasDeath = true
+		elseif kind == Kind.QUEST_ACCEPT then
+			hasQuestAccept = true
+		elseif (kind == Kind.CRAFT or kind == Kind.FISH) and extra ~= 1 then
+			hasCraftOrFish = true
+		elseif kind == Kind.IDLE then
+			if extra == 0 then
+				if not openIdle then
+					openIdle = when
+				end
+			elseif extra == 1 then
+				if openIdle then
+					idleSpans[#idleSpans + 1] = { openIdle, when }
+					openIdle = nil
+				end
+			end
+		elseif kind == Kind.AFK_START then
+			if not openAfk then
+				openAfk = when
+			end
+		elseif kind == Kind.AFK_END then
+			if openAfk then
+				idleSpans[#idleSpans + 1] = { openAfk, when }
+				openAfk = nil
+			end
+		end
+	end
+
+	if type(raw) == "table" then
+		local m = raw.m
+		samples = type(raw.t) == "table" and #raw.t or 0
+		if type(m) == "table" then
+			for i = 1, samples do
+				local mapID = m[i]
+				if type(mapID) == "number" and mapID > 0 and not MapTooWide(mapID) then
+					hasMap = true
+					if not cityMaps[mapID] then
+						allCity = false
+					end
+				end
+			end
+		end
+		local ek = raw.ek
+		if type(ek) == "table" then
+			events = #ek
+			local et, em, ex, ey, ea = raw.et, raw.em, raw.ex, raw.ey, raw.ea
+			for i = 1, events do
+				handleEvent(startAt + (et and et[i] or 0), ek[i], em and em[i] or 0, ex and ex[i] or 0, ey and ey[i] or 0, ea and ea[i] or 0)
+			end
+		end
+	elseif type(raw) == "string" and raw:sub(1, 3) == "Z3:" then
+		local bytes = Decode64(raw:sub(4))
+		if bytes:byte(1) == 90 and bytes:byte(2) == 51 then
+			local index = 3
+			samples, index = ReadVar(bytes, index)
+			events, index = ReadVar(bytes, index)
+			-- Skip sample timestamps (t).
+			for _ = 1, samples do
+				index = SkipVar(bytes, index)
+			end
+			-- Read sample mapIDs (m).
+			local prevM = 0
+			for _ = 1, samples do
+				local delta
+				delta, index = ReadVar(bytes, index)
+				prevM = prevM + Unzig(delta)
+				if prevM > 0 and not MapTooWide(prevM) then
+					hasMap = true
+					if not cityMaps[prevM] then
+						allCity = false
+					end
+				end
+			end
+			-- Skip sample x and y.
+			for _ = 1, samples * 2 do
+				index = SkipVar(bytes, index)
+			end
+			index = SkipRuns(bytes, index, samples)
+			index = SkipRuns(bytes, index, samples)
+			local prevT = 0
+			for _ = 1, events do
+				local delta, kind, mapID, x, y, extra
+				delta, index = ReadVar(bytes, index)
+				prevT = prevT + delta
+				kind, index = ReadVar(bytes, index)
+				mapID, index = ReadVar(bytes, index)
+				x, index = ReadVar(bytes, index)
+				y, index = ReadVar(bytes, index)
+				extra, index = ReadVar(bytes, index)
+				handleEvent(startAt + prevT, kind, Unzig(mapID), Unzig(x), Unzig(y), Unzig(extra))
+			end
+		end
+	end
+
+	if openIdle then
+		idleSpans[#idleSpans + 1] = { openIdle, stopAt }
+	end
+	if openAfk then
+		idleSpans[#idleSpans + 1] = { openAfk, stopAt }
+	end
+
+	local idleSeconds = MergeSpansDuration(idleSpans, startAt, stopAt)
+	local idleRatio = duration > 0 and (idleSeconds / duration) or 0
+	local xpGained = self:LevelsGained(session)
+	local leveledUp = type(session.lv) == "number" and type(session.el) == "number" and session.el > session.lv
+	local kills = session.kills or 0
+	local quests = session.quests or 0
+	local maxLv = SafeMaxLevel()
+	local preCap = type(session.lv) ~= "number" or session.lv < maxLv
+	local worthKeeping = (kills > 0)
+		or (quests > 0)
+		or leveledUp
+		or (type(session.reach) == "number" and session.reach >= (ns.QUIET_YARDS or 250))
+		or hasKeepEvent
+		or (type(session.reach) ~= "number" and samples > 0)
+
+	return {
+		duration = duration,
+		bytes = self:SessionBytes(host, session),
+		samples = samples,
+		events = events,
+		kills = kills,
+		quests = quests,
+		xpGained = xpGained,
+		leveledUp = leveledUp,
+		reach = session.reach,
+		preCap = preCap,
+		cityOnly = hasMap and allCity and not hasInstance,
+		hasInstance = hasInstance,
+		hasBoss = hasBoss,
+		hasDeath = hasDeath,
+		hasQuestAccept = hasQuestAccept,
+		hasCraftOrFish = hasCraftOrFish,
+		hasKeptGroup = hasKeptGroup,
+		hasKeepEvent = hasKeepEvent,
+		hasOtherKeepEvent = hasOtherKeepEvent,
+		idleSeconds = idleSeconds,
+		idleRatio = idleRatio,
+		quiet = not worthKeeping,
+	}
+end
+
 function ns.DB:SessionWorthKeeping(journey, session)
 	if not Usable(session) then
 		return true
@@ -2374,38 +2644,163 @@ function ns.DB:RemoveSession(journey, index)
 	if not Usable(session) or session == self.session then
 		return false
 	end
+	local s0 = session.s
+	local s1 = session.seen or session.s
 	table.remove(sessions, index)
 	if type(journey.tracks) == "table" and session.id then
 		journey.tracks[session.id] = nil
+	end
+	if type(journey.levels) == "table" and type(s0) == "number" and type(s1) == "number" then
+		for i = #journey.levels, 1, -1 do
+			local row = journey.levels[i]
+			if type(row) == "table" and type(row.t) == "number" and row.t >= s0 and row.t <= s1 then
+				table.remove(journey.levels, i)
+			end
+		end
 	end
 	self.eventGen = (self.eventGen or 0) + 1
 	return true
 end
 
-function ns.DB:DropQuietTail()
-	local journey = self.record
-	local sessions = journey and journey.sessions
-	if type(sessions) ~= "table" then
-		return 0
-	end
-	local last = sessions[#sessions]
-	if not Usable(last) or last == self.session then
-		return 0
-	end
-	local seen = last.seen or last.s
-	if type(seen) == "number" and (self:Now() - seen) <= ns.CONTINUE_SECONDS then
-		return 0
-	end
-	if self:SessionWorthKeeping(journey, last) then
-		return 0
-	end
-	if not self:RemoveSession(journey, #sessions) then
-		return 0
-	end
-	self:PruneIdleCompany(false)
+function ns.DB:FinalizeSessionRemovals(touched, closedOnly)
+	self:PruneIdleCompany(closedOnly and true or false)
 	self.companySpanKey = nil
 	self.companyReportKey = nil
-	return 1
+	if type(touched) ~= "table" then
+		return
+	end
+	self:EnsureStore()
+	local journeys = ZipperDB.journeys
+	for journey in pairs(touched) do
+		if type(journey) == "table" and HasBody(journey) then
+			journey.bytes = self:MeasureJourney(journey)
+			if journey == self.record and self.playerKey and type(journeys) == "table" then
+				local stub = journeys[self.playerKey]
+				if type(stub) == "table" and stub ~= journey then
+					SyncStubFromBody(stub, journey)
+					SnapshotPeopleRefs(stub, journey)
+				end
+			end
+		end
+	end
+end
+
+function ns.DB:DeleteSession(journey, session)
+	if type(journey) ~= "table" or not Usable(session) or session == self.session then
+		return false, 0
+	end
+	local sessions = journey.sessions
+	if type(sessions) ~= "table" then
+		return false, 0
+	end
+	for i = #sessions, 1, -1 do
+		if sessions[i] == session then
+			local bytes = self:SessionBytes(journey, session)
+			if self:RemoveSession(journey, i) then
+				self:FinalizeSessionRemovals({ [journey] = true }, true)
+				return true, bytes
+			end
+			return false, 0
+		end
+	end
+	return false, 0
+end
+
+function ns.DB:DeleteSessions(items)
+	if type(items) ~= "table" or #items == 0 then
+		return 0, 0
+	end
+	local byJourney = {}
+	for i = 1, #items do
+		local entry = items[i]
+		local journey = entry and entry.journey
+		local session = entry and entry.session
+		if type(journey) == "table" and Usable(session) and session ~= self.session then
+			local set = byJourney[journey]
+			if not set then
+				set = {}
+				byJourney[journey] = set
+			end
+			set[session] = true
+		end
+	end
+	local dropped = 0
+	local freedBytes = 0
+	local touched = {}
+	for journey, set in pairs(byJourney) do
+		local sessions = journey.sessions
+		if type(sessions) == "table" then
+			for i = #sessions, 1, -1 do
+				local session = sessions[i]
+				if set[session] and session ~= self.session then
+					local bytes = self:SessionBytes(journey, session)
+					if self:RemoveSession(journey, i) then
+						dropped = dropped + 1
+						freedBytes = freedBytes + bytes
+						touched[journey] = true
+					end
+				end
+			end
+		end
+	end
+	if dropped > 0 then
+		self:FinalizeSessionRemovals(touched, true)
+	end
+	return dropped, freedBytes
+end
+
+function ns.DB:DropQuietTail()
+	self:EnsureStore()
+	local journeys = ZipperDB.journeys
+	local now = self:Now()
+	local maxSeconds = ns.QUIET_MAX_SECONDS or 900
+	local dropped = 0
+	local seenJourneys = {}
+	local touched = {}
+
+	local function checkTail(journey)
+		if type(journey) ~= "table" or seenJourneys[journey] then
+			return
+		end
+		seenJourneys[journey] = true
+		local sessions = journey.sessions
+		if type(sessions) ~= "table" or #sessions == 0 then
+			return
+		end
+		local last = sessions[#sessions]
+		if not Usable(last) or last == self.session then
+			return
+		end
+		local seen = last.seen or last.s
+		if type(seen) == "number" and (now - seen) <= ns.CONTINUE_SECONDS then
+			return
+		end
+		if type(seen) == "number" and (seen - last.s) > maxSeconds then
+			return
+		end
+		if self:SessionWorthKeeping(journey, last) then
+			return
+		end
+		if self:RemoveSession(journey, #sessions) then
+			dropped = dropped + 1
+			touched[journey] = true
+		end
+	end
+
+	if type(journeys) == "table" then
+		for _, journey in pairs(journeys) do
+			if HasBody(journey) then
+				checkTail(journey)
+			end
+		end
+	end
+	if HasBody(self.record) then
+		checkTail(self.record)
+	end
+	if dropped > 0 then
+		self:FinalizeSessionRemovals(touched)
+	end
+	return dropped
 end
 
 function ns.DB:DropQuietSessions()
@@ -2416,6 +2811,7 @@ function ns.DB:DropQuietSessions()
 	end
 	local dropped = 0
 	local seen = {}
+	local touched = {}
 	local function sweep(journey)
 		if type(journey) ~= "table" or seen[journey] then
 			return
@@ -2430,6 +2826,7 @@ function ns.DB:DropQuietSessions()
 			if session ~= self.session and not self:SessionWorthKeeping(journey, session) then
 				if self:RemoveSession(journey, i) then
 					dropped = dropped + 1
+					touched[journey] = true
 				end
 			end
 		end
@@ -2443,11 +2840,133 @@ function ns.DB:DropQuietSessions()
 		sweep(self.record)
 	end
 	if dropped > 0 then
-		self:PruneIdleCompany(false)
-		self.companySpanKey = nil
-		self.companyReportKey = nil
+		self:FinalizeSessionRemovals(touched, true)
 	end
 	return dropped
+end
+
+-- Dry-run session finder for automated cleanup presets.
+function ns.DB:FindCleanupSessions(opts)
+	self:EnsureStore()
+	opts = opts or {}
+	local preset = opts.preset or "quiet"
+	local scope = opts.scope or "all"
+	local maxSeconds = (type(opts.maxMinutes) == "number" and opts.maxMinutes > 0) and (opts.maxMinutes * 60) or nil
+	local idlePct = type(opts.idlePct) == "number" and opts.idlePct or 80
+	local protectPreCap = opts.protectPreCap ~= false
+	local keepCraftFish = opts.keepCraftFish ~= false
+
+	local targets = {}
+	local seen = {}
+	local function addJourney(key, journey)
+		if type(journey) ~= "table" or not HasBody(journey) or seen[journey] then
+			return
+		end
+		seen[journey] = true
+		targets[#targets + 1] = { key = key, journey = journey, label = self:JourneyLabel(journey) }
+	end
+
+	if scope == "current" then
+		local cur = self.record or self.char
+		if cur then
+			addJourney(self.playerKey or self.viewKey or "", cur)
+		end
+	else
+		local journeys = ZipperDB.journeys
+		if type(journeys) == "table" then
+			for key, journey in pairs(journeys) do
+				if HasBody(journey) then
+					addJourney(key, journey)
+				end
+			end
+		end
+	end
+
+	local matches = {}
+	for t = 1, #targets do
+		local entry = targets[t]
+		local journey = entry.journey
+		local sessions = journey.sessions
+		if type(sessions) == "table" then
+			for i = 1, #sessions do
+				local session = sessions[i]
+				if Usable(session) and session ~= self.session then
+					local info = self:InspectSession(journey, session)
+					if info then
+						-- Hard milestone excludes for automated cleanups.
+						local blocked = info.xpGained > 0
+							or info.leveledUp
+							or info.kills > 0
+							or info.quests > 0
+							or info.hasQuestAccept
+							or info.hasInstance
+							or info.hasBoss
+							or info.hasDeath
+							or info.hasKeptGroup
+						if not blocked then
+							local matched = false
+							local reason = nil
+							if preset == "quiet" then
+								if info.quiet and (not maxSeconds or info.duration <= maxSeconds) then
+									matched = true
+									reason = L["Quiet stop"]
+								end
+							elseif preset == "idle" then
+								if info.duration >= 60
+									and (info.idleRatio * 100) >= idlePct
+									and not info.hasCraftOrFish
+									and not info.hasOtherKeepEvent
+									and (not maxSeconds or info.duration <= maxSeconds)
+								then
+									matched = true
+									reason = string.format(L["%d%% idle"], math.floor(info.idleRatio * 100 + 0.5))
+								end
+							elseif preset == "city" then
+								if info.cityOnly
+									and (not protectPreCap or not info.preCap)
+									and (not keepCraftFish or not info.hasCraftOrFish)
+									and (not maxSeconds or info.duration <= maxSeconds)
+								then
+									matched = true
+									reason = L["City only"]
+								end
+							elseif preset == "short" then
+								local limit = maxSeconds or (ns.QUIET_MAX_SECONDS or 900)
+								if info.duration <= limit
+									and not info.hasOtherKeepEvent
+									and (not protectPreCap or not info.preCap)
+									and (not keepCraftFish or not info.hasCraftOrFish)
+								then
+									matched = true
+									reason = L["Short stop"]
+								end
+							end
+							if matched then
+								matches[#matches + 1] = {
+									key = entry.key,
+									journey = journey,
+									charLabel = entry.label,
+									session = session,
+									duration = info.duration,
+									bytes = info.bytes,
+									reason = reason,
+									info = info,
+								}
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(matches, function(a, b)
+		if a.session.s == b.session.s then
+			return (a.charLabel or "") < (b.charLabel or "")
+		end
+		return a.session.s > b.session.s
+	end)
+	return matches
 end
 
 function ns.DB:Open(now, forceNew)
