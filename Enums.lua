@@ -34,7 +34,40 @@ ns.Kind = {
 	FISH = 24,
 	IDLE = 25,
 	CRAFT = 26,
+	ROLE = 27,
 }
+
+-- Combat role. Stored as a number on session.role and Kind.ROLE event extra.
+ns.Role = {
+	NONE = 0,
+	TANK = 1,
+	HEALER = 2,
+	DAMAGER = 3,
+}
+
+ns.RoleName = {
+	[1] = L["Tank"],
+	[2] = L["Healer"],
+	[3] = L["DPS"],
+}
+
+ns.PureDamageClass = {
+	MAGE = true,
+	ROGUE = true,
+	HUNTER = true,
+	WARLOCK = true,
+}
+
+function ns.RoleFromString(token)
+	if token == "TANK" then
+		return ns.Role.TANK
+	elseif token == "HEALER" then
+		return ns.Role.HEALER
+	elseif token == "DAMAGER" then
+		return ns.Role.DAMAGER
+	end
+	return ns.Role.NONE
+end
 
 -- How a path sample was traveled. Stored on the point, not as a string.
 ns.Travel = {
@@ -347,6 +380,12 @@ DefineEvent(Kind.CRAFT, {
 	blocksAFK = true,
 	blocksIdle = true,
 	pause = { key = "craft", label = L["Crafting"], order = 7, still = false },
+})
+
+DefineEvent(Kind.ROLE, {
+	name = L["Role"],
+	color = { 0.65, 0.78, 0.92 },
+	pip = false,
 })
 
 -- Ordered lists derived once from ns.EventSpec for Config, Replay, and Viz.

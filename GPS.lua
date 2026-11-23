@@ -572,6 +572,129 @@ function ns.GPS:MarkAt(kind, extra, when)
 	return true
 end
 
+-- For non-map state transitions (such as role changes inside instances where
+-- ReadPosition returns nil): attach live coords when available, else last known.
+function ns.GPS:MarkAny(kind, extra, when)
+	if not ns.Config:WantsKind(kind) then
+		return true
+	end
+	if type(when) ~= "number" then
+		when = ns.DB:Now()
+	end
+	local mapID, x, y = self:ReadPosition()
+	if not mapID then
+		mapID = self.lastMap or 0
+		x = self.lastNormX or 0
+		y = self.lastNormY or 0
+	end
+	ns.DB:AddEvent(kind, mapID, x, y, when, extra or 0)
+	Notify()
+	return true
+end
+
+function ns.GPS:ReadRole()
+	if C_SpecializationInfo and C_SpecializationInfo.IsInitialized then
+		if not PlainBool(C_SpecializationInfo.IsInitialized(), false) then
+			return nil
+		end
+	end
+	-- Trust explicit TANK or HEALER group role; NONE or DAMAGER may just be a default.
+	if UnitGroupRolesAssigned then
+		local assigned = UnitGroupRolesAssigned("player")
+		if type(assigned) == "string" and not (issecretvalue and issecretvalue(assigned)) then
+			if assigned == "TANK" then
+				return ns.Role.TANK
+			elseif assigned == "HEALER" then
+				return ns.Role.HEALER
+			end
+		end
+	end
+	local classFile, classID
+	if UnitClass then
+		local _
+		_, classFile, classID = UnitClass("player")
+	end
+	-- Fall back to active specialization / dominant talent tree.
+	if C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo then
+		local specIndex = C_SpecializationInfo.GetSpecialization and C_SpecializationInfo.GetSpecialization() or nil
+		if IsPlainNumber(specIndex) and specIndex > 0 then
+			local _, _, _, _, role = C_SpecializationInfo.GetSpecializationInfo(specIndex)
+			if type(role) == "string" and not (issecretvalue and issecretvalue(role)) then
+				local parsed = ns.RoleFromString(role)
+				if parsed ~= ns.Role.NONE then
+					return parsed
+				end
+			end
+		end
+		local isTalentTab = GetSpecializationSystem
+			and Enum
+			and Enum.SpecializationSystem
+			and GetSpecializationSystem() == Enum.SpecializationSystem.TalentTab
+		local numSpecs = (isTalentTab and IsPlainNumber(classID) and C_SpecializationInfo.GetNumSpecializationsForClassID)
+			and C_SpecializationInfo.GetNumSpecializationsForClassID(classID)
+			or 0
+		if IsPlainNumber(numSpecs) and numSpecs > 0 then
+			local bestPoints, bestRole, tied = 0, ns.Role.NONE, false
+			for i = 1, numSpecs do
+				local _, _, _, _, role, _, pointsSpent = C_SpecializationInfo.GetSpecializationInfo(i)
+				if IsPlainNumber(pointsSpent) and pointsSpent > 0 then
+					if type(role) == "string" and not (issecretvalue and issecretvalue(role)) then
+						local parsed = ns.RoleFromString(role)
+						if parsed ~= ns.Role.NONE then
+							if pointsSpent > bestPoints then
+								bestPoints = pointsSpent
+								bestRole = parsed
+								tied = false
+							elseif pointsSpent == bestPoints and parsed ~= bestRole then
+								tied = true
+							end
+						end
+					end
+				end
+			end
+			if bestRole ~= ns.Role.NONE and not tied then
+				return bestRole
+			end
+		end
+	end
+	-- Pure DPS classes are always DPS even before talents unlock.
+	if type(classFile) == "string" and not (issecretvalue and issecretvalue(classFile)) and ns.PureDamageClass[classFile] then
+		return ns.Role.DAMAGER
+	end
+	return ns.Role.NONE
+end
+
+function ns.GPS:SyncRole()
+	local session = ns.DB:Current()
+	if not session then
+		return
+	end
+	local role = self:ReadRole()
+	if role == nil then
+		return
+	end
+	if self.roleReady ~= true then
+		if self.continued then
+			local lastRole = ns.DB:LastSessionRole(session)
+			if lastRole == nil then
+				session.role = role
+			elseif lastRole ~= role then
+				self:MarkAny(Kind.ROLE, role)
+			end
+		else
+			session.role = role
+		end
+		self.role = role
+		self.roleReady = true
+		return
+	end
+	if role == self.role then
+		return
+	end
+	self.role = role
+	self:MarkAny(Kind.ROLE, role)
+end
+
 function ns.GPS:ReadInstance()
 	local inside, kind = IsInInstance()
 	if not inside or kind == nil or kind == "none" then
@@ -932,6 +1055,11 @@ function ns.GPS:EnsureEvents()
 	add("BOSS_KILL")
 	add("PLAYER_CONTROL_LOST")
 	add("PLAYER_CONTROL_GAINED")
+	add("PLAYER_ROLES_ASSIGNED")
+	add("PLAYER_TALENT_UPDATE")
+	add("ACTIVE_TALENT_GROUP_CHANGED")
+	add("PLAYER_SPECIALIZATION_CHANGED")
+	add("CHARACTER_POINTS_CHANGED")
 	for ev in pairs(self.activityEvents) do
 		add(ev)
 	end
@@ -953,6 +1081,7 @@ function ns.GPS:Tick()
 	self:SyncGhost()
 	self:SyncTaxi()
 	self:SyncInstance()
+	self:SyncRole()
 	self:CheckSummon()
 	self:NotifyActivities("OnTick")
 	if self.needAnchor then
@@ -1073,6 +1202,18 @@ function ns.GPS:OnEvent(event, ...)
 		self:OnBossKill(encounterID)
 	elseif event == "PLAYER_CONTROL_LOST" or event == "PLAYER_CONTROL_GAINED" then
 		self:SyncTaxi()
+	elseif
+		event == "PLAYER_ROLES_ASSIGNED"
+		or event == "PLAYER_TALENT_UPDATE"
+		or event == "ACTIVE_TALENT_GROUP_CHANGED"
+		or event == "CHARACTER_POINTS_CHANGED"
+	then
+		self:SyncRole()
+	elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
+		local unit = ...
+		if unit == nil or (not (issecretvalue and issecretvalue(unit)) and unit == "player") then
+			self:SyncRole()
+		end
 	end
 	if event == "UNIT_AURA" then
 		self.auraScanArmed = true
@@ -1100,6 +1241,8 @@ function ns.GPS:Start(continued)
 	self.taxiReady = false
 	self.mountReady = false
 	self.afkReady = false
+	self.roleReady = false
+	self.role = nil
 
 	local session = ns.DB:Current()
 	local track = session and ns.DB:Track(session) or nil
@@ -1119,6 +1262,7 @@ function ns.GPS:Start(continued)
 	self:SyncMount()
 	self:SyncAFK()
 	self:SyncTaxi()
+	self:SyncRole()
 	self:NotifyActivities("OnStart")
 
 	if not self.ticker then

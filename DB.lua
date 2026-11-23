@@ -1110,8 +1110,12 @@ function ns.DB:BindPlayer()
 	end
 	roster.name = name
 	roster.realm = realm
-	local _, classFile = UnitClass and UnitClass("player") or nil
-	if type(classFile) == "string" and classFile ~= "" and not (issecretvalue and issecretvalue(classFile)) then
+	local classFile
+	if UnitClass then
+		local _
+		_, classFile = UnitClass("player")
+	end
+	if type(classFile) == "string" and not (issecretvalue and issecretvalue(classFile)) and classFile ~= "" then
 		roster.class = classFile
 	end
 
@@ -3258,6 +3262,30 @@ function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 		self:CreditCompany(now)
 	end
 	return true
+end
+
+function ns.DB:LastSessionRole(session)
+	session = session or self.session
+	if not session then
+		return nil
+	end
+	local track = self:Track(session)
+	local ek = track and track.ek
+	local ea = track and track.ea
+	if type(ek) == "table" then
+		for i = #ek, 1, -1 do
+			if ek[i] == ns.Kind.ROLE then
+				local val = ea and ea[i]
+				if type(val) == "number" and val >= 0 then
+					return val
+				end
+			end
+		end
+	end
+	if type(session.role) == "number" and session.role >= 0 then
+		return session.role
+	end
+	return nil
 end
 
 function ns.DB:LastInstanceDoor()
