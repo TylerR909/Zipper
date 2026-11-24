@@ -2663,6 +2663,7 @@ function ns.DB:RemoveSession(journey, index)
 		end
 	end
 	self.eventGen = (self.eventGen or 0) + 1
+	self.companyGen = (self.companyGen or 0) + 1
 	return true
 end
 
@@ -2670,6 +2671,8 @@ function ns.DB:FinalizeSessionRemovals(touched, closedOnly)
 	self:PruneIdleCompany(closedOnly and true or false)
 	self.companySpanKey = nil
 	self.companyReportKey = nil
+	self.creditedCompany = nil
+	self.joinMarkerDone = nil
 	if type(touched) ~= "table" then
 		return
 	end
@@ -3231,8 +3234,10 @@ function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 	end
 	local n = #track.ek
 	local insertAt = n + 1
+	local backdated = false
 	-- Idle start is backdated; keep et ordered so replay scans stay correct.
 	if n > 0 and offset < (track.et[n] or 0) then
+		backdated = true
 		insertAt = 1
 		for i = n, 1, -1 do
 			if (track.et[i] or 0) <= offset then
@@ -3258,8 +3263,43 @@ function ns.DB:AddEventOn(session, kind, mapID, x, y, now, extra)
 	track.ea[insertAt] = extra or 0
 	session.seen = self:Now()
 	self.eventGen = (self.eventGen or 0) + 1
+	local companyCredited = false
 	if kind ~= ns.Kind.GROUP and self:CompanyQualifies(kind) then
-		self:CreditCompany(now)
+		companyCredited = self:CreditCompany(now)
+	end
+	if backdated or kind == ns.Kind.BOSS or kind == ns.Kind.INSTANCE_ENTER or kind == ns.Kind.INSTANCE_LEAVE or kind == ns.Kind.GROUP then
+		self.companyGen = (self.companyGen or 0) + 1
+	elseif not companyCredited and session == self.session and self.companyReportJourney == self.record and self.companyByGuid then
+		local isCounted = kind == ns.Kind.KILL or kind == ns.Kind.QUEST_TURNIN or kind == ns.Kind.QUEST_ACCEPT or kind == ns.Kind.DEATH
+		local with = isCounted and self.record and self.record.with
+		if type(with) == "table" then
+			local elite, rare
+			if kind == ns.Kind.KILL then
+				local _
+				_, elite, rare = self:ReadKill(extra)
+			end
+			for guid, spans in pairs(with) do
+				if type(spans) == "table" and (#spans % 2 == 1) and type(spans[#spans]) == "number" and now >= spans[#spans] then
+					local row = self.companyByGuid[guid]
+					if row then
+						if kind == ns.Kind.KILL then
+							row.kills = (row.kills or 0) + 1
+							if elite then
+								row.elites = (row.elites or 0) + 1
+							elseif rare then
+								row.rares = (row.rares or 0) + 1
+							end
+						elseif kind == ns.Kind.QUEST_TURNIN then
+							row.quests = (row.quests or 0) + 1
+						elseif kind == ns.Kind.QUEST_ACCEPT then
+							row.accepts = (row.accepts or 0) + 1
+						elseif kind == ns.Kind.DEATH then
+							row.deaths = (row.deaths or 0) + 1
+						end
+					end
+				end
+			end
+		end
 	end
 	return true
 end
@@ -3612,23 +3652,102 @@ function ns.DB:JoinPlace(guid, when)
 	return self:SampleNear(self.record, when)
 end
 
+local function SampleNearPacked(raw, sessionStart, when, best)
+	if type(raw) ~= "string" or raw:sub(1, 3) ~= "Z3:" then
+		return best, nil, nil, nil
+	end
+	local count = DecodeHeader(raw)
+	if not count or count <= 0 then
+		return best, nil, nil, nil
+	end
+	local bytes = Decode64(raw:sub(4))
+	if bytes:byte(1) ~= 90 or bytes:byte(2) ~= 51 then
+		return best, nil, nil, nil
+	end
+	local index = 3
+	local total
+	total, index = ReadVar(bytes, index)
+	local _
+	_, index = ReadVar(bytes, index)
+	local bestIdx, bestDist = nil, best
+	local prev = 0
+	for n = 1, total do
+		local delta
+		delta, index = ReadVar(bytes, index)
+		prev = prev + delta
+		local dist = math.abs((sessionStart + prev) - when)
+		if not bestDist or dist < bestDist then
+			bestDist = dist
+			bestIdx = n
+		end
+	end
+	if not bestIdx or bestDist > 30 then
+		return best, nil, nil, nil
+	end
+	local function readAt(target)
+		local val = 0
+		local found = 0
+		for n = 1, total do
+			if n <= target then
+				local rawDelta
+				rawDelta, index = ReadVar(bytes, index)
+				val = val + Unzig(rawDelta)
+				if n == target then
+					found = val
+				end
+			else
+				index = SkipVar(bytes, index)
+			end
+		end
+		return found
+	end
+	local mapID = readAt(bestIdx)
+	local px = readAt(bestIdx)
+	local py = readAt(bestIdx)
+	return bestDist, mapID, px / ns.COORD_SCALE, py / ns.COORD_SCALE
+end
+
 function ns.DB:SampleNear(journey, when)
 	local sessions = journey and journey.sessions
-	if type(sessions) ~= "table" or type(when) ~= "number" then
+	local tracks = journey and journey.tracks
+	if type(sessions) ~= "table" or type(tracks) ~= "table" or type(when) ~= "number" then
 		return nil
 	end
 	local best, mapID, x, y
 	for i = 1, #sessions do
 		local session = sessions[i]
-		if type(session) == "table" and type(session.s) == "number" then
-			local track = self:Track(session)
-			for n = 1, #track.t do
-				local dist = math.abs((session.s + (track.t[n] or 0)) - when)
-				if not best or dist < best then
-					best = dist
-					mapID = track.m[n]
-					x = (track.x[n] or 0) / ns.COORD_SCALE
-					y = (track.y[n] or 0) / ns.COORD_SCALE
+		if type(session) == "table" and type(session.s) == "number" and session.s <= when + 30 then
+			local stop = (session == self.session) and self:Now() or (session.seen or session.s)
+			if stop >= when - 30 then
+				local raw = tracks[session.id]
+				if type(raw) == "table" then
+					local t = raw.t
+					local m = raw.m
+					local rx = raw.x
+					local ry = raw.y
+					for n = 1, #(t or {}) do
+						local dist = math.abs((session.s + (t[n] or 0)) - when)
+						if not best or dist < best then
+							best = dist
+							mapID = m and m[n] or nil
+							x = (rx and rx[n] or 0) / ns.COORD_SCALE
+							y = (ry and ry[n] or 0) / ns.COORD_SCALE
+							if best == 0 then
+								break
+							end
+						end
+					end
+				elseif type(raw) == "string" then
+					local dist, foundMap, foundX, foundY = SampleNearPacked(raw, session.s, when, best)
+					if foundMap ~= nil then
+						best = dist
+						mapID = foundMap
+						x = foundX
+						y = foundY
+					end
+				end
+				if best == 0 then
+					break
 				end
 			end
 		end
@@ -3686,11 +3805,23 @@ end
 
 function ns.DB:WriteJoinMarker(when)
 	local journey = self.record
-	if not journey or self:HasJoinMarker(journey, when) then
+	if not journey or not ns.Config:WantsKind(ns.Kind.GROUP) then
+		return false
+	end
+	if self.joinMarkerJourney ~= journey or type(self.joinMarkerDone) ~= "table" then
+		self.joinMarkerJourney = journey
+		self.joinMarkerDone = {}
+	end
+	if self.joinMarkerDone[when] then
+		return false
+	end
+	if self:HasJoinMarker(journey, when) then
+		self.joinMarkerDone[when] = true
 		return false
 	end
 	local session = self:SessionCovering(journey, when)
-	if not session then
+	if not session or type(session.s) ~= "number" or when < session.s - 2 then
+		self.joinMarkerDone[when] = true
 		return false
 	end
 	local count = 0
@@ -3717,7 +3848,11 @@ function ns.DB:WriteJoinMarker(when)
 	if count < 1 then
 		count = 1
 	end
-	return self:AddEventOn(session, ns.Kind.GROUP, mapID, x, y, when, count + self.GROUP_KEPT)
+	local wrote = self:AddEventOn(session, ns.Kind.GROUP, mapID, x, y, when, count + self.GROUP_KEPT)
+	if wrote then
+		self.joinMarkerDone[when] = true
+	end
+	return wrote
 end
 
 -- The event at `when` already happened. Anyone whose span covers it has now
@@ -3729,32 +3864,65 @@ function ns.DB:CreditCompany(when)
 	if type(with) ~= "table" or type(when) ~= "number" then
 		return false
 	end
-	local starts = {}
+	if self.creditedJourney ~= journey or type(self.creditedCompany) ~= "table" then
+		self.creditedJourney = journey
+		self.creditedCompany = {}
+	end
+	if self.joinMarkerJourney ~= journey or type(self.joinMarkerDone) ~= "table" then
+		self.joinMarkerJourney = journey
+		self.joinMarkerDone = {}
+	end
+	local credited = self.creditedCompany
+	local joinDone = self.joinMarkerDone
+	local wantsGroup = ns.Config:WantsKind(ns.Kind.GROUP)
+	local starts = nil
 	local any = false
 	for guid, spans in pairs(with) do
 		local startAt = self:CoveringStart(spans, when, when)
-		local apart = ns.Social and ns.Social.NearEnough and not ns.Social:NearEnough(guid)
-		if startAt and not apart then
-			local info, mapID = nil, nil
-			if ns.Social and ns.Social.Recall then
-				local recall, recalledMap = ns.Social:Recall(guid)
-				info = recall
-				mapID = recalledMap
+		if startAt then
+			local alreadyCredited = credited[guid] == startAt and (not wantsGroup or joinDone[startAt])
+			if not alreadyCredited then
+				local apart = ns.Social and ns.Social.NearEnough and not ns.Social:NearEnough(guid)
+				if not apart then
+					local info, mapID = nil, nil
+					if ns.Social and ns.Social.Recall then
+						local recall, recalledMap = ns.Social:Recall(guid)
+						info = recall
+						mapID = recalledMap
+					end
+					local existing = ZipperDB and ZipperDB.people and ZipperDB.people[guid]
+					local needsFirst = type(existing) ~= "table" or type(existing.t) ~= "number"
+					if needsFirst and (type(info) ~= "table" or type(info.t) ~= "number" or math.abs(info.t - startAt) > 2) then
+						mapID = select(1, self:JoinPlace(guid, startAt))
+					end
+					self:TouchPerson(guid, info, startAt, mapID)
+					local row = ZipperDB.people and ZipperDB.people[guid]
+					local earnedNew = false
+					if type(row) == "table" and type(row.ok) ~= "number" then
+						row.ok = startAt
+						earnedNew = true
+					end
+					credited[guid] = startAt
+					if wantsGroup and not joinDone[startAt] then
+						starts = starts or {}
+						starts[startAt] = true
+					end
+					if needsFirst or earnedNew then
+						any = true
+					end
+				end
 			end
-			if type(info) ~= "table" or type(info.t) ~= "number" or math.abs(info.t - startAt) > 2 then
-				mapID = select(1, self:JoinPlace(guid, startAt))
-			end
-			self:TouchPerson(guid, info, startAt, mapID)
-			local row = ZipperDB.people and ZipperDB.people[guid]
-			if type(row) == "table" and type(row.ok) ~= "number" then
-				row.ok = startAt
-			end
-			starts[startAt] = true
-			any = true
 		end
 	end
-	for startAt in pairs(starts) do
-		self:WriteJoinMarker(startAt)
+	if starts then
+		for startAt in pairs(starts) do
+			if self:WriteJoinMarker(startAt) then
+				any = true
+			end
+		end
+	end
+	if any then
+		self.companyGen = (self.companyGen or 0) + 1
 	end
 	return any
 end
@@ -3806,6 +3974,8 @@ local function DropIdleMarkers(self, journey, starts)
 				track.et, track.ek, track.em = et, ek, em
 				track.ex, track.ey, track.ea = ex, ey, ea
 				self.eventGen = (self.eventGen or 0) + 1
+				self.companyGen = (self.companyGen or 0) + 1
+				self.joinMarkerDone = nil
 			end
 		end
 	end
@@ -3826,12 +3996,15 @@ function ns.DB:PruneIdleCompany(closedOnly)
 			hosts[#hosts + 1] = journey
 		end
 	end
-	for _, journey in pairs(journeys) do
-		if HasBody(journey) then
-			addHost(journey)
+	if not closedOnly then
+		for _, journey in pairs(journeys) do
+			if HasBody(journey) then
+				addHost(journey)
+			end
 		end
 	end
 	addHost(self.record)
+	local anyDropped = false
 	for i = 1, #hosts do
 		local journey = hosts[i]
 		local with = journey.with
@@ -3845,12 +4018,13 @@ function ns.DB:PruneIdleCompany(closedOnly)
 				liveEnd = (last and (last.seen or last.s)) or 0
 			end
 			local starts = {}
+			local journeyDropped = false
 			for guid, spans in pairs(with) do
 				if type(spans) == "table" then
 					local fresh = {}
-					for i = 1, #spans, 2 do
-						local startAt = spans[i]
-						local stopAt = spans[i + 1]
+					for j = 1, #spans, 2 do
+						local startAt = spans[j]
+						local stopAt = spans[j + 1]
 						local open = type(stopAt) ~= "number"
 						local keep = false
 						if type(startAt) == "number" then
@@ -3867,6 +4041,8 @@ function ns.DB:PruneIdleCompany(closedOnly)
 							if not open then
 								fresh[#fresh + 1] = stopAt
 							end
+						else
+							journeyDropped = true
 						end
 					end
 					if #fresh > 0 then
@@ -3876,12 +4052,35 @@ function ns.DB:PruneIdleCompany(closedOnly)
 					end
 				else
 					with[guid] = nil
+					journeyDropped = true
 				end
 			end
 			if not next(with) then
 				journey.with = nil
 			end
-			DropIdleMarkers(self, journey, starts)
+			if journeyDropped then
+				anyDropped = true
+			end
+			if journeyDropped or not closedOnly then
+				DropIdleMarkers(self, journey, starts)
+			end
+		end
+	end
+	if closedOnly and not anyDropped then
+		return
+	end
+	if anyDropped then
+		self.companyGen = (self.companyGen or 0) + 1
+		self.creditedCompany = nil
+		self.joinMarkerDone = nil
+	end
+	if closedOnly then
+		-- When pruning a dropped span on the live journey, inspect all account
+		-- journeys before removing any entry from ZipperDB.people.
+		for _, journey in pairs(journeys) do
+			if HasBody(journey) then
+				addHost(journey)
+			end
 		end
 	end
 	-- Private bodies are not in the account map for other characters. Keep a
@@ -4281,7 +4480,7 @@ function ns.DB:CompanyReport(journey, sessions, t0, t1)
 	return list
 end
 
-function ns.DB:CompanyCacheKey(journey)
+function ns.DB:CompanyCacheKey(journey, withClock)
 	local with = journey and journey.with
 	local spans, open = 0, 0
 	if type(with) == "table" then
@@ -4295,24 +4494,18 @@ function ns.DB:CompanyCacheKey(journey)
 		end
 	end
 	local sessions = journey and journey.sessions or {}
-	local kills, quests = 0, 0
-	for i = 1, #sessions do
-		local session = sessions[i]
-		kills = kills + (session.kills or 0)
-		quests = quests + (session.quests or 0)
-	end
 	local bucket = 0
-	if open > 0 and journey == self.record then
+	if withClock and open > 0 and journey == self.record then
 		bucket = math.floor(self:Now() / 30)
 	end
-	return spans .. ":" .. #sessions .. ":" .. (self.eventGen or 0) .. ":" .. kills .. ":" .. quests .. ":" .. bucket
+	return spans .. ":" .. #sessions .. ":" .. (self.companyGen or 0) .. ":" .. bucket
 end
 
 function ns.DB:CompanySpanIndex(journey)
 	if type(journey) ~= "table" then
 		return {}
 	end
-	local key = self:CompanyCacheKey(journey)
+	local key = self:CompanyCacheKey(journey, true)
 	if self.companySpanJourney == journey and self.companySpanKey == key and self.companySpans then
 		return self.companySpans
 	end
@@ -4367,13 +4560,19 @@ function ns.DB:CompanyByGuid(journey, guid)
 	if type(journey) ~= "table" or type(guid) ~= "string" then
 		return nil
 	end
-	local key = self:CompanyCacheKey(journey)
+	local key = self:CompanyCacheKey(journey, false)
 	if self.companyReportJourney ~= journey or self.companyReportKey ~= key or not self.companyByGuid then
+		local builtAt = CompanyLiveEnd(self, journey)
 		local list = self:CompanyReport(journey, journey.sessions or {})
+		local with = journey.with
 		local byGuid = {}
 		for i = 1, #list do
 			local row = list[i]
 			if row.guid then
+				local spans = type(with) == "table" and with[row.guid] or nil
+				row._baseSeconds = row.seconds or 0
+				row._builtAt = builtAt
+				row._open = type(spans) == "table" and (#spans % 2 == 1)
 				byGuid[row.guid] = row
 			end
 		end
@@ -4381,7 +4580,14 @@ function ns.DB:CompanyByGuid(journey, guid)
 		self.companyReportKey = key
 		self.companyByGuid = byGuid
 	end
-	return self.companyByGuid[guid]
+	local row = self.companyByGuid[guid]
+	if row and row._open and journey == self.record and type(row._builtAt) == "number" then
+		local delta = self:Now() - row._builtAt
+		if delta > 0 then
+			row.seconds = (row._baseSeconds or 0) + delta
+		end
+	end
+	return row
 end
 
 -- Chat lookup of people you have actually played with. One letter matches too

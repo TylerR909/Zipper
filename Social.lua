@@ -337,8 +337,11 @@ end
 -- Outdoors that means a real distance reading (or the short grace after one).
 -- Inside an instance the matching zone is the guard, because distance fails.
 function ns.Social:NearEnough(guid)
-	self:SampleDistance(guid)
 	local unit = self:UnitFor(guid)
+	if not unit and UnitGUID then
+		return false
+	end
+	self:SampleDistance(guid)
 	if self:LiveHere(unit) then
 		return true
 	end
