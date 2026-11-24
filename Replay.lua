@@ -3940,14 +3940,32 @@ function ns.Replay:NearbyZoneMap(when, window)
 	return best
 end
 
+-- Route map opens and switches through C_Map.OpenWorldMap so Blizzard's
+-- WORLD_MAP_OPEN handler runs untainted. Calling ToggleWorldMap or
+-- WorldMapFrame:SetMapID directly from addon code taints WorldMapFrame.mapID
+-- and its quest pin pool, which later blocks SetPassThroughButtons in combat.
+function ns.Replay:OpenWorldMap(mapID)
+	if InCombatLockdown and InCombatLockdown() then
+		return false
+	end
+	if C_Map and C_Map.OpenWorldMap then
+		C_Map.OpenWorldMap(mapID)
+		return true
+	end
+	return false
+end
+
 -- Move the open world map to the playhead map. Never opens the map.
 function ns.Replay:SnapMapToPlayhead()
 	if self.settingMap then
 		return
 	end
+	if InCombatLockdown and InCombatLockdown() then
+		return
+	end
 	local mapID = self:PlayheadPlace()
 	local map = self:EnsureMap()
-	if not mapID or not map or not map:IsShown() or not map.SetMapID or not map.GetMapID then
+	if not mapID or not map or not map:IsShown() or not map.GetMapID then
 		return
 	end
 	if self:MapTooWide(mapID) then
@@ -3962,7 +3980,9 @@ function ns.Replay:SnapMapToPlayhead()
 		return
 	end
 	self.settingMap = true
-	map:SetMapID(mapID)
+	if not self:OpenWorldMap(mapID) and map.SetMapID then
+		map:SetMapID(mapID)
+	end
 	self.settingMap = false
 end
 
@@ -4900,8 +4920,10 @@ function ns.Replay:TogglePlay()
 	self.route = true
 	self.playButton:SetText(L["Pause"])
 	local map = self:EnsureMap()
-	if map and not map:IsShown() and ToggleWorldMap then
-		ToggleWorldMap()
+	if map and not map:IsShown() then
+		if not self:OpenWorldMap() and not (InCombatLockdown and InCombatLockdown()) and ToggleWorldMap then
+			ToggleWorldMap()
+		end
 	end
 	-- Drop the full-route preview and start drawing only up to the playhead.
 	self.trailDirty = false
@@ -6336,10 +6358,12 @@ function ns.Replay:ShowRoute()
 		self:ReloadView()
 	end
 	local map = self:EnsureMap()
-	if map and not map:IsShown() and ToggleWorldMap then
-		ToggleWorldMap()
-	end
 	self:HookMap()
+	if map and not map:IsShown() then
+		if not self:OpenWorldMap() and not (InCombatLockdown and InCombatLockdown()) and ToggleWorldMap then
+			ToggleWorldMap()
+		end
+	end
 	self:EnsureDot()
 	if not (self.frame and self.frame:IsShown()) then
 		if self:UseCurrentTrailOutsidePanel() then
