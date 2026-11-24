@@ -2435,32 +2435,6 @@ function ns.Replay:SetPane(pane)
 	self:SetExpanded(pane == "charts")
 end
 
-function ns.Replay:ToggleCharacters()
-	local picker = self.charPicker
-	if not picker then
-		return
-	end
-	if picker:IsShown() then
-		picker:Hide()
-		return
-	end
-	self:RefreshCharacters()
-	picker:Show()
-end
-
-function ns.Replay:StyleCharButton()
-	local button = self.charButton
-	if not button or not button.arrow then
-		return
-	end
-	local open = self.charPicker and self.charPicker:IsShown()
-	if open then
-		button.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollUp-Up")
-	else
-		button.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
-	end
-end
-
 function ns.Replay:ClearBlocked()
 	self.blockedKey = nil
 	if self.blockedText then
@@ -2487,12 +2461,7 @@ function ns.Replay:ShowBlocked(key, label, pending)
 	if self.ClearOverlay then
 		self:ClearOverlay()
 	end
-	if self.charPicker then
-		self.charPicker:Hide()
-	end
-	if self.charButton and label then
-		self.charButton:SetText(label)
-	end
+	self:RefreshCharacters()
 	if self.scroll then
 		self.scroll:Hide()
 	end
@@ -2524,74 +2493,18 @@ function ns.Replay:ShowBlocked(key, label, pending)
 end
 
 function ns.Replay:RefreshCharacters()
-	if self.charButton then
-		if self.blockedKey and self.blockedLabel then
-			self.charButton:SetText(self.blockedLabel)
-		elseif ns.DB.char then
-			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
-		end
-	end
-	local picker = self.charPicker
-	if not picker then
+	if not self.charButton then
 		return
 	end
-	local list = ns.DB:CharacterList()
-	self.charRows = self.charRows or {}
-	for i = 1, #list do
-		local row = self.charRows[i]
-		if not row then
-			row = CreateFrame("Button", nil, picker)
-			row:SetHeight(22)
-			row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			row.label:SetPoint("LEFT", 10, 0)
-			row.label:SetPoint("RIGHT", -8, 0)
-			row.label:SetJustifyH("LEFT")
-			row:SetScript("OnClick", function(button)
-				local info = button.rowInfo
-				if ns.Replay.charPicker then
-					ns.Replay.charPicker:Hide()
-				end
-				if info and not info.accessible then
-					ns.Replay:ShowBlocked(info.key, info.label, info.pending)
-					return
-				end
-				ns.Replay:ClearBlocked()
-				ns.Replay:RememberPlayhead()
-				ns.DB:SetView(button.charKey)
-				if button.charKey == ns.DB.playerKey then
-					ns.Replay:SetMode("current", nil, true)
-				else
-					ns.Replay:SetMode("all", nil, true)
-				end
-			end)
-			self.charRows[i] = row
-		end
-		row:SetHeight(22)
-		row.charKey = list[i].key
-		row.rowInfo = list[i]
-		local mark = list[i].current and "  · recording" or ""
-		if not list[i].accessible then
-			mark = mark .. "  · locked"
-		end
-		row.label:SetText(string.format("%s  (%d)%s", list[i].label, list[i].sessions, mark))
-		if self.blockedKey and list[i].key == self.blockedKey then
-			row.label:SetTextColor(1, 0.55, 0.2)
-		elseif list[i].key == ns.DB.viewKey and not self.blockedKey then
-			row.label:SetTextColor(1, 0.86, 0.45)
-		elseif not list[i].accessible then
-			row.label:SetTextColor(0.55, 0.52, 0.48)
-		else
-			row.label:SetTextColor(0.9, 0.88, 0.78)
-		end
-		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", picker, "TOPLEFT", 0, -((i - 1) * 22))
-		row:SetPoint("RIGHT", picker, "RIGHT", 0, 0)
-		row:Show()
+	local text
+	if self.blockedKey and self.blockedLabel then
+		text = self.blockedLabel
+	elseif ns.DB.char then
+		text = ns.DB:JourneyLabel(ns.DB.char)
+	else
+		text = L["Character"]
 	end
-	for i = #list + 1, #self.charRows do
-		self.charRows[i]:Hide()
-	end
-	picker:SetHeight(math.max(24, #list * 22 + 6))
+	self.charButton:OverrideText(text)
 end
 
 function ns.Replay:ScopeCaption()
@@ -4464,13 +4377,7 @@ function ns.Replay:RefreshLevelList()
 	for i = #groups + 1, #self.rows do
 		self.rows[i]:Hide()
 	end
-	if self.charButton then
-		if self.blockedKey and self.blockedLabel then
-			self.charButton:SetText(self.blockedLabel)
-		elseif ns.DB.char then
-			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
-		end
-	end
+	self:RefreshCharacters()
 	content:SetHeight(math.max(24, #groups * 24))
 end
 
@@ -4798,13 +4705,7 @@ function ns.Replay:RefreshList()
 			self.armedDelete = nil
 		end
 	end
-	if self.charButton then
-		if self.blockedKey and self.blockedLabel then
-			self.charButton:SetText(self.blockedLabel)
-		elseif ns.DB.char then
-			self.charButton:SetText(ns.DB:JourneyLabel(ns.DB.char))
-		end
-	end
+	self:RefreshCharacters()
 	local width = content:GetWidth()
 	if width < 40 then
 		width = 250
@@ -5747,70 +5648,43 @@ function ns.Replay:CreateFrame()
 	title:SetTextColor(1, 0.86, 0.45)
 	title:SetText(L["Zipper"])
 
-	local charButton = CreateFrame("Button", nil, frame, "BackdropTemplate")
+	local charButton = CreateFrame("DropdownButton", nil, frame, "WowStyle1DropdownTemplate")
 	charButton:SetPoint("TOPLEFT", 16, -32)
 	charButton:SetPoint("RIGHT", frame, "RIGHT", -16, 0)
 	charButton:SetHeight(22)
-	charButton:SetBackdrop({
-		bgFile = "Interface\\Buttons\\WHITE8X8",
-		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 1,
-	})
-	charButton:SetBackdropColor(0.05, 0.04, 0.03, 1)
-	charButton:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
-	local arrow = charButton:CreateTexture(nil, "OVERLAY")
-	arrow:SetSize(16, 16)
-	arrow:SetPoint("RIGHT", -6, 0)
-	arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
-	charButton.arrow = arrow
-	local charLabel = charButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	charLabel:SetPoint("LEFT", 10, 0)
-	charLabel:SetPoint("RIGHT", arrow, "LEFT", -6, 0)
-	charLabel:SetJustifyH("LEFT")
-	charLabel:SetWordWrap(false)
-	charLabel:SetText(L["Character"])
-	charButton:SetFontString(charLabel)
-	charButton:SetScript("OnClick", function()
-		ns.Replay:ToggleCharacters()
-	end)
-	charButton:SetScript("OnEnter", function(self)
-		self:SetBackdropBorderColor(1, 0.86, 0.45, 1)
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["Choose a character"])
-		GameTooltip:Show()
-	end)
-	charButton:SetScript("OnLeave", function(self)
-		self:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
-		if GameTooltip:IsOwned(self) then
-			GameTooltip:Hide()
+	charButton:OverrideText(L["Character"])
+	charButton:SetupMenu(function(_, rootDescription)
+		local list = ns.DB:CharacterList()
+		for i = 1, #list do
+			local info = list[i]
+			local mark = info.current and "  · recording" or ""
+			if not info.accessible then
+				mark = mark .. "  · locked"
+			end
+			local text = string.format("%s  (%d)%s", info.label, info.sessions, mark)
+			rootDescription:CreateRadio(text, function()
+				if ns.Replay.blockedKey then
+					return info.key == ns.Replay.blockedKey
+				end
+				return info.key == ns.DB.viewKey
+			end, function()
+				if not info.accessible then
+					ns.Replay:ShowBlocked(info.key, info.label, info.pending)
+					return
+				end
+				ns.Replay:ClearBlocked()
+				ns.Replay:RememberPlayhead()
+				ns.DB:SetView(info.key)
+				if ns.Viz then
+					ns.Viz.selectedChars = nil
+				end
+				if info.key == ns.DB.playerKey then
+					ns.Replay:SetMode("current", nil, true)
+				else
+					ns.Replay:SetMode("all", nil, true)
+				end
+			end)
 		end
-	end)
-	charButton:SetScript("OnMouseDown", function(self)
-		self.arrow:SetPoint("RIGHT", -5, -1)
-	end)
-	charButton:SetScript("OnMouseUp", function(self)
-		self.arrow:SetPoint("RIGHT", -6, 0)
-	end)
-
-	local charPicker = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-	charPicker:SetPoint("TOPLEFT", charButton, "BOTTOMLEFT", 0, -4)
-	charPicker:SetPoint("RIGHT", charButton, "RIGHT", 0, 0)
-	charPicker:SetFrameStrata("DIALOG")
-	charPicker:SetFrameLevel(400)
-	charPicker:Hide()
-	charPicker:EnableMouse(true)
-	charPicker:SetBackdrop({
-		bgFile = "Interface\\Buttons\\WHITE8X8",
-		edgeFile = "Interface\\Buttons\\WHITE8X8",
-		edgeSize = 1,
-	})
-	charPicker:SetBackdropColor(0.08, 0.07, 0.06, 0.98)
-	charPicker:SetBackdropBorderColor(0.62, 0.50, 0.22, 0.95)
-	charPicker:SetScript("OnShow", function()
-		ns.Replay:StyleCharButton()
-	end)
-	charPicker:SetScript("OnHide", function()
-		ns.Replay:StyleCharButton()
 	end)
 
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
@@ -6247,8 +6121,6 @@ function ns.Replay:CreateFrame()
 	self.chartsButton = chartsButton
 	self.collapseButton = collapseButton
 	self.charButton = charButton
-	self.charPicker = charPicker
-	self.charRows = {}
 	self.blockedText = blockedText
 	self.blockedLink = blockedLink
 	self.sessionButton = sessionButton
@@ -6694,6 +6566,12 @@ function ns.Replay:ApplySkin()
 				paint(skin.Button, button)
 				paint(skin.WhiteButtonLabel, button)
 			end
+		end
+		if self.charButton then
+			paint(skin.Dropdown, self.charButton)
+		end
+		if ns.Viz and ns.Viz.charDropdown then
+			paint(skin.Dropdown, ns.Viz.charDropdown)
 		end
 		if self.chapterStrip then
 			paint(skin.Inset, self.chapterStrip)

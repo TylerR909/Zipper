@@ -1250,6 +1250,42 @@ function ns.DB:SetView(key)
 	return true
 end
 
+local function JourneyLevel(body, key, playerKey)
+	local best = 0
+	if key == playerKey and UnitLevel then
+		local live = UnitLevel("player")
+		if type(live) == "number" and not (issecretvalue and issecretvalue(live)) and live > best then
+			best = live
+		end
+	end
+	if type(body) == "table" then
+		local sessions = body.sessions
+		if type(sessions) == "table" then
+			for i = 1, #sessions do
+				local s = sessions[i]
+				if type(s) == "table" then
+					if type(s.lv) == "number" and s.lv > best then
+						best = s.lv
+					end
+					if type(s.el) == "number" and s.el > best then
+						best = s.el
+					end
+				end
+			end
+		end
+		local levels = body.levels
+		if type(levels) == "table" then
+			for i = 1, #levels do
+				local row = levels[i]
+				if type(row) == "table" and type(row.lv) == "number" and row.lv > best then
+					best = row.lv
+				end
+			end
+		end
+	end
+	return best
+end
+
 function ns.DB:CharacterList()
 	self:EnsureStore()
 	local list = {}
@@ -1276,6 +1312,8 @@ function ns.DB:CharacterList()
 			list[#list + 1] = {
 				key = key,
 				label = self:JourneyLabel(roster),
+				class = self:JourneyClass(body or roster, key),
+				level = JourneyLevel(body, key, self.playerKey),
 				sessions = sessions,
 				bytes = bytes,
 				current = key == self.playerKey,

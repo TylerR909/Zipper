@@ -10,4 +10,6 @@
 	<Script file="Elites.lua"/>
 	<Script file="Zones.lua"/>
 	<Script file="Pauses.lua"/>
+	<Script file="Characters.lua"/>
+	<Script file="Roles.lua"/>
 </Ui>

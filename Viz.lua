@@ -83,7 +83,7 @@ end
 
 -- Level-up rows are the usual source. A LEVEL event covers a journey whose
 -- ding list was missing, without a second chart pass.
-local function LevelMarks(sessions, dings)
+local function LevelMarks(sessions, dings, journey)
 	local seen = {}
 	for i = 1, #dings do
 		seen[dings[i].t .. ":" .. dings[i].lv] = true
@@ -91,7 +91,7 @@ local function LevelMarks(sessions, dings)
 	local Kind = ns.Kind
 	for s = 1, #sessions do
 		local session = sessions[s]
-		local track = ns.DB:Track(session)
+		local track = ns.DB:Track(session, journey)
 		for i = 1, #(track.ek or {}) do
 			if track.ek[i] == Kind.LEVEL then
 				local level = track.ea and track.ea[i]
@@ -298,10 +298,11 @@ function ns.Viz:LevelRows(summary, keys)
 	return rows
 end
 
-function ns.Viz:Summarize(replay, sessions)
+function ns.Viz:Summarize(replay, sessions, entries)
 	sessions = sessions or {}
 	local Kind = ns.Kind
 	local Travel = ns.Travel
+	local Role = ns.Role
 	local function blankPauses()
 		local out = {}
 		local specs = ns.PauseSpecs or {}
@@ -310,9 +311,24 @@ function ns.Viz:Summarize(replay, sessions)
 		end
 		return out
 	end
+	if type(entries) ~= "table" then
+		local singleKey = ns.DB.viewKey or ns.DB.playerKey or "char"
+		local singleJourney = ns.DB.char
+		entries = {
+			{
+				key = singleKey,
+				label = singleJourney and ns.DB:JourneyLabel(singleJourney) or L["Character"],
+				class = singleJourney and ns.DB:JourneyClass(singleJourney, singleKey) or nil,
+				journey = singleJourney,
+				sessions = sessions,
+				levelClip = (replay.mode == "level" and replay.levelLo and replay.t0 and replay.t1) and true or false,
+			},
+		}
+	end
 	local where = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
 	local travel = { foot = 0, mount = 0, flight = 0, ghost = 0 }
 	local pauses = blankPauses()
+	local roles = { [Role.TANK] = 0, [Role.HEALER] = 0, [Role.DAMAGER] = 0 }
 	local kills = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
 	local turnins = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
 	local idleAt = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0 }
@@ -321,14 +337,19 @@ function ns.Viz:Summarize(replay, sessions)
 	local recorded = 0
 	local unplacedKills = 0
 	local counts = { kills = 0, turnins = 0, accepts = 0, deaths = 0 }
-	local levelClip = replay.mode == "level" and replay.levelLo and replay.t0 and replay.t1
-	local dings = LevelMarks(sessions, Dings(ns.DB.char))
-	local groupSpans = GroupSpans(ns.DB.char)
 	local zones = {}
+	local characters = {}
 	local minLv, maxLv
 	local piece
 	local dingI = 1
 	local dingLevel
+	local dings = {}
+	local groupSpans = {}
+	local levelClip = false
+	local activeJourney
+	local activeCharKey = ""
+	local levelSpans
+	local fingerprint = "-"
 
 	local function zoneRow(mapID)
 		mapID = tonumber(mapID)
@@ -443,6 +464,7 @@ function ns.Viz:Summarize(replay, sessions)
 			where = blankCounts(),
 			travel = { foot = 0, mount = 0, flight = 0, ghost = 0 },
 			pauses = blankPauses(),
+			roles = { [Role.TANK] = 0, [Role.HEALER] = 0, [Role.DAMAGER] = 0 },
 			kills = blankCounts(),
 			turnins = blankCounts(),
 			idleAt = blankCounts(),
@@ -473,16 +495,22 @@ function ns.Viz:Summarize(replay, sessions)
 		end
 	end
 
-	local function mergePiece(src)
+	local function mergePiece(src, charRow)
 		addNums(where, src.where)
 		addNums(travel, src.travel)
 		addNums(pauses, src.pauses)
+		if src.roles then
+			addNums(roles, src.roles)
+		end
 		addNums(kills, src.kills)
 		addNums(turnins, src.turnins)
 		addNums(idleAt, src.idleAt)
 		addNums(counts, src.counts)
 		recorded = recorded + (src.recorded or 0)
 		unplacedKills = unplacedKills + (src.unplacedKills or 0)
+		if charRow then
+			charRow.seconds = charRow.seconds + (src.recorded or 0)
+		end
 		for level, row in pairs(src.buckets) do
 			noteLevel(level)
 			local into = buckets[level]
@@ -528,11 +556,6 @@ function ns.Viz:Summarize(replay, sessions)
 		end
 	end
 
-	-- A level selection is the spans of those levels, not one box around all of
-	-- them. A second session of the same level must not keep the first session
-	-- running into the next level.
-	local levelSpans = levelClip and ns.DB:LevelSpans(ns.DB.char) or nil
-
 	local function clipsFor(session)
 		local stop = ns.DB:SessionStop(session) or session.s
 		if not levelClip then
@@ -544,11 +567,11 @@ function ns.Viz:Summarize(replay, sessions)
 		local lo = replay.levelLo
 		local hi = replay.levelHi or lo
 		local list = {}
-		for i = 1, #levelSpans do
+		for i = 1, #(levelSpans or {}) do
 			local span = levelSpans[i]
 			local top = span.lvTo or span.lv
 			if top >= lo and span.lv <= hi then
-				local spanStop = ns.DB:SpanStop(span, ns.DB.char)
+				local spanStop = ns.DB:SpanStop(span, activeJourney)
 				local a, b = Overlap(session.s, stop, span.t0, spanStop)
 				if a then
 					list[#list + 1] = { a, b }
@@ -574,8 +597,8 @@ function ns.Viz:Summarize(replay, sessions)
 
 	-- Stored company endpoints only. An open span's end is the live clock, and
 	-- putting that in the key would throw away every cached session once a second.
-	local function groupFingerprint()
-		local with = ns.DB.char and ns.DB.char.with
+	local function groupFingerprint(journey)
+		local with = journey and journey.with
 		if type(with) ~= "table" then
 			return "-"
 		end
@@ -593,13 +616,13 @@ function ns.Viz:Summarize(replay, sessions)
 		return table.concat(parts, "|")
 	end
 
-	local fingerprint = groupFingerprint()
-
 	local function pieceKey(session, index, clips)
-		local track = ns.DB:Track(session)
+		local track = ns.DB:Track(session, activeJourney)
 		local bits = {
+			activeCharKey,
 			tostring(session.id or index),
 			tostring(session.seen or 0),
+			tostring(session.role or -1),
 			tostring(#track.t),
 			tostring(#(track.ek or {})),
 		}
@@ -615,6 +638,7 @@ function ns.Viz:Summarize(replay, sessions)
 		local where = piece.where
 		local travel = piece.travel
 		local pauses = piece.pauses
+		local pieceRoles = piece.roles
 		local kills = piece.kills
 		local turnins = piece.turnins
 		local idleAt = piece.idleAt
@@ -631,7 +655,7 @@ function ns.Viz:Summarize(replay, sessions)
 						row.span = row.span + seconds
 					end
 				end)
-				local track = ns.DB:Track(session)
+				local track = ns.DB:Track(session, activeJourney)
 				local modes = track.mode
 				if not modes or #modes < #track.t then
 					modes = replay:InferModes(track)
@@ -700,6 +724,16 @@ function ns.Viz:Summarize(replay, sessions)
 				local idleStart, idlePlace
 				local pauseOpen = {}
 				local instStart, instType
+				local roleNow = (type(session.role) == "number" and session.role > 0) and session.role or nil
+				local roleStart = session.s
+				local function addRole(role, startT, endT)
+					if role and role >= Role.TANK and role <= Role.DAMAGER then
+						local a, b = Overlap(startT, endT, clip0, clip1)
+						if a then
+							pieceRoles[role] = (pieceRoles[role] or 0) + (b - a)
+						end
+					end
+				end
 				local function addPause(field, startT, endT, still)
 					local a, b = Overlap(startT, endT, clip0, clip1)
 					if not a then
@@ -839,8 +873,13 @@ function ns.Viz:Summarize(replay, sessions)
 					elseif inside and kind == Kind.DEATH then
 						counts.deaths = counts.deaths + 1
 						bump(levelAtForward(when, session.lv), "deaths")
+					elseif kind == Kind.ROLE then
+						addRole(roleNow, roleStart, when)
+						roleNow = (type(extra) == "number" and extra > 0) and extra or nil
+						roleStart = when
 					end
 				end
+				addRole(roleNow, roleStart, stop)
 				if idleStart then
 					addIdle(idleStart, stop, idlePlace)
 				end
@@ -877,23 +916,52 @@ function ns.Viz:Summarize(replay, sessions)
 	self.pieces = self.pieces or {}
 	local gen = (self.pieceGen or 0) + 1
 	self.pieceGen = gen
-	for s = 1, #sessions do
-		local session = sessions[s]
-		local clips = clipsFor(session)
-		if #clips > 0 then
-			local key = pieceKey(session, s, clips)
-			local entry = self.pieces[key]
-			local built
-			if entry then
-				entry.gen = gen
-				built = entry.piece
-			else
-				built = absorb(session, clips)
-				self.pieces[key] = { piece = built, gen = gen }
+	for e = 1, #entries do
+		local item = entries[e]
+		local journey = item and item.journey
+		local list = item and item.sessions or {}
+		if type(journey) == "table" and #list > 0 then
+			activeJourney = journey
+			activeCharKey = tostring(item.key or e)
+			levelClip = item.levelClip and true or false
+			dings = LevelMarks(list, Dings(journey), journey)
+			groupSpans = GroupSpans(journey)
+			levelSpans = levelClip and ns.DB:LevelSpans(journey) or nil
+			fingerprint = groupFingerprint(journey)
+			local charRow = {
+				key = item.key,
+				label = item.label or ns.DB:JourneyLabel(journey),
+				class = item.class or ns.DB:JourneyClass(journey, item.key),
+				seconds = 0,
+			}
+			for s = 1, #list do
+				local session = list[s]
+				local clips = clipsFor(session)
+				if #clips > 0 then
+					local key = pieceKey(session, s, clips)
+					local entry = self.pieces[key]
+					local built
+					if entry then
+						entry.gen = gen
+						built = entry.piece
+					else
+						built = absorb(session, clips)
+						self.pieces[key] = { piece = built, gen = gen }
+					end
+					mergePiece(built, charRow)
+				end
 			end
-			mergePiece(built)
+			if charRow.seconds > 0 then
+				characters[#characters + 1] = charRow
+			end
 		end
 	end
+	table.sort(characters, function(a, b)
+		if a.seconds ~= b.seconds then
+			return a.seconds > b.seconds
+		end
+		return (a.label or "") < (b.label or "")
+	end)
 	for key, entry in pairs(self.pieces) do
 		if entry.gen ~= gen then
 			self.pieces[key] = nil
@@ -1002,6 +1070,8 @@ function ns.Viz:Summarize(replay, sessions)
 		where = where,
 		travel = travel,
 		pauses = pauses,
+		roles = roles,
+		characters = characters,
 		kills = kills,
 		turnins = turnins,
 		levels = levels,
@@ -1022,18 +1092,122 @@ function ns.Viz:DrawToken()
 	return (self.chartId or "") .. ":" .. (chart and chart.display or "") .. ":" .. tostring(width)
 end
 
+function ns.Viz:CharSelectionKeys(list)
+	list = list or ns.DB:CharacterList()
+	local accessible = {}
+	local byKey = {}
+	for i = 1, #list do
+		local info = list[i]
+		byKey[info.key] = info
+		if info.accessible then
+			accessible[#accessible + 1] = info
+		end
+	end
+	local picked = {}
+	if type(self.selectedChars) == "table" then
+		for i = 1, #accessible do
+			local info = accessible[i]
+			if self.selectedChars[info.key] then
+				picked[#picked + 1] = info
+			end
+		end
+	end
+	if #picked == 0 then
+		local fallback = byKey[ns.DB.viewKey] or byKey[ns.DB.playerKey]
+		if fallback and fallback.accessible then
+			picked[1] = fallback
+		elseif accessible[1] then
+			picked[1] = accessible[1]
+		end
+	end
+	local multi = (#picked > 1) or (#picked == 1 and picked[1].key ~= ns.DB.viewKey)
+	return picked, accessible, multi
+end
+
+function ns.Viz:UpdateCharDropdown(text)
+	local dropdown = self.charDropdown
+	if not dropdown then
+		return
+	end
+	if not text then
+		if type(self.selectedChars) ~= "table" then
+			text = ns.DB.char and ns.DB:JourneyLabel(ns.DB.char) or L["Character"]
+		else
+			local picked, accessible = self:CharSelectionKeys()
+			if #picked == 1 then
+				text = picked[1].label
+			elseif #picked > 1 and #picked == #accessible then
+				text = string.format(L["All Characters (%d)"], #picked)
+			else
+				text = string.format(L["%d Characters"], #picked)
+			end
+		end
+	end
+	if text ~= self.charDropdownText then
+		self.charDropdownText = text
+		dropdown:OverrideText(text)
+	end
+end
+
 function ns.Viz:Refresh(sessions)
 	if not self.pane or ns.Replay.pane ~= "charts" then
 		return
 	end
 	sessions = sessions or ns.Replay.sessions or {}
-	local key = ns.Replay:StatsKey(sessions)
+	local key, entries
+	if type(self.selectedChars) ~= "table" then
+		self:UpdateCharDropdown(ns.DB.char and ns.DB:JourneyLabel(ns.DB.char) or L["Character"])
+		key = ns.Replay:StatsKey(sessions)
+	else
+		local picked, accessible, multi = self:CharSelectionKeys()
+		local text
+		if #picked == 1 then
+			text = picked[1].label
+		elseif #picked > 1 and #picked == #accessible then
+			text = string.format(L["All Characters (%d)"], #picked)
+		else
+			text = string.format(L["%d Characters"], #picked)
+		end
+		self:UpdateCharDropdown(text)
+		if not multi then
+			self.selectedChars = nil
+			key = ns.Replay:StatsKey(sessions)
+		else
+			local bits = { "multi" }
+			entries = {}
+			for i = 1, #picked do
+				local info = picked[i]
+				local body = ns.DB:JourneyBody(info.key)
+				if body then
+					local list = body.sessions or {}
+					local last = list[#list]
+					local lastSeen = last and (last.seen or last.s) or 0
+					local isLive = body == ns.DB.record and ns.DB.session ~= nil
+					local seenKey = isLive and math.floor(lastSeen / 10) or lastSeen
+					bits[#bits + 1] = info.key .. ":" .. tostring(#list) .. ":" .. tostring(seenKey)
+					if isLive then
+						bits[#bits + 1] = "n" .. tostring(math.floor(ns.DB:Now() / 10))
+						bits[#bits + 1] = "g" .. tostring(ns.DB.eventGen or 0)
+					end
+					entries[#entries + 1] = {
+						key = info.key,
+						label = info.label,
+						class = info.class,
+						journey = body,
+						sessions = list,
+						levelClip = false,
+					}
+				end
+			end
+			key = table.concat(bits, "|")
+		end
+	end
 	local token = self:DrawToken()
 	if key == self.summaryKey and self.summary and token == self.drawKey then
 		return
 	end
 	if key ~= self.summaryKey or not self.summary then
-		self.summary = self:Summarize(ns.Replay, sessions)
+		self.summary = self:Summarize(ns.Replay, sessions, entries)
 		self.summaryKey = key
 	end
 	self:Draw()
@@ -1081,7 +1255,12 @@ function ns.Viz:PlaceTabs()
 	if width < 40 then
 		width = 152
 	end
-	local y = 0
+	if self.charDropdown then
+		self.charDropdown:ClearAllPoints()
+		self.charDropdown:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, 0)
+		self.charDropdown:SetSize(width, 24)
+	end
+	local y = self.charDropdown and -32 or 0
 	for i = 1, #tabs do
 		local tab = tabs[i]
 		if tab:IsShown() then
@@ -1444,6 +1623,137 @@ function ns.Viz:Attach(replay)
 
 	local menu = CreateFrame("Frame", nil, pane)
 	menu:SetWidth(168)
+	local charDropdown = CreateFrame("DropdownButton", nil, menu, "WowStyle1DropdownTemplate")
+	charDropdown:SetSize(168, 24)
+	charDropdown:SetFrameLevel(menu:GetFrameLevel() + 16)
+	charDropdown:SetupMenu(function(_, rootDescription)
+		local list = ns.DB:CharacterList()
+		local picked, accessible = ns.Viz:CharSelectionKeys(list)
+		local selected = {}
+		for i = 1, #picked do
+			selected[picked[i].key] = true
+		end
+		local function cancelCharTip()
+			if ns.Viz.charTipTimer then
+				ns.Viz.charTipTimer:Cancel()
+				ns.Viz.charTipTimer = nil
+			end
+		end
+		local function apply(nextMap, clearToDefault)
+			cancelCharTip()
+			for k in pairs(selected) do
+				selected[k] = nil
+			end
+			for k, v in pairs(nextMap) do
+				if v then
+					selected[k] = true
+				end
+			end
+			ns.Viz.selectedChars = clearToDefault and nil or nextMap
+			ns.Viz:Refresh()
+		end
+		local maxLv = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60
+		if type(maxLv) ~= "number" or (issecretvalue and issecretvalue(maxLv)) or maxLv <= 0 then
+			maxLv = 60
+		end
+		local caps = {}
+		for i = 1, #accessible do
+			if (accessible[i].level or 0) >= maxLv then
+				caps[#caps + 1] = accessible[i]
+			end
+		end
+		local curKey = ns.DB.viewKey or ns.DB.playerKey
+		local curBtn = rootDescription:CreateButton(L["Current"], function()
+			local nextMap = {}
+			if curKey then
+				nextMap[curKey] = true
+			end
+			apply(nextMap, true)
+			return MenuResponse.Refresh
+		end)
+		if not curKey then
+			curBtn:SetEnabled(false)
+		end
+		local allBtn = rootDescription:CreateButton(L["All Characters"], function()
+			local nextMap = {}
+			for i = 1, #accessible do
+				nextMap[accessible[i].key] = true
+			end
+			apply(nextMap)
+			return MenuResponse.Refresh
+		end)
+		if #accessible == 0 then
+			allBtn:SetEnabled(false)
+		end
+		local capBtn = rootDescription:CreateButton(L["All 60s"], function()
+			local nextMap = {}
+			for i = 1, #caps do
+				nextMap[caps[i].key] = true
+			end
+			apply(nextMap)
+			return MenuResponse.Refresh
+		end)
+		if #caps == 0 then
+			capBtn:SetEnabled(false)
+		end
+		rootDescription:CreateDivider()
+		for i = 1, #list do
+			local info = list[i]
+			if info.accessible then
+				local key = info.key
+				local cb = rootDescription:CreateCheckbox(info.label, function()
+					return selected[key] == true
+				end, function(_, menuInputData)
+					if menuInputData and menuInputData.buttonName == "RightButton" then
+						apply({ [key] = true }, key == ns.DB.viewKey)
+						return
+					end
+					local nextMap = {}
+					local count = 0
+					for k in pairs(selected) do
+						if k ~= key then
+							nextMap[k] = true
+							count = count + 1
+						end
+					end
+					if not selected[key] or count == 0 then
+						nextMap[key] = true
+					end
+					apply(nextMap)
+				end)
+				cb:AddInitializer(function(button)
+					button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+				end)
+				cb:SetOnEnter(function(button)
+					cancelCharTip()
+					ns.Viz.charTipTimer = C_Timer.NewTimer(1.5, function()
+						ns.Viz.charTipTimer = nil
+						if button:IsVisible() and button:IsMouseOver() then
+							GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+							GameTooltip_AddInstructionLine(GameTooltip, L["Right-click to select only this character."])
+							GameTooltip:Show()
+						end
+					end)
+				end)
+				cb:SetOnLeave(function(button)
+					cancelCharTip()
+					if GameTooltip:IsOwned(button) then
+						GameTooltip:Hide()
+					end
+				end)
+			else
+				local label = info.label
+				local cb = rootDescription:CreateCheckbox(label, function()
+					return false
+				end, function() end)
+				cb:SetEnabled(false)
+				cb:SetTooltip(function(tooltip)
+					GameTooltip_SetTitle(tooltip, label)
+					GameTooltip_AddNormalLine(tooltip, L["Non-Global on another character. Log in as them and enable Global in Saved data to include them."])
+				end)
+			end
+		end
+	end)
 	local rule = pane:CreateTexture(nil, "BORDER")
 	rule:SetColorTexture(0.85, 0.68, 0.28, 0.75)
 	rule:Hide()
@@ -1474,6 +1784,7 @@ function ns.Viz:Attach(replay)
 
 	self.pane = pane
 	self.menu = menu
+	self.charDropdown = charDropdown
 	self.menuRule = rule
 	self.chartHost = host
 	self.title = title
