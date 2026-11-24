@@ -572,6 +572,25 @@ function ns.GPS:MarkAt(kind, extra, when)
 	return true
 end
 
+-- For events that still matter when ReadPosition returns nil (such as kills,
+-- boss kills, deaths, level-ups, and quests inside instances): use live coords
+-- when available, else store mapID 0 so charts and company count them without
+-- dropping fake pins on the open-world map.
+function ns.GPS:MarkOrUnplaced(kind, extra, when)
+	self:SyncInstance()
+	if self:MarkAt(kind, extra, when) then
+		return true
+	end
+	if type(when) ~= "number" then
+		when = ns.DB:Now()
+	end
+	if not ns.DB:AddEvent(kind, 0, 0, 0, when, extra or 0) then
+		return false
+	end
+	Notify()
+	return true
+end
+
 -- For non-map state transitions (such as role changes inside instances where
 -- ReadPosition returns nil): attach live coords when available, else last known.
 function ns.GPS:MarkAny(kind, extra, when)
@@ -735,9 +754,9 @@ function ns.GPS:ReconcileInstance()
 	end
 	local openHere = kind == Kind.INSTANCE_ENTER and session == ns.DB.session
 	if inst and not openHere then
-		self:Mark(Kind.INSTANCE_ENTER, extra)
+		self:MarkAny(Kind.INSTANCE_ENTER, extra)
 	elseif not inst and openHere then
-		self:Mark(Kind.INSTANCE_LEAVE, doorExtra)
+		self:MarkAny(Kind.INSTANCE_LEAVE, doorExtra)
 	end
 end
 
@@ -751,23 +770,24 @@ function ns.GPS:SyncInstance()
 		return
 	end
 	if self.instance then
-		self:Mark(Kind.INSTANCE_LEAVE, self.instanceExtra or self.instance)
+		self:MarkAny(Kind.INSTANCE_LEAVE, self.instanceExtra or self.instance)
 	end
 	self.instance = inst
 	self.instanceExtra = inst and self:InstanceExtra(inst) or nil
 	if inst then
-		self:Mark(Kind.INSTANCE_ENTER, self.instanceExtra)
+		self:MarkAny(Kind.INSTANCE_ENTER, self.instanceExtra)
 	end
 end
 
 function ns.GPS:OnBossKill(encounterID)
+	self:SyncInstance()
 	if not self.instance then
 		return
 	end
 	if not IsPlainNumber(encounterID) then
 		encounterID = 0
 	end
-	self:Mark(Kind.BOSS, encounterID)
+	self:MarkOrUnplaced(Kind.BOSS, encounterID)
 end
 
 function ns.GPS:SyncTaxi()
@@ -979,19 +999,30 @@ end
 function ns.GPS:OnKill(attackerGUID, targetGUID)
 	-- Forever forbids registering COMBAT_LOG_EVENT_UNFILTERED. PARTY_KILL is the
 	-- kill-credit event, and it also fires for other people in the party.
-	if not attackerGUID or (issecretvalue and issecretvalue(attackerGUID)) then
+	-- Inside instances Forever marks PARTY_KILL's GUIDs secret
+	-- (SecretWhenUnitIdentityRestricted), so we cannot match attackerGUID to
+	-- the player there; accept secret kills only inside an instance so dungeon
+	-- and raid kills still count without inflating open-world kills.
+	if not attackerGUID then
 		return
 	end
-	local me = UnitGUID("player")
-	if not me or (issecretvalue and issecretvalue(me)) or attackerGUID ~= me then
-		return
+	if issecretvalue and issecretvalue(attackerGUID) then
+		self:SyncInstance()
+		if not self.instance then
+			return
+		end
+	else
+		local me = UnitGUID("player")
+		if not me or (issecretvalue and issecretvalue(me)) or attackerGUID ~= me then
+			return
+		end
 	end
 	if targetGUID and issecretvalue and issecretvalue(targetGUID) then
 		targetGUID = nil
 	end
 	local mobID = ns.DB:CreatureID(targetGUID)
 	local extra = ns.DB:PackKill(mobID, self:TargetIsElite(), self:TargetIsRare())
-	if not self:Mark(Kind.KILL, extra) then
+	if not self:MarkOrUnplaced(Kind.KILL, extra) then
 		ns.DB:AddKill()
 	end
 end
@@ -1129,12 +1160,12 @@ function ns.GPS:OnEvent(event, ...)
 			self:SyncGhost()
 		end
 	elseif event == "PLAYER_DEAD" then
-		self:Mark(Kind.DEATH, 0)
+		self:MarkOrUnplaced(Kind.DEATH, 0)
 	elseif event == "PLAYER_LEVEL_UP" then
 		local level = ...
 		if type(level) == "number" and not (issecretvalue and issecretvalue(level)) then
 			local stored = ns.DB:NoteLevelUp(level)
-			self:Mark(Kind.LEVEL, level)
+			self:MarkOrUnplaced(Kind.LEVEL, level)
 			if stored then
 				local function announce()
 					local text = ns.DB:LevelRecapText(level)
@@ -1159,10 +1190,10 @@ function ns.GPS:OnEvent(event, ...)
 		self:SyncGhost()
 	elseif event == "QUEST_ACCEPTED" then
 		local questID = ...
-		self:Mark(Kind.QUEST_ACCEPT, questID or 0)
+		self:MarkOrUnplaced(Kind.QUEST_ACCEPT, questID or 0)
 	elseif event == "QUEST_TURNED_IN" then
 		local questID = ...
-		self:Mark(Kind.QUEST_TURNIN, questID or 0)
+		self:MarkOrUnplaced(Kind.QUEST_TURNIN, questID or 0)
 	elseif event == "CONFIRM_SUMMON" then
 		self:OnConfirmSummon()
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then

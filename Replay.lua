@@ -172,7 +172,7 @@ end
 
 function ns.Replay:Project(mapID, x, y)
 	local view = self.mapID
-	if not view or not mapID then
+	if not view or not mapID or mapID <= 0 then
 		return nil
 	end
 	if mapID == view then
@@ -3102,14 +3102,16 @@ function ns.Replay:CollectChapters(sessions)
 			if workKind[track.ek[i]] then
 				local t = session.s + (track.et[i] or 0)
 				local mapID = track.em[i]
-				for v = 1, #visits do
-					local visit = visits[v]
-					if t >= visit.first - 30 and t <= visit.last + 30 and (not mapID or mapID == 0 or mapID == visit.map) then
-						visit.work = true
+				if mapID and mapID > 0 then
+					for v = 1, #visits do
+						local visit = visits[v]
+						if t >= visit.first - 30 and t <= visit.last + 30 and mapID == visit.map then
+							visit.work = true
+						end
 					end
-				end
-				if open and t >= open.first - 30 and t <= open.last + 30 and (not mapID or mapID == 0 or mapID == open.map) then
-					open.work = true
+					if open and t >= open.first - 30 and t <= open.last + 30 and mapID == open.map then
+						open.work = true
+					end
 				end
 			end
 		end

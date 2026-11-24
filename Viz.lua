@@ -814,10 +814,10 @@ function ns.Viz:Summarize(replay, sessions)
 							bump(level, "solo")
 						end
 						local mapID = track.em and track.em[i]
-						if not mapID or mapID <= 0 then
+						if (not mapID or mapID <= 0) and not instType then
 							mapID = mapAt(when)
 						end
-						local zone = zoneRow(mapID)
+						local zone = (mapID and mapID > 0) and zoneRow(mapID) or nil
 						if zone then
 							zone.kills = zone.kills + 1
 						end
@@ -827,10 +827,10 @@ function ns.Viz:Summarize(replay, sessions)
 						counts.turnins = counts.turnins + 1
 						bump(levelAtForward(when, session.lv), "turnins")
 						local mapID = track.em and track.em[i]
-						if not mapID or mapID <= 0 then
+						if (not mapID or mapID <= 0) and not instType then
 							mapID = mapAt(when)
 						end
-						local zone = zoneRow(mapID)
+						local zone = (mapID and mapID > 0) and zoneRow(mapID) or nil
 						if zone then
 							zone.turnins = zone.turnins + 1
 						end
