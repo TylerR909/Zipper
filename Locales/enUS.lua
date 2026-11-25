@@ -433,6 +433,16 @@ S("Deleted %d sessions (~%s).")
 S("Date")
 S("Duration")
 S("Reason")
+S("Next  ")
+S("  · recording")
+S("  · locked")
+S("%s  (%d)%s")
+S("%d B")
+S("%.1f KB")
+S("%.2f MB")
+S("%dh %dm")
+S("%dm %02ds")
+S("%ds")
 
 -- NewLocale returns a write-only proxy. Reading a key on it asserts.
 -- Later files need the real table, which is what GetLocale hands back.

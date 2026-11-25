@@ -533,9 +533,13 @@ end
 
 function ns.DB:JourneyLabel(journey)
 	if type(journey) ~= "table" then
-		return "Character"
+		return L["Character"]
 	end
-	local name = journey.name or "Character"
+	-- Stored journeys may keep the English "Character" sentinel; show it localized.
+	local name = journey.name
+	if type(name) ~= "string" or name == "" or name == "Character" then
+		name = L["Character"]
+	end
 	-- Regional unique names already include the surname; skip the long realm suffix.
 	if RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled() then
 		return name

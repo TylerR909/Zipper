@@ -814,12 +814,12 @@ local function FormatBytes(bytes)
 		bytes = 0
 	end
 	if bytes < 1024 then
-		return string.format("%d B", math.floor(bytes + 0.5))
+		return string.format(L["%d B"], math.floor(bytes + 0.5))
 	end
 	if bytes < (1024 * 1024) then
-		return string.format("%.1f KB", bytes / 1024)
+		return string.format(L["%.1f KB"], bytes / 1024)
 	end
-	return string.format("%.2f MB", bytes / (1024 * 1024))
+	return string.format(L["%.2f MB"], bytes / (1024 * 1024))
 end
 
 function ns.Config:GrowthText()
@@ -1307,12 +1307,12 @@ local function FormatShortDuration(seconds)
 	local mins = math.floor((seconds % 3600) / 60)
 	local secs = seconds % 60
 	if hours > 0 then
-		return string.format("%dh %dm", hours, mins)
+		return string.format(L["%dh %dm"], hours, mins)
 	end
 	if mins > 0 then
-		return string.format("%dm %02ds", mins, secs)
+		return string.format(L["%dm %02ds"], mins, secs)
 	end
-	return string.format("%ds", secs)
+	return string.format(L["%ds"], secs)
 end
 
 local function MakeCleanupButton(parent, text, width)

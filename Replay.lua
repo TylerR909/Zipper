@@ -3454,7 +3454,7 @@ function ns.Replay:PaintChapter()
 			self.chapterText:SetText(L["No chapters yet"])
 		else
 			local shown = current > 0 and current or 1
-			local prefix = current > 0 and "" or "Next  "
+			local prefix = current > 0 and "" or L["Next  "]
 			self.chapterText:SetText(string.format(L["%s%d/%d  %s"], prefix, shown, #chapters, chapters[shown].name))
 		end
 	end
@@ -5659,11 +5659,11 @@ function ns.Replay:CreateFrame()
 		local list = ns.DB:CharacterList()
 		for i = 1, #list do
 			local info = list[i]
-			local mark = info.current and "  · recording" or ""
+			local mark = info.current and L["  · recording"] or ""
 			if not info.accessible then
-				mark = mark .. "  · locked"
+				mark = mark .. L["  · locked"]
 			end
-			local text = string.format("%s  (%d)%s", info.label, info.sessions, mark)
+			local text = string.format(L["%s  (%d)%s"], info.label, info.sessions, mark)
 			rootDescription:CreateRadio(text, function()
 				if ns.Replay.blockedKey then
 					return info.key == ns.Replay.blockedKey
