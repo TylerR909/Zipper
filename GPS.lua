@@ -471,11 +471,14 @@ function ns.GPS:SpeedPercent()
 	if not GetUnitSpeed then
 		return self.lastSpeed or 100
 	end
-	local current, run = GetUnitSpeed("player")
-	if not IsPlainNumber(current) or not IsPlainNumber(run) or run <= 0 then
+	local current = GetUnitSpeed("player")
+	if not IsPlainNumber(current) then
 		return self.lastSpeed or 100
 	end
-	local pct = math.floor((current / run) * 100 + 0.5)
+	-- GetUnitSpeed's second return (run) already includes mounts and buffs, so
+	-- dividing by it always gave 100%. Scale against base ground speed (7 yd/s).
+	local base = (IsPlainNumber(BASE_MOVEMENT_SPEED) and BASE_MOVEMENT_SPEED > 0) and BASE_MOVEMENT_SPEED or 7
+	local pct = math.floor((current / base) * 100 + 0.5)
 	if pct < 0 then
 		pct = 0
 	elseif pct > 1000 then

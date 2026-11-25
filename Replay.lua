@@ -283,12 +283,10 @@ function ns.Replay:LineLook(mode, speed)
 	if mode == ns.Travel.FLIGHT then
 		return 0.62, 0.38, 1, 0.95, 0.7
 	end
-	if mode == ns.Travel.MOUNT then
-		return 0.95, 0.72 - (0.38 * heat), 0.22, 0.92, thin
-	end
 	local cr, cg, cb = self:ClassColor()
 	local lift = 0.28 * heat
-	return cr + ((1 - cr) * lift), cg + ((1 - cg) * lift), cb + ((1 - cb) * lift), 0.92, thin
+	local mul = mode == ns.Travel.MOUNT and 0.5 or thin
+	return cr + ((1 - cr) * lift), cg + ((1 - cg) * lift), cb + ((1 - cb) * lift), 0.92, mul
 end
 
 function ns.Replay:InferModes(track)
@@ -360,8 +358,8 @@ function ns.Replay:PlaceLine(line, x1, y1, x2, y2, mode, speed, trailAlpha, widt
 	end
 	a = (a or 0.9) * trailAlpha
 	local thick = (2 * (mul or 1)) / scale
-	if thick < 1 then
-		thick = 1
+	if thick < 0.25 then
+		thick = 0.25
 	elseif thick > 14 then
 		thick = 14
 	end
@@ -3793,7 +3791,11 @@ function ns.Replay:HoverPath()
 	elseif best.mode == ns.Travel.FLIGHT then
 		GameTooltip:AddLine(L["Flight path"], 0.72, 0.55, 1)
 	elseif best.mode == ns.Travel.MOUNT then
-		GameTooltip:AddLine(string.format(L["Mounted, %d%% speed"], best.speed or 100), 0.95, 0.75, 0.3)
+		if (best.speed or 0) > 105 then
+			GameTooltip:AddLine(string.format(L["Mounted, %d%% speed"], best.speed), 0.95, 0.75, 0.3)
+		else
+			GameTooltip:AddLine(L["Mounted"], 0.95, 0.75, 0.3)
+		end
 	elseif (best.speed or 100) > 105 then
 		GameTooltip:AddLine(string.format(L["%d%% speed"], best.speed), 0.6, 0.85, 1)
 	end
@@ -6299,17 +6301,17 @@ function ns.Replay:LegendEntries()
 	for i = 1, #list do
 		local spec = list[i]
 		local pip = spec.pip
-		local legend = pip and pip.legend
-		if pip and legend then
+		if pip then
+			local legend = pip.legend
 			local color = pip.color or spec.color or { 1, 0.82, 0.28 }
 			local texture = pip.shape == "ring" and MEDIA_RING or MEDIA_CIRCLE
 			entries[#entries + 1] = {
-				label = legend.label or spec.name,
+				label = (legend and legend.label) or spec.name,
 				texture = texture,
 				r = color[1],
 				g = color[2],
 				b = color[3],
-				size = legend.size or 9,
+				size = (legend and legend.size) or 9,
 			}
 			if spec.kind == Kind.KILL then
 				entries[#entries + 1] = {

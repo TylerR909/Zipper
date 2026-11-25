@@ -168,7 +168,7 @@ DefineEvent(Kind.SUMMON, {
 	color = { 0.75, 0.40, 1.00 },
 	config = { key = "summon", page = "moments", label = L["Summons"], order = 6 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 7 },
+	pip = { shape = "circle", size = 7, legend = { order = 11, size = 9 } },
 })
 
 DefineEvent(Kind.HEARTH, {
@@ -176,7 +176,7 @@ DefineEvent(Kind.HEARTH, {
 	color = { 0.35, 0.60, 1.00 },
 	config = { key = "hearth", page = "moments", label = L["Hearths"], order = 5 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 7, legend = { order = 8, size = 9 } },
+	pip = { shape = "circle", size = 7, legend = { order = 9, size = 9 } },
 })
 
 DefineEvent(Kind.FLIGHT_START, {
@@ -186,7 +186,7 @@ DefineEvent(Kind.FLIGHT_START, {
 	pairEnd = Kind.FLIGHT_END,
 	config = { key = "flight", page = "road", label = L["Flights"], order = 3 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 7 },
+	pip = false,
 })
 
 DefineEvent(Kind.FLIGHT_END, {
@@ -195,7 +195,7 @@ DefineEvent(Kind.FLIGHT_END, {
 	shape = "pairEnd",
 	pairStart = Kind.FLIGHT_START,
 	configKey = "flight",
-	pip = { shape = "circle", size = 7 },
+	pip = false,
 })
 
 DefineEvent(Kind.MOUNT, {
@@ -204,7 +204,7 @@ DefineEvent(Kind.MOUNT, {
 	shape = "pair",
 	pairEnd = Kind.DISMOUNT,
 	config = { key = "mount", page = "road", label = L["Mount and dismount"], order = 2 },
-	pip = { shape = "circle", size = 7 },
+	pip = false,
 })
 
 DefineEvent(Kind.DISMOUNT, {
@@ -213,7 +213,7 @@ DefineEvent(Kind.DISMOUNT, {
 	shape = "pairEnd",
 	pairStart = Kind.MOUNT,
 	configKey = "mount",
-	pip = { shape = "circle", size = 7 },
+	pip = false,
 })
 
 DefineEvent(Kind.AFK_START, {
@@ -222,7 +222,7 @@ DefineEvent(Kind.AFK_START, {
 	shape = "pair",
 	pairEnd = Kind.AFK_END,
 	config = { key = "afk", page = "road", label = L["AFK"], order = 5 },
-	pip = { shape = "circle", size = 7 },
+	pip = { shape = "circle", size = 7, legend = { order = 15, size = 9 } },
 	playhead = "parked",
 	pause = { key = "afk", label = L["AFK"], order = 2, still = false },
 })
@@ -233,7 +233,7 @@ DefineEvent(Kind.AFK_END, {
 	shape = "pairEnd",
 	pairStart = Kind.AFK_START,
 	configKey = "afk",
-	pip = { shape = "circle", size = 7 },
+	pip = { shape = "circle", size = 7, legend = { order = 16, size = 9 } },
 })
 
 DefineEvent(Kind.INSTANCE_ENTER, {
@@ -244,7 +244,7 @@ DefineEvent(Kind.INSTANCE_ENTER, {
 	config = { key = "instance", page = "moments", label = L["Dungeons and raids"], order = 9 },
 	keepsSession = true,
 	qualifiesCompany = true,
-	pip = { shape = "circle", size = 7, legend = { order = 13, size = 9 } },
+	pip = false,
 })
 
 DefineEvent(Kind.INSTANCE_LEAVE, {
@@ -253,7 +253,7 @@ DefineEvent(Kind.INSTANCE_LEAVE, {
 	shape = "pairEnd",
 	pairStart = Kind.INSTANCE_ENTER,
 	configKey = "instance",
-	pip = { shape = "circle", size = 7 },
+	pip = false,
 })
 
 DefineEvent(Kind.ZONE, {
@@ -280,7 +280,7 @@ DefineEvent(Kind.GROUP, {
 	name = L["Joined Party"],
 	color = { 0.45, 0.75, 1.00 },
 	config = { key = "party", page = "moments", label = L["Party members"], order = 10 },
-	pip = { shape = "circle", size = 7, legend = { order = 7, size = 9 } },
+	pip = { shape = "circle", size = 7, legend = { order = 8, size = 9 } },
 })
 
 DefineEvent(Kind.PORTAL, {
@@ -288,7 +288,7 @@ DefineEvent(Kind.PORTAL, {
 	color = { 0.20, 0.78, 0.95 },
 	config = { key = "portal", page = "moments", label = L["Teleports and portals"], order = 7 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 7, legend = { order = 9, size = 9 } },
+	pip = { shape = "circle", size = 7, legend = { order = 10, size = 9 } },
 })
 
 DefineEvent(Kind.TRAINER, {
@@ -296,7 +296,7 @@ DefineEvent(Kind.TRAINER, {
 	color = { 0.78, 0.58, 0.28 },
 	config = { key = "trainer", page = "moments", label = L["Trainers"], order = 8 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 7, legend = { order = 12, size = 9 } },
+	pip = { shape = "circle", size = 7, legend = { order = 14, size = 9 } },
 })
 
 DefineEvent(Kind.CAMP, {
@@ -305,7 +305,7 @@ DefineEvent(Kind.CAMP, {
 	shape = "span",
 	config = { key = "rest", page = "road", label = L["Camps and sleeping bags"], order = 7 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 7, legend = { order = 10, size = 9 } },
+	pip = { shape = "circle", size = 7, legend = { order = 12, size = 9 } },
 	playhead = "busy",
 	blocksAFK = true,
 	blocksIdle = true,
@@ -318,7 +318,7 @@ DefineEvent(Kind.SLEEP, {
 	shape = "span",
 	configKey = "rest",
 	keepsSession = true,
-	pip = { shape = "circle", size = 7, legend = { order = 11, size = 9 } },
+	pip = { shape = "circle", size = 7, legend = { order = 13, size = 9 } },
 	playhead = "busy",
 	blocksAFK = true,
 	blocksIdle = true,
@@ -342,7 +342,7 @@ DefineEvent(Kind.BOSS, {
 	configKey = "instance",
 	keepsSession = true,
 	qualifiesCompany = true,
-	pip = { shape = "ring", size = 9, milestone = true },
+	pip = { shape = "ring", size = 9, milestone = true, legend = { order = 6, size = 10 } },
 })
 
 DefineEvent(Kind.FISH, {
@@ -351,7 +351,7 @@ DefineEvent(Kind.FISH, {
 	shape = "span",
 	config = { key = "fishing", page = "road", label = L["Fishing"], order = 8 },
 	keepsSession = true,
-	pip = { shape = "circle", size = 10, legend = { order = 6, size = 10 } },
+	pip = { shape = "circle", size = 10, legend = { order = 7, size = 10 } },
 	playhead = "fish",
 	blocksAFK = true,
 	blocksIdle = true,
@@ -395,7 +395,7 @@ for _, spec in pairs(ns.EventSpec) do
 	if spec.pause then
 		ns.PauseSpecs[#ns.PauseSpecs + 1] = spec
 	end
-	if spec.pip and spec.pip.legend then
+	if spec.pip then
 		ns.LegendSpecs[#ns.LegendSpecs + 1] = spec
 	end
 end
@@ -409,7 +409,8 @@ table.sort(ns.PauseSpecs, function(a, b)
 end)
 
 table.sort(ns.LegendSpecs, function(a, b)
-	local ao, bo = a.pip.legend.order or 999, b.pip.legend.order or 999
+	local ao = (a.pip.legend and a.pip.legend.order) or 999
+	local bo = (b.pip.legend and b.pip.legend.order) or 999
 	if ao ~= bo then
 		return ao < bo
 	end
