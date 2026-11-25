@@ -6,6 +6,7 @@
 ## Version: @project-version@
 ## SavedVariables: ZipperDB
 ## SavedVariablesPerCharacter: ZipperCharDB
+## OptionalDeps: AddOnSkins
 ## X-Curse-Project-ID: 1799002
 
 Libs/LibStub/LibStub.lua

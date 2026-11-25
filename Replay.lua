@@ -4112,7 +4112,7 @@ function ns.Replay:StyleModeButtons()
 				font:SetTextColor(0.78, 0.76, 0.70)
 			end
 		end
-		if button.SetBackdropBorderColor then
+		if not (self.addonSkin and not self.skin) and button.SetBackdropBorderColor then
 			if active then
 				button:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
 				button:SetBackdropColor(0.20, 0.16, 0.08, 1)
@@ -4914,12 +4914,14 @@ function ns.Replay:StyleSpeedButtons()
 				font:SetTextColor(0.78, 0.76, 0.70)
 			end
 		end
-		if active then
-			button:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
-			button:SetBackdropColor(0.20, 0.16, 0.08, 1)
-		else
-			button:SetBackdropBorderColor(0.38, 0.32, 0.16, 0.9)
-			button:SetBackdropColor(0.12, 0.11, 0.10, 1)
+		if not (self.addonSkin and not self.skin) then
+			if active then
+				button:SetBackdropBorderColor(0.85, 0.68, 0.28, 1)
+				button:SetBackdropColor(0.20, 0.16, 0.08, 1)
+			else
+				button:SetBackdropBorderColor(0.38, 0.32, 0.16, 0.9)
+				button:SetBackdropColor(0.12, 0.11, 0.10, 1)
+			end
 		end
 	end
 end
@@ -6532,92 +6534,159 @@ function ns.Replay:CreateMapButton()
 	self.mapButton = button
 end
 
-function ns.Replay:ApplySkin()
-	local skin = self.skin
-	local frame = self.frame
-	if not skin or not frame or self.skinApplied then
-		return
+function ns.Replay:SkinButtons()
+	local buttons = { self.sessionButton, self.selectAllButton, self.playButton, self.optionsButton, self.chartsButton }
+	if self.speedButtons then
+		for j = 1, #self.speedButtons do
+			buttons[#buttons + 1] = self.speedButtons[j]
+		end
 	end
+	if self.jumpButtons then
+		for j = 1, #self.jumpButtons do
+			buttons[#buttons + 1] = self.jumpButtons[j]
+		end
+	end
+	-- Chapter nav glyphs are bare text on the strip; skip Button paint so
+	-- skins do not wrap them in extra chrome.
+	buttons[#buttons + 1] = self.levelsButton
+	return buttons
+end
+
+function ns.Replay:ApplyEllesmereSkin(skin, frame)
 	local function paint(fn, ...)
 		if type(fn) == "function" then
 			fn(...)
 		end
 	end
-	local ok, err = pcall(function()
-		paint(skin.Shell, frame)
-		if self.closeButton then
-			paint(skin.CloseButton, self.closeButton)
+	paint(skin.Shell, frame)
+	if self.closeButton then
+		paint(skin.CloseButton, self.closeButton)
+	end
+	local buttons = self:SkinButtons()
+	for i = 1, #buttons do
+		local button = buttons[i]
+		if button then
+			paint(skin.Button, button)
+			paint(skin.WhiteButtonLabel, button)
 		end
-		local buttons = { self.sessionButton, self.selectAllButton, self.playButton, self.optionsButton, self.chartsButton }
-		if self.speedButtons then
-			for j = 1, #self.speedButtons do
-				buttons[#buttons + 1] = self.speedButtons[j]
+	end
+	if self.charButton then
+		paint(skin.Dropdown, self.charButton)
+	end
+	if ns.Viz and ns.Viz.charDropdown then
+		paint(skin.Dropdown, ns.Viz.charDropdown)
+	end
+	if self.chapterStrip then
+		paint(skin.Inset, self.chapterStrip)
+	end
+	if self.chapterText then
+		paint(skin.Font, self.chapterText)
+	end
+	for _, nav in ipairs({ self.chapterStart, self.chapterPrev, self.chapterNext, self.chapterEnd }) do
+		if nav then
+			paint(skin.WhiteButtonLabel, nav)
+			local font = nav:GetFontString()
+			if font then
+				font:SetTextColor(0.93, 0.90, 0.78)
 			end
 		end
-		if self.jumpButtons then
-			for j = 1, #self.jumpButtons do
-				buttons[#buttons + 1] = self.jumpButtons[j]
-			end
+	end
+	local bars = {
+		self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar),
+		self.statScroll and (self.statScroll.ScrollBar or self.statScroll.scrollBar),
+	}
+	for i = 1, #bars do
+		if bars[i] then
+			paint(skin.ScrollBar, bars[i])
 		end
-		-- Chapter nav glyphs are bare text on the strip; skip Button paint so
-		-- Ellesmere does not wrap them in extra chrome.
-		buttons[#buttons + 1] = self.levelsButton
-		for i = 1, #buttons do
-			local button = buttons[i]
-			if button then
-				paint(skin.Button, button)
-				paint(skin.WhiteButtonLabel, button)
-			end
+	end
+	if self.titleText then
+		paint(skin.Font, self.titleText)
+	end
+	if self.timeText then
+		paint(skin.Font, self.timeText)
+	end
+	if self.timeMissing then
+		paint(skin.Font, self.timeMissing)
+	end
+	if self.trailLabel then
+		paint(skin.Font, self.trailLabel)
+	end
+	if self.trailValue then
+		paint(skin.Font, self.trailValue)
+	end
+end
+
+function ns.Replay:ApplyAddOnSkins(as, frame)
+	local function paint(fn, ...)
+		if type(fn) == "function" then
+			fn(as, ...)
 		end
-		if self.charButton then
-			paint(skin.Dropdown, self.charButton)
+	end
+	paint(as.SkinFrame, frame)
+	if self.closeButton then
+		paint(as.SkinCloseButton, self.closeButton)
+	end
+	local buttons = self:SkinButtons()
+	for i = 1, #buttons do
+		local button = buttons[i]
+		if button then
+			paint(as.SkinButton, button)
 		end
-		if ns.Viz and ns.Viz.charDropdown then
-			paint(skin.Dropdown, ns.Viz.charDropdown)
+	end
+	-- WowStyle1DropdownTemplate is a DropdownButton rather than a legacy
+	-- UIDropDownMenuTemplate, so skin it as a button instead of SkinDropDownBox.
+	if self.charButton then
+		paint(as.SkinButton, self.charButton)
+	end
+	if ns.Viz and ns.Viz.charDropdown then
+		paint(as.SkinButton, ns.Viz.charDropdown)
+	end
+	-- SkinFrame replaces the BackdropTemplate; SkinBackdropFrame would leave
+	-- Zipper's gold border underneath a second ElvUI backdrop.
+	local insets = { self.listInset, self.chapterStrip, self.statInset }
+	for i = 1, #insets do
+		if insets[i] then
+			paint(as.SkinFrame, insets[i])
 		end
-		if self.chapterStrip then
-			paint(skin.Inset, self.chapterStrip)
+	end
+	local bars = {
+		self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar),
+		self.statScroll and (self.statScroll.ScrollBar or self.statScroll.scrollBar),
+	}
+	for i = 1, #bars do
+		if bars[i] then
+			paint(as.SkinScrollBar, bars[i])
 		end
-		if self.chapterText then
-			paint(skin.Font, self.chapterText)
+	end
+	local sliders = { self.trailSlider, self.scrub }
+	for i = 1, #sliders do
+		if sliders[i] then
+			paint(as.SkinSlideBar, sliders[i])
 		end
-		for _, nav in ipairs({ self.chapterStart, self.chapterPrev, self.chapterNext, self.chapterEnd }) do
-			if nav then
-				paint(skin.WhiteButtonLabel, nav)
-				local font = nav:GetFontString()
-				if font then
-					font:SetTextColor(0.93, 0.90, 0.78)
-				end
-			end
-		end
-		local bars = {
-			self.scroll and (self.scroll.ScrollBar or self.scroll.scrollBar),
-			self.statScroll and (self.statScroll.ScrollBar or self.statScroll.scrollBar),
-		}
-		for i = 1, #bars do
-			if bars[i] then
-				paint(skin.ScrollBar, bars[i])
-			end
-		end
-		if self.titleText then
-			paint(skin.Font, self.titleText)
-		end
-		if self.timeText then
-			paint(skin.Font, self.timeText)
-		end
-		if self.timeMissing then
-			paint(skin.Font, self.timeMissing)
-		end
-		if self.trailLabel then
-			paint(skin.Font, self.trailLabel)
-		end
-		if self.trailValue then
-			paint(skin.Font, self.trailValue)
-		end
-	end)
+	end
+end
+
+function ns.Replay:ApplySkin()
+	local frame = self.frame
+	if not frame or self.skinApplied then
+		return
+	end
+	local skin = self.skin
+	local as = self.addonSkin
+	if not skin and not as then
+		return
+	end
+	local ok, err
+	if skin then
+		ok, err = pcall(self.ApplyEllesmereSkin, self, skin, frame)
+	else
+		ok, err = pcall(self.ApplyAddOnSkins, self, as, frame)
+	end
 	self.skinApplied = true
 	if not ok then
-		ns:Print(string.format(L["EllesmereUI skin skipped: %s"], tostring(err)))
+		local msg = skin and L["EllesmereUI skin skipped: %s"] or L["AddOnSkins skin skipped: %s"]
+		ns:Print(string.format(msg, tostring(err)))
 	end
 	self:StyleSpeedButtons()
 	if self.sessionButton then
@@ -6629,19 +6698,37 @@ function ns.Replay:ApplySkin()
 	self:OwnChrome()
 end
 
+local function GetAddOnSkins()
+	if type(_G.AddOnSkins) == "table" then
+		return unpack(_G.AddOnSkins)
+	end
+	return nil
+end
+
 function ns.Replay:RegisterSkin()
 	if self.skinRegistered then
 		return
 	end
-	local eui = _G.EllesmereUI
-	if not eui or not eui.RegisterSkin then
-		return
-	end
 	self.skinRegistered = true
-	eui.RegisterSkin("Zipper", function(S)
-		ns.Replay.skin = S
-		ns.Replay:ApplySkin()
-	end)
+	local eui = _G.EllesmereUI
+	if eui and eui.RegisterSkin then
+		eui.RegisterSkin("Zipper", function(S)
+			ns.Replay.skin = S
+			ns.Replay:ApplySkin()
+		end)
+	end
+	local as = GetAddOnSkins()
+	if as and type(as.RegisterSkin) == "function" then
+		-- AddOnSkins builds its default options before Zipper loads, so a
+		-- third-party key starts nil and CheckOption skips the callback.
+		if as.db and as.db.Zipper == nil and type(as.SetOption) == "function" then
+			as:SetOption("Zipper", true)
+		end
+		as:RegisterSkin("Zipper", function()
+			ns.Replay.addonSkin = as
+			ns.Replay:ApplySkin()
+		end)
+	end
 end
 
 -- Local addon links only. The client delivers the click through SetItemRef.
