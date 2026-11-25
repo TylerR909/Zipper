@@ -1,14 +1,33 @@
 # Changelog
 
+## 0.1.6-beta
+
+### Added
+
+- Multi-character comparison and role tracking in Charts: compare journeys across characters, and see time spent by combat role.
+- Inline delete buttons on the Replay sessions list (with a confirmation dialog for sessions that gained XP), plus a Session Cleanup window in Options that previews quiet, mostly idle, city-only, and short stops before removing them.
+- Missing level data and XP gaps are flagged in the level replay list, noted beside the replay timeline clock, and marked with tall orange pips at missing-data seams on the scrubber.
+
+### Changed
+
+- The open session in the replay list is labeled Current instead of its start date.
+- Mounted route segments draw as a thinner class-colored line instead of turning gold, and stay thin when zoomed in.
+- The Zipper map-button legend automatically includes every map pip, and mount/dismount, flight start/end, and instance enter/leave no longer place map pips.
+- Automatic quiet-stop compaction on login now covers all Global characters up to 15 minutes.
+
+### Fixed
+
+- Movement speed is recorded against base run speed so mounts and speed buffs report real speed instead of 100%, and older mounted segments hide their inaccurate speed readout.
+- Kills and boss kills inside dungeons are counted reliably, and instance exits are recorded when leaving a dungeon.
+- Group kills no longer unpack journey history into memory or cause hitches inside dungeons.
+- Opening the world map during combat no longer blocks world map quest pins.
+- Forever characters keep both their first and last names in the replay picker and Saved data list, and party members who share a first name no longer inherit each other's zone.
+
 ## 0.1.5-beta
 
 ### Added
 
 - Crafting is its own activity: cast-bar tradeskill time is recorded for the Pauses chart, kept out of AFK and idle, and left off the map (no pips).
-
-### Changed
-
-- The open session in the replay list is labeled Current instead of its start date.
 
 ### Fixed
 
