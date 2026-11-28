@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0
+
+First full release for Warcraft Forever.
+
+### Added
+
+- AddOnSkins support: the replay panel skins to match ElvUI when AddOnSkins is enabled.
+
+### Fixed
+
+- Remaining plain UI labels (chapter navigation, recording and locked markers, save sizes, and short durations) now go through localization.
+
 ## 0.1.6-beta
 
 ### Added
